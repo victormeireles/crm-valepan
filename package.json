@@ -1,0 +1,26 @@
+{
+  "name": "crm-valepan",
+  "private": true,
+  "packageManager": "npm@10.9.2",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "predev": "node scripts/sync-env.cjs",
+    "prebuild": "node scripts/sync-env.cjs",
+    "dev": "node scripts/run-in-app.cjs dev --turbopack",
+    "dev:node": "node scripts/sync-env.cjs && node scripts/run-in-app.cjs dev --turbopack",
+    "build": "node scripts/run-in-app.cjs build",
+    "lint": "node scripts/run-in-app.cjs lint",
+    "test": "node scripts/run-vitest.cjs",
+    "typecheck": "node ./node_modules/typescript/bin/tsc --noEmit -p packages/shared && node ./node_modules/typescript/bin/tsc --noEmit -p apps/crm",
+    "seed:admin": "node scripts/seed-admin.cjs",
+    "db:push": "node scripts/db-push.cjs",
+    "db:apply:linked": "node scripts/apply-migrations-linked.cjs",
+    "db:apply:zapi-lid-map": "node scripts/apply-zapi-lid-migration.cjs"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3"
+  }
+}

@@ -1,0 +1,59 @@
+"use client";
+
+import { createLead } from "@/app/actions/leads";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
+
+export function NewLeadForm() {
+  const router = useRouter();
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setLoading(true);
+    setErr(null);
+    const fd = new FormData(e.currentTarget);
+    const res = await createLead(fd);
+    setLoading(false);
+    if (!res.ok) {
+      setErr(res.error ?? "Erro ao criar lead");
+      return;
+    }
+    e.currentTarget.reset();
+    router.refresh();
+  }
+
+  return (
+    <form
+      onSubmit={onSubmit}
+      className="flex flex-wrap items-end gap-2 rounded-lg border border-[var(--border)] bg-[var(--card)] p-3 text-sm"
+    >
+      <label className="flex min-w-[220px] flex-1 flex-col gap-1">
+        Telefone
+        <input
+          name="phone"
+          required
+          placeholder="(11) 99999-9999"
+          className="rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1"
+        />
+      </label>
+      <label className="flex min-w-[180px] flex-col gap-1">
+        Origem
+        <input
+          name="source"
+          defaultValue="manual"
+          className="rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1"
+        />
+      </label>
+      <button
+        type="submit"
+        disabled={loading}
+        className="rounded bg-[var(--accent)] px-3 py-1.5 text-white disabled:opacity-50"
+      >
+        {loading ? "Criando..." : "Novo lead"}
+      </button>
+      {err ? <p className="w-full text-xs text-red-600">{err}</p> : null}
+    </form>
+  );
+}
