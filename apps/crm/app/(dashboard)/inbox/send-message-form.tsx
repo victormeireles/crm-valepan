@@ -34,7 +34,7 @@ export function SendMessageForm({
   }
 
   return (
-    <form onSubmit={onSubmit} className="flex flex-col gap-2">
+    <form onSubmit={onSubmit} className="flex flex-col gap-3">
       <input type="hidden" name="conversation_id" value={conversationId} />
       <input type="hidden" name="phone" value={phone} />
       <textarea
@@ -42,15 +42,18 @@ export function SendMessageForm({
         required
         placeholder="Digite a mensagem..."
         rows={3}
-        className="rounded border border-[var(--border)] bg-[var(--background)] px-2 py-2 text-sm"
+        className="min-h-[5.5rem] w-full resize-y rounded-xl border border-[var(--border)] bg-[var(--vp-paper-pure)] px-3 py-2.5 text-sm text-[var(--foreground)] shadow-sm placeholder:text-[var(--muted)] focus:border-[var(--vp-wine-soft)] focus:outline-none focus:ring-2 focus:ring-[var(--vp-gold-deep)]/30"
       />
       {err ? <p className="text-xs text-[var(--vp-error)]">{err}</p> : null}
       <button
         type="submit"
         disabled={loading}
-        className="w-fit rounded bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-[var(--vp-gold)] disabled:opacity-50"
+        className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[var(--vp-wine)] px-5 py-3.5 text-sm font-semibold text-[var(--vp-gold)] shadow-[var(--sh-md)] transition-[transform,box-shadow,background-color] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] hover:-translate-y-0.5 hover:bg-[var(--vp-wine-classic)] hover:shadow-[var(--sh-lg)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--vp-gold-deep)] disabled:pointer-events-none disabled:opacity-55"
       >
-        {loading ? "Enviando..." : "Enviar mensagem"}
+        <span className="material-symbols-outlined text-[20px] leading-none" aria-hidden>
+          send
+        </span>
+        <span>{loading ? "Enviando…" : "Enviar mensagem"}</span>
       </button>
     </form>
   );

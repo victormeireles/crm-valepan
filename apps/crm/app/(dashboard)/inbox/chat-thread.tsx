@@ -111,7 +111,7 @@ export function ChatThread({
               type="button"
               onClick={handleLoadOlder}
               disabled={loadingOlder}
-              className="rounded-full border border-[var(--border)] bg-[var(--vp-paper)] px-3 py-1.5 text-xs font-medium text-[var(--foreground)] shadow-sm hover:bg-[rgba(35,0,4,0.06)] disabled:opacity-50"
+              className="rounded-xl border border-[color:var(--border-strong)] bg-[var(--vp-paper-pure)] px-4 py-2 text-xs font-semibold text-[var(--vp-wine)] shadow-sm transition-[transform,background-color,border-color] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] hover:border-[var(--vp-wine)]/40 hover:bg-[rgba(35,0,4,0.05)] disabled:pointer-events-none disabled:opacity-50"
             >
               {loadingOlder
                 ? "Carregando…"
