@@ -21,18 +21,11 @@ export function ChatThread({
   initialMessages,
   hasMoreOlder: hasMoreOlderInitial,
   messagesLoadError,
-  technicalSummary,
 }: {
   conversationId: string;
   initialMessages: InboxMessageRow[];
   hasMoreOlder: boolean;
   messagesLoadError?: string;
-  /** Referência mínima para debug (o CRM não grava o JSON bruto do webhook nas mensagens). */
-  technicalSummary?: {
-    conversationId: string;
-    leadId: string | null;
-    phoneE164: string;
-  };
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const skipScrollToBottomRef = useRef(false);
@@ -106,19 +99,6 @@ export function ChatThread({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      {technicalSummary ? (
-        <details className="mb-2 flex-shrink-0 rounded-md border border-[var(--border)] bg-[var(--background)] px-2 py-1.5 text-xs text-[var(--muted)]">
-          <summary className="cursor-pointer select-none font-medium text-[var(--foreground)] hover:text-[var(--vp-wine)]">
-            Payload técnico / referência
-          </summary>
-          <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded border border-[var(--border)] bg-[var(--card)] p-2 font-mono text-[10px] leading-relaxed text-[var(--foreground)]">
-            {JSON.stringify(technicalSummary, null, 2)}
-          </pre>
-          <p className="mt-2 text-[10px] text-[var(--muted)]">
-            O corpo completo do webhook fica nos logs do servidor (Z-API). Aqui só ids estáveis do CRM.
-          </p>
-        </details>
-      ) : null}
       <div
         ref={scrollRef}
         className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-1 py-2"
