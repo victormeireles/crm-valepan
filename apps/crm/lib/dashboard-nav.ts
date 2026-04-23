@@ -1,6 +1,6 @@
 export const dashboardNavLinks = [
   { href: "/dashboard", label: "Dashboard" },
-  { href: "/inbox", label: "Inbox" },
+  { href: "/inbox", label: "Chat" },
   { href: "/leads", label: "Leads" },
   { href: "/pipeline", label: "Funil" },
   { href: "/tasks", label: "Tarefas" },

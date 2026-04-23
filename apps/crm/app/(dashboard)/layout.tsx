@@ -31,8 +31,8 @@ export default async function DashboardLayout({
     .maybeSingle();
 
   return (
-    <div className="min-h-screen bg-[var(--background)]">
-      <header className="bg-[var(--background)] shadow-[var(--sh-sm)]">
+    <div className="flex min-h-screen flex-col bg-[var(--background)]">
+      <header className="shrink-0 bg-[var(--background)] shadow-[var(--sh-sm)]">
         <div className="mx-auto flex min-h-[var(--header-height)] max-w-[min(100%,var(--container-wide))] flex-wrap items-center justify-between gap-4 px-4 py-3">
           <div className="flex min-w-0 flex-1 flex-wrap items-center gap-5">
             <Link
@@ -71,7 +71,7 @@ export default async function DashboardLayout({
           </div>
         </div>
       </header>
-      <div className="mx-auto max-w-[min(100%,var(--container-wide))] px-4 py-6 md:py-8">
+      <div className="mx-auto flex min-h-0 w-full max-w-[min(100%,var(--container-wide))] flex-1 flex-col px-4 py-6 md:py-8">
         {children}
       </div>
     </div>
