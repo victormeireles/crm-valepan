@@ -28,10 +28,10 @@ function KpiCard({
   return (
     <div
       title={hint}
-      className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-4 shadow-[var(--sh-sm)]"
+      className="rounded-xl border-y border-r border-[var(--border)] border-l-[3px] border-l-[var(--vp-gold-classic)] bg-[var(--vp-paper-pure)] p-4 shadow-[var(--sh-sm)] transition-shadow duration-200 hover:shadow-[var(--sh-md)]"
     >
-      <p className="text-sm text-[var(--muted)]">{label}</p>
-      <p className="mt-1 text-2xl font-semibold tabular-nums">{value}</p>
+      <p className="text-xs font-semibold uppercase tracking-[0.06em] text-[var(--vp-ink-muted)]">{label}</p>
+      <p className="mt-1.5 text-2xl font-bold tabular-nums text-[var(--vp-wine)]">{value}</p>
       {subline ? <p className="mt-1 text-xs text-[var(--muted)]">{subline}</p> : null}
     </div>
   );
@@ -106,16 +106,22 @@ export default async function DashboardPage() {
   }
 
   return (
-    <div className="space-y-8">
-      <div>
-        <h1 className="text-lg font-semibold text-[var(--foreground)]">Dashboard</h1>
-        <p className="mt-1 max-w-2xl text-sm text-[var(--muted)]">
-          Resumo operacional. Janelas de «novos leads» e conversas ativas usam <strong>UTC</strong> (timestamps do
-          Supabase).
+    <div className="space-y-10">
+      <div className="border-b border-[var(--border)] pb-8">
+        <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--vp-gold-classic)]">Resumo</p>
+        <h1
+          className="mt-2 text-3xl font-bold tracking-tight text-[var(--vp-wine)] md:text-4xl"
+          style={{ fontFamily: "var(--font-display)" }}
+        >
+          Dashboard
+        </h1>
+        <p className="mt-3 max-w-2xl text-sm leading-relaxed text-[var(--muted)]">
+          Visão geral do funil e tarefas. Janelas de «novos leads» e conversas ativas usam{" "}
+          <strong className="font-semibold text-[var(--vp-ink-body)]">UTC</strong> (timestamps do Supabase).
         </p>
       </div>
 
-      <section className="space-y-3" aria-labelledby="dash-general">
+      <section className="space-y-4" aria-labelledby="dash-general">
         <h2 id="dash-general" className="sr-only">
           Indicadores gerais
         </h2>
@@ -131,8 +137,12 @@ export default async function DashboardPage() {
         </div>
       </section>
 
-      <section className="space-y-3" aria-labelledby="dash-priority">
-        <h2 id="dash-priority" className="text-sm font-semibold text-[var(--foreground)]">
+      <section className="space-y-4" aria-labelledby="dash-priority">
+        <h2
+          id="dash-priority"
+          className="text-lg font-bold text-[var(--vp-wine)]"
+          style={{ fontFamily: "var(--font-display)" }}
+        >
           Prioridades e tendência
         </h2>
         {kpiError ? (
@@ -161,11 +171,15 @@ export default async function DashboardPage() {
         </div>
       </section>
 
-      <section className="space-y-3" aria-labelledby="dash-recent-leads">
-        <h2 id="dash-recent-leads" className="text-sm font-semibold text-[var(--foreground)]">
+      <section className="space-y-4" aria-labelledby="dash-recent-leads">
+        <h2
+          id="dash-recent-leads"
+          className="text-lg font-bold text-[var(--vp-wine)]"
+          style={{ fontFamily: "var(--font-display)" }}
+        >
           Últimos leads
         </h2>
-        <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--card)] shadow-[var(--sh-sm)]">
+        <div className="overflow-hidden rounded-xl border-y border-r border-[var(--border)] border-l-[3px] border-l-[var(--vp-gold-classic)] bg-[var(--vp-paper-pure)] shadow-[var(--sh-sm)]">
           <ul className="divide-y divide-[var(--border)]">
             {(recentLeads ?? []).map((row) => {
               const contact = nestOne(
@@ -179,7 +193,7 @@ export default async function DashboardPage() {
                 <li key={row.id}>
                   <Link
                     href={`/leads/${row.id}`}
-                    className="flex flex-wrap items-baseline justify-between gap-2 px-4 py-3 transition-colors hover:bg-[var(--vp-surface-low)]"
+                    className="flex flex-wrap items-baseline justify-between gap-2 px-4 py-3 transition-colors hover:bg-[rgba(35,0,4,0.04)]"
                   >
                     <div>
                       <span className="font-medium text-[var(--foreground)]">

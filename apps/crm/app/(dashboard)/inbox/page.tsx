@@ -130,10 +130,10 @@ export default async function InboxPage({
           <InboxSidebar conversations={sidebarRows} selectedId={selectedId} />
         </div>
 
-        <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--vp-paper-pure)] shadow-[var(--sh-sm)]">
+        <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border-y border-r border-[var(--border)] border-l-[3px] border-l-[var(--vp-gold-classic)] bg-[var(--vp-paper-pure)] shadow-[var(--sh-sm)]">
           {selected ? (
             <>
-              <div className="shrink-0 border-b border-[var(--border)] px-3 pb-3 pt-3">
+              <div className="shrink-0 border-b border-[var(--border)] bg-[var(--vp-paper)] px-3 pb-3 pt-3">
                 <div>
                   {(() => {
                     const selectedContact = nestOne(
@@ -163,7 +163,7 @@ export default async function InboxPage({
                 </div>
               </div>
 
-              <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-3">
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--vp-paper)] px-3">
                 <ChatThread
                   key={selected.id}
                   conversationId={selected.id}
@@ -173,7 +173,7 @@ export default async function InboxPage({
                 />
               </div>
 
-              <div className="shrink-0 border-t border-[var(--border)] px-3 pb-3 pt-3">
+              <div className="shrink-0 border-t border-[var(--border)] bg-[var(--vp-paper)] px-3 pb-3 pt-3">
                 <SendMessageForm conversationId={selected.id} phone={selected.phone_e164} />
               </div>
             </>

@@ -42,7 +42,7 @@ export function InboxSidebar({
   }, [conversations, q]);
 
   return (
-    <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--vp-paper-pure)] shadow-[var(--sh-sm)]">
+    <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-xl border-y border-r border-[var(--border)] border-l-[3px] border-l-[var(--vp-gold-classic)] bg-[var(--vp-paper-pure)] shadow-[var(--sh-sm)]">
       <div className="shrink-0 border-b border-[var(--border)] bg-[var(--vp-paper)] p-2">
         <label htmlFor="inbox-search" className="sr-only">
           Buscar conversas
