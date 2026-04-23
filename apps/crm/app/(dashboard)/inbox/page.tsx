@@ -63,7 +63,7 @@ export default async function InboxPage({
         </p>
         {dbError ? (
           <div
-            className="mt-3 rounded-lg border border-amber-600/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-950 dark:text-amber-100"
+            className="mt-3 rounded-lg border border-[color:var(--border-strong)] bg-[var(--vp-surface)] px-3 py-2 text-sm text-[var(--vp-wine-classic)]"
             role="alert"
           >
             <p className="font-medium">Não foi possível carregar dados do CRM no navegador.</p>

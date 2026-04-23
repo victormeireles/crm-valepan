@@ -49,11 +49,11 @@ export function NewLeadForm() {
       <button
         type="submit"
         disabled={loading}
-        className="rounded bg-[var(--accent)] px-3 py-1.5 text-white disabled:opacity-50"
+        className="rounded bg-[var(--accent)] px-3 py-1.5 font-medium text-[var(--vp-gold)] disabled:opacity-50"
       >
         {loading ? "Criando..." : "Novo lead"}
       </button>
-      {err ? <p className="w-full text-xs text-red-600">{err}</p> : null}
+      {err ? <p className="w-full text-xs text-[var(--vp-error)]">{err}</p> : null}
     </form>
   );
 }

@@ -27,7 +27,10 @@ export default async function LeadsPage() {
           </thead>
           <tbody>
             {(leads ?? []).map((l) => (
-              <tr key={l.id} className="border-b border-[var(--border)] last:border-0">
+              <tr
+                key={l.id}
+                className="border-b border-[var(--border)] last:border-0 transition-colors hover:bg-[var(--vp-surface-low)]"
+              >
                 <td className="px-3 py-2">
                   <Link className="text-[var(--accent)] hover:underline" href={`/leads/${l.id}`}>
                     {l.phone_e164}

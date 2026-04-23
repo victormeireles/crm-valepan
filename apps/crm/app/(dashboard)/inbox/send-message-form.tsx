@@ -44,11 +44,11 @@ export function SendMessageForm({
         rows={3}
         className="rounded border border-[var(--border)] bg-[var(--background)] px-2 py-2 text-sm"
       />
-      {err ? <p className="text-xs text-red-600">{err}</p> : null}
+      {err ? <p className="text-xs text-[var(--vp-error)]">{err}</p> : null}
       <button
         type="submit"
         disabled={loading}
-        className="w-fit rounded bg-[var(--accent)] px-3 py-1.5 text-sm text-white disabled:opacity-50"
+        className="w-fit rounded bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-[var(--vp-gold)] disabled:opacity-50"
       >
         {loading ? "Enviando..." : "Enviar mensagem"}
       </button>

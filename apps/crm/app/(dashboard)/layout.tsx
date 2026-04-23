@@ -3,6 +3,7 @@ import { createServerSupabaseClient, crmTables } from "@/lib/supabase/server";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { signOutAction } from "@/app/actions/auth";
+import { DashboardNav } from "./dashboard-nav";
 
 const roleLabel: Record<string, string> = {
   admin: "Administrador",
@@ -10,16 +11,6 @@ const roleLabel: Record<string, string> = {
   gestao: "Gestão",
   operacao: "Operação",
 };
-
-const nav = [
-  { href: "/dashboard", label: "Dashboard" },
-  { href: "/inbox", label: "Inbox" },
-  { href: "/leads", label: "Leads" },
-  { href: "/pipeline", label: "Funil" },
-  { href: "/tasks", label: "Tarefas" },
-  { href: "/distributors", label: "Distribuidores" },
-  { href: "/samples", label: "Amostras" },
-];
 
 export default async function DashboardLayout({
   children,
@@ -40,24 +31,17 @@ export default async function DashboardLayout({
     .maybeSingle();
 
   return (
-    <div className="min-h-screen">
-      <header className="border-b border-[var(--border)] bg-[var(--card)]">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-4 py-3">
+    <div className="min-h-screen bg-[var(--background)]">
+      <header className="border-b border-[color:var(--border-strong)] bg-[var(--background)]">
+        <div className="mx-auto flex min-h-[var(--header-height)] max-w-[min(100%,var(--container-wide))] flex-wrap items-center justify-between gap-4 px-4 py-3">
           <div className="flex flex-wrap items-center gap-4">
-            <Link href="/dashboard" className="font-semibold">
+            <Link
+              href="/dashboard"
+              className="text-base font-extrabold tracking-tight text-[var(--vp-wine)]"
+            >
               CRM Valepan
             </Link>
-            <nav className="flex flex-wrap gap-2 text-sm">
-              {nav.map((n) => (
-                <Link
-                  key={n.href}
-                  href={n.href}
-                  className="rounded px-2 py-1 text-[var(--muted)] hover:bg-[var(--background)] hover:text-[var(--foreground)]"
-                >
-                  {n.label}
-                </Link>
-              ))}
-            </nav>
+            <DashboardNav />
           </div>
           <div className="flex items-center gap-3 text-sm">
             <span className="text-[var(--muted)]">
@@ -69,7 +53,7 @@ export default async function DashboardLayout({
             <form action={signOutAction}>
               <button
                 type="submit"
-                className="rounded border border-[var(--border)] px-2 py-1 hover:bg-[var(--background)]"
+                className="rounded-md border border-[color:var(--border-strong)] px-3 py-1.5 text-[var(--foreground)] transition-colors duration-200 hover:bg-[var(--vp-surface-low)]"
               >
                 Sair
               </button>
@@ -77,7 +61,9 @@ export default async function DashboardLayout({
           </div>
         </div>
       </header>
-      <div className="mx-auto max-w-6xl px-4 py-6">{children}</div>
+      <div className="mx-auto max-w-[min(100%,var(--container-wide))] px-4 py-6">
+        {children}
+      </div>
     </div>
   );
 }

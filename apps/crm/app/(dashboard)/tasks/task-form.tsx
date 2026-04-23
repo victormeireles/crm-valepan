@@ -29,11 +29,11 @@ export function TaskForm() {
       <h2 className="font-medium">Nova tarefa</h2>
       <input name="title" required placeholder="Título" className="rounded border border-[var(--border)] px-2 py-1" />
       <input name="due_at" type="datetime-local" className="rounded border border-[var(--border)] px-2 py-1" />
-      {err ? <p className="text-xs text-red-600">{err}</p> : null}
+      {err ? <p className="text-xs text-[var(--vp-error)]">{err}</p> : null}
       <button
         type="submit"
         disabled={loading}
-        className="w-fit rounded bg-[var(--accent)] px-3 py-1.5 text-white disabled:opacity-50"
+        className="w-fit rounded bg-[var(--accent)] px-3 py-1.5 font-medium text-[var(--vp-gold)] disabled:opacity-50"
       >
         {loading ? "Salvando…" : "Criar"}
       </button>

@@ -83,7 +83,7 @@ export function ChatThread({
 
   if (messagesLoadError) {
     return (
-      <p className="py-6 text-center text-sm text-red-600 dark:text-red-400">
+      <p className="py-6 text-center text-sm text-[var(--vp-error)]">
         Erro ao carregar mensagens: {messagesLoadError}
       </p>
     );
@@ -119,9 +119,7 @@ export function ChatThread({
         ) : null}
 
         {loadError ? (
-          <p className="text-center text-xs text-red-600 dark:text-red-400">
-            {loadError}
-          </p>
+          <p className="text-center text-xs text-[var(--vp-error)]">{loadError}</p>
         ) : null}
 
         {messages.map((m) => {
@@ -134,8 +132,8 @@ export function ChatThread({
               <div
                 className={
                   out
-                    ? "max-w-[min(88%,440px)] rounded-2xl rounded-br-sm bg-[var(--accent)] px-3 py-2 text-sm text-white shadow-sm"
-                    : "max-w-[min(88%,440px)] rounded-2xl rounded-bl-sm border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm text-[var(--foreground)] shadow-sm"
+                    ? "max-w-[min(88%,440px)] rounded-2xl rounded-br-sm bg-[var(--vp-wine)] px-3 py-2 text-sm text-[var(--vp-gold)] shadow-[var(--sh-sm)]"
+                    : "max-w-[min(88%,440px)] rounded-2xl rounded-bl-sm border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm text-[var(--foreground)] shadow-[var(--sh-sm)]"
                 }
               >
                 <p className="whitespace-pre-wrap break-words">
@@ -145,11 +143,15 @@ export function ChatThread({
                 </p>
                 <div
                   className={`mt-1.5 flex items-center gap-1.5 text-[10px] leading-none ${
-                    out ? "justify-end text-blue-100" : "justify-end text-[var(--muted)]"
+                    out
+                      ? "justify-end text-[var(--vp-gold-pale)]/90"
+                      : "justify-end text-[var(--muted)]"
                   }`}
                 >
                   <span
-                    className={`font-medium ${out ? "text-blue-50" : "text-[var(--foreground)]"}`}
+                    className={`font-medium ${
+                      out ? "text-[var(--vp-gold)]" : "text-[var(--foreground)]"
+                    }`}
                   >
                     {out ? "Enviada" : "Recebida"}
                   </span>

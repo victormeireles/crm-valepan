@@ -33,11 +33,11 @@ export function DistributorForm() {
       <input name="name" required placeholder="Nome" className="rounded border border-[var(--border)] px-2 py-1" />
       <input name="region" placeholder="Região (opcional)" className="rounded border border-[var(--border)] px-2 py-1" />
       <input name="state" placeholder="UF (opcional)" className="rounded border border-[var(--border)] px-2 py-1" />
-      {err ? <p className="text-xs text-red-600">{err}</p> : null}
+      {err ? <p className="text-xs text-[var(--vp-error)]">{err}</p> : null}
       <button
         type="submit"
         disabled={loading}
-        className="w-fit rounded bg-[var(--accent)] px-3 py-1.5 text-white disabled:opacity-50"
+        className="w-fit rounded bg-[var(--accent)] px-3 py-1.5 font-medium text-[var(--vp-gold)] disabled:opacity-50"
       >
         {loading ? "Salvando…" : "Salvar"}
       </button>

@@ -41,18 +41,23 @@ export function LoginForm() {
   }
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-6 p-8">
-      <div>
-        <h1 className="text-xl font-semibold">Entrar</h1>
-        <p className="mt-1 text-sm text-[var(--muted)]">
+    <div className="w-full rounded-[var(--r-xl)] border border-[var(--border)] bg-[var(--card)] p-6 shadow-[var(--sh-md)]">
+      <div className="mb-6">
+        <h1
+          className="text-3xl font-normal uppercase tracking-wide text-[var(--vp-wine)]"
+          style={{ fontFamily: "var(--font-display)" }}
+        >
+          Entrar
+        </h1>
+        <p className="mt-2 text-sm text-[var(--muted)]">
           Informe usuário e senha cadastrados no CRM.
         </p>
       </div>
       <form onSubmit={onSubmit} className="flex flex-col gap-4">
-        <label className="flex flex-col gap-1 text-sm">
+        <label className="flex flex-col gap-1 text-sm text-[var(--foreground)]">
           Usuário
           <input
-            className="rounded border border-[var(--border)] bg-[var(--card)] px-3 py-2"
+            className="rounded-[var(--r-sm)] border border-[var(--border)] bg-[var(--vp-paper-pure)] px-3 py-2 text-[var(--foreground)]"
             type="text"
             autoComplete="username"
             name="username"
@@ -61,10 +66,10 @@ export function LoginForm() {
             required
           />
         </label>
-        <label className="flex flex-col gap-1 text-sm">
+        <label className="flex flex-col gap-1 text-sm text-[var(--foreground)]">
           Senha
           <input
-            className="rounded border border-[var(--border)] bg-[var(--card)] px-3 py-2"
+            className="rounded-[var(--r-sm)] border border-[var(--border)] bg-[var(--vp-paper-pure)] px-3 py-2 text-[var(--foreground)]"
             type="password"
             autoComplete="current-password"
             value={password}
@@ -73,16 +78,16 @@ export function LoginForm() {
           />
         </label>
         {error ? (
-          <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+          <p className="text-sm text-[var(--vp-error)]">{error}</p>
         ) : null}
         <button
           type="submit"
           disabled={loading}
-          className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+          className="rounded-[var(--r-lg)] bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-[var(--vp-gold)] disabled:opacity-60"
         >
           {loading ? "Entrando…" : "Entrar"}
         </button>
       </form>
-    </main>
+    </div>
   );
 }

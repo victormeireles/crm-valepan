@@ -31,7 +31,10 @@ export default async function SamplesPage() {
                 s.leads as { phone_e164: string } | { phone_e164: string }[] | null,
               );
               return (
-                <tr key={s.id} className="border-b border-[var(--border)] last:border-0">
+                <tr
+                  key={s.id}
+                  className="border-b border-[var(--border)] last:border-0 transition-colors hover:bg-[var(--vp-surface-low)]"
+                >
                   <td className="px-3 py-2">{s.status}</td>
                   <td className="px-3 py-2">{s.contact_name ?? "—"}</td>
                   <td className="px-3 py-2">{lead?.phone_e164 ?? "—"}</td>

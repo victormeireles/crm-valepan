@@ -101,12 +101,12 @@ export function LeadActions({
     return (
       <div className="flex min-w-[240px] flex-col gap-2 rounded-lg border border-[var(--border)] bg-[var(--card)] p-3 text-sm">
         <p className="text-xs text-[var(--muted)]">Nenhuma oportunidade neste lead.</p>
-        {err ? <p className="text-xs text-red-600">{err}</p> : null}
+        {err ? <p className="text-xs text-[var(--vp-error)]">{err}</p> : null}
         <button
           type="button"
           onClick={() => void createOpp()}
           disabled={loadingCreate}
-          className="rounded bg-[var(--accent)] px-3 py-1.5 text-white disabled:opacity-50"
+          className="rounded bg-[var(--accent)] px-3 py-1.5 font-medium text-[var(--vp-gold)] disabled:opacity-50"
         >
           {loadingCreate ? "Criando…" : "Criar oportunidade"}
         </button>
@@ -172,12 +172,12 @@ export function LeadActions({
           />
         </label>
       ) : null}
-      {err ? <p className="text-xs text-red-600">{err}</p> : null}
+      {err ? <p className="text-xs text-[var(--vp-error)]">{err}</p> : null}
       <button
         type="button"
         onClick={() => void saveStage()}
         disabled={loading}
-        className="rounded bg-[var(--accent)] px-3 py-1.5 text-white disabled:opacity-50"
+        className="rounded bg-[var(--accent)] px-3 py-1.5 font-medium text-[var(--vp-gold)] disabled:opacity-50"
       >
         {loading ? "Salvando…" : "Atualizar etapa"}
       </button>
