@@ -41,7 +41,16 @@ export function LoginForm() {
   }
 
   return (
-    <div className="w-full rounded-[var(--r-xl)] border border-[var(--border)] bg-[var(--card)] p-6 shadow-[var(--sh-md)]">
+    <>
+      {/* eslint-disable-next-line @next/next/no-img-element -- SVG em public */}
+      <img
+        src="/brand/valepan-logo-full.svg"
+        alt="Valepan"
+        className="mx-auto mb-6 block h-auto w-[min(100%,220px)]"
+        width={220}
+        height={157}
+      />
+      <div className="w-full rounded-[var(--r-xl)] border border-[var(--border)] bg-[var(--card)] p-6 shadow-[var(--sh-md)]">
       <div className="mb-6">
         <h1
           className="text-3xl font-normal uppercase tracking-wide text-[var(--vp-wine)]"
@@ -88,6 +97,7 @@ export function LoginForm() {
           {loading ? "Entrando…" : "Entrar"}
         </button>
       </form>
-    </div>
+      </div>
+    </>
   );
 }
