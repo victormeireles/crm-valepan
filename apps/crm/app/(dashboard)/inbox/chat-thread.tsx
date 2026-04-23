@@ -83,17 +83,19 @@ export function ChatThread({
 
   if (messagesLoadError) {
     return (
-      <p className="py-6 text-center text-sm text-[var(--vp-error)]">
-        Erro ao carregar mensagens: {messagesLoadError}
-      </p>
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto px-2 py-6">
+        <p className="text-center text-sm text-[var(--vp-error)]">
+          Erro ao carregar mensagens: {messagesLoadError}
+        </p>
+      </div>
     );
   }
 
   if (messages.length === 0) {
     return (
-      <p className="py-8 text-center text-sm text-[var(--muted)]">
-        Sem mensagens nesta conversa.
-      </p>
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto px-2 py-8">
+        <p className="text-sm text-[var(--muted)]">Sem mensagens nesta conversa.</p>
+      </div>
     );
   }
 

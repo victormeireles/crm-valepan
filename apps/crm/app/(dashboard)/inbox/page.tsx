@@ -2,12 +2,11 @@ import {
   loadRecentConversationMessages,
   type InboxMessageRow,
 } from "@/lib/inbox/load-messages";
-import { formatRelativeShort } from "@/lib/format-relative";
 import { nestOne } from "@/lib/supabase/nested";
 import { createServerSupabaseClient, crmTables } from "@/lib/supabase/server";
-import Link from "next/link";
 import { ChatThread } from "./chat-thread";
 import { InboxLiveRefresh } from "./inbox-live-refresh";
+import { InboxSidebar, type InboxSidebarRow } from "./inbox-sidebar";
 import { SendMessageForm } from "./send-message-form";
 
 /** Evita cache estático: mensagens novas precisam aparecer após webhook / envio. */
@@ -87,8 +86,34 @@ export default async function InboxPage({
       )
     : null;
 
+  const sidebarRows: InboxSidebarRow[] = conversationsSorted.map((c) => {
+    const lead = nestOne(
+      c.leads as
+        | { id: string; status: string; contacts?: { full_name: string | null } | { full_name: string | null }[] | null }
+        | { id: string; status: string; contacts?: { full_name: string | null } | { full_name: string | null }[] | null }[]
+        | null,
+    );
+    const contact = nestOne(
+      (lead?.contacts ?? null) as
+        | { full_name: string | null }
+        | { full_name: string | null }[]
+        | null,
+    );
+    const contactName = contact?.full_name?.trim() || null;
+    const tail = tailById.get(c.id);
+    return {
+      id: c.id,
+      displayName: contactName ?? c.phone_e164,
+      phone_e164: c.phone_e164,
+      preview: previewLine(tail?.last_body_preview),
+      lastAt: tail?.last_sent_at ?? c.updated_at,
+      leadLine: lead ? `Lead · ${lead.status}` : "Sem lead",
+      awaiting: tail?.last_direction === "in",
+    };
+  });
+
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3">
+    <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden">
       <InboxLiveRefresh />
       {dbError ? (
         <div
@@ -100,69 +125,15 @@ export default async function InboxPage({
           {schemaHint ? <p className="mt-2 text-xs">{schemaHint}</p> : null}
         </div>
       ) : null}
-      <div className="grid min-h-0 flex-1 gap-3 lg:min-h-[calc(100dvh-var(--header-height)-5.5rem)] lg:grid-cols-[minmax(260px,300px)_minmax(0,1fr)] lg:items-stretch">
-        <ul className="flex max-h-[min(42vh,360px)] min-h-0 flex-col divide-y divide-[var(--border)] overflow-y-auto overflow-x-hidden rounded-lg border border-[var(--border)] bg-[var(--card)] shadow-[var(--sh-sm)] lg:h-full lg:max-h-none">
-          {conversationsSorted.map((c) => {
-            const lead = nestOne(
-              c.leads as
-                | { id: string; status: string; contacts?: { full_name: string | null } | { full_name: string | null }[] | null }
-                | { id: string; status: string; contacts?: { full_name: string | null } | { full_name: string | null }[] | null }[]
-                | null,
-            );
-            const contact = nestOne(
-              (lead?.contacts ?? null) as
-                | { full_name: string | null }
-                | { full_name: string | null }[]
-                | null,
-            );
-            const contactName = contact?.full_name?.trim() || null;
-            const tail = tailById.get(c.id);
-            const rowAwaiting = tail?.last_direction === "in";
-            const lastAt = tail?.last_sent_at ?? c.updated_at;
-            return (
-              <li key={c.id}>
-                <Link
-                  href={`/inbox?cid=${c.id}`}
-                  className={`flex flex-col gap-1 px-4 py-3 transition-colors hover:bg-[var(--vp-surface-low)] ${
-                    c.id === selectedId
-                      ? "border-l-[3px] border-l-[var(--vp-wine)] bg-[var(--vp-surface-low)]"
-                      : "border-l-[3px] border-l-transparent"
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <span className="font-medium text-[var(--foreground)]">
-                      {contactName ?? c.phone_e164}
-                    </span>
-                    <span className="shrink-0 text-[10px] text-[var(--muted)]" title={new Date(lastAt).toLocaleString("pt-BR")}>
-                      {formatRelativeShort(lastAt)}
-                    </span>
-                  </div>
-                  <p className="line-clamp-2 text-xs text-[var(--muted)]">{previewLine(tail?.last_body_preview)}</p>
-                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-[var(--muted)]">
-                    <span>{lead ? `Lead · ${lead.status}` : "Sem lead"}</span>
-                    {rowAwaiting ? (
-                      <span
-                        className="inline-flex items-center gap-1 font-medium text-[var(--vp-wine)]"
-                        title="Última mensagem do cliente — aguarda resposta"
-                      >
-                        <span className="size-1.5 rounded-full bg-[var(--vp-wine)]" aria-hidden />
-                        Aguarda resposta
-                      </span>
-                    ) : null}
-                  </div>
-                </Link>
-              </li>
-            );
-          })}
-          {conversationsSorted.length === 0 && (
-            <li className="px-4 py-8 text-center text-sm text-[var(--muted)]">Nenhuma conversa ainda.</li>
-          )}
-        </ul>
+      <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,40vh)_minmax(0,1fr)] gap-2 overflow-hidden lg:grid-cols-[minmax(260px,320px)_minmax(0,1fr)] lg:grid-rows-1">
+        <div className="h-full min-h-0 overflow-hidden">
+          <InboxSidebar conversations={sidebarRows} selectedId={selectedId} />
+        </div>
 
-        <section className="flex min-h-[min(480px,calc(100dvh-var(--header-height)-10rem))] flex-1 flex-col overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--card)] p-3 shadow-[var(--sh-sm)] lg:h-full lg:min-h-0">
+        <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--card)] shadow-[var(--sh-sm)]">
           {selected ? (
             <>
-              <div className="flex flex-shrink-0 flex-wrap items-center justify-between gap-2 border-b border-[var(--border)] pb-3">
+              <div className="shrink-0 border-b border-[var(--border)] px-3 pb-3 pt-3">
                 <div>
                   {(() => {
                     const selectedContact = nestOne(
@@ -192,20 +163,24 @@ export default async function InboxPage({
                 </div>
               </div>
 
-              <ChatThread
-                key={selected.id}
-                conversationId={selected.id}
-                initialMessages={messages}
-                hasMoreOlder={hasMoreOlder}
-                messagesLoadError={messagesError?.message}
-              />
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-3">
+                <ChatThread
+                  key={selected.id}
+                  conversationId={selected.id}
+                  initialMessages={messages}
+                  hasMoreOlder={hasMoreOlder}
+                  messagesLoadError={messagesError?.message}
+                />
+              </div>
 
-              <div className="mt-auto flex-shrink-0 border-t border-[var(--border)] pt-3">
+              <div className="shrink-0 border-t border-[var(--border)] px-3 pb-3 pt-3">
                 <SendMessageForm conversationId={selected.id} phone={selected.phone_e164} />
               </div>
             </>
           ) : (
-            <p className="text-sm text-[var(--muted)]">Selecione uma conversa para ver as mensagens.</p>
+            <div className="flex flex-1 items-center justify-center px-4 py-12">
+              <p className="text-center text-sm text-[var(--muted)]">Nenhuma conversa para mostrar.</p>
+            </div>
           )}
         </section>
       </div>

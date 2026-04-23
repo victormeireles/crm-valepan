@@ -34,7 +34,7 @@ export function SendMessageForm({
   }
 
   return (
-    <form onSubmit={onSubmit} className="mt-3 flex flex-col gap-2">
+    <form onSubmit={onSubmit} className="flex flex-col gap-2">
       <input type="hidden" name="conversation_id" value={conversationId} />
       <input type="hidden" name="phone" value={phone} />
       <textarea
