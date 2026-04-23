@@ -12,7 +12,9 @@ const protectedPrefixes = [
 ];
 
 export async function middleware(request: NextRequest) {
-  let response = NextResponse.next({ request: { headers: request.headers } });
+  // Passar o `request` inteiro — não `{ headers }` só — para o Next preservar
+  // headers internos (RSC / router state). Objeto parcial causa 500 em rotas dinâmicas.
+  let response = NextResponse.next({ request });
   const url =
     process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL;
   const anon =
@@ -30,7 +32,7 @@ export async function middleware(request: NextRequest) {
         cookiesToSet.forEach(({ name, value }) =>
           request.cookies.set(name, value),
         );
-        response = NextResponse.next({ request: { headers: request.headers } });
+        response = NextResponse.next({ request });
         cookiesToSet.forEach(({ name, value, options }) =>
           response.cookies.set(name, value, options as never),
         );
@@ -61,6 +63,7 @@ export async function middleware(request: NextRequest) {
 export const config = {
   matcher: [
     "/dashboard/:path*",
+    "/inbox",
     "/inbox/:path*",
     "/leads/:path*",
     "/pipeline/:path*",
