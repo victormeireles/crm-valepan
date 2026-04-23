@@ -130,7 +130,7 @@ export default async function InboxPage({
           <InboxSidebar conversations={sidebarRows} selectedId={selectedId} />
         </div>
 
-        <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--card)] shadow-[var(--sh-sm)]">
+        <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--vp-paper-pure)] shadow-[var(--sh-sm)]">
           {selected ? (
             <>
               <div className="shrink-0 border-b border-[var(--border)] px-3 pb-3 pt-3">

@@ -111,7 +111,7 @@ export function ChatThread({
               type="button"
               onClick={handleLoadOlder}
               disabled={loadingOlder}
-              className="rounded-full border border-[var(--border)] bg-[var(--background)] px-3 py-1.5 text-xs font-medium text-[var(--foreground)] shadow-sm hover:bg-[var(--card)] disabled:opacity-50"
+              className="rounded-full border border-[var(--border)] bg-[var(--vp-paper)] px-3 py-1.5 text-xs font-medium text-[var(--foreground)] shadow-sm hover:bg-[rgba(35,0,4,0.06)] disabled:opacity-50"
             >
               {loadingOlder
                 ? "Carregando…"
@@ -135,7 +135,7 @@ export function ChatThread({
                 className={
                   out
                     ? "max-w-[min(88%,440px)] rounded-2xl rounded-br-sm bg-[var(--vp-wine)] px-3 py-2 text-sm text-[var(--vp-gold)] shadow-[var(--sh-sm)]"
-                    : "max-w-[min(88%,440px)] rounded-2xl rounded-bl-sm border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm text-[var(--foreground)] shadow-[var(--sh-sm)]"
+                    : "max-w-[min(88%,440px)] rounded-2xl rounded-bl-sm border border-[var(--border)] bg-[var(--vp-paper-pure)] px-3 py-2 text-sm text-[var(--foreground)] shadow-[var(--sh-sm)]"
                 }
               >
                 <p className="whitespace-pre-wrap break-words">

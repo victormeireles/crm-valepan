@@ -42,8 +42,8 @@ export function InboxSidebar({
   }, [conversations, q]);
 
   return (
-    <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--card)] shadow-[var(--sh-sm)]">
-      <div className="shrink-0 border-b border-[var(--border)] p-2">
+    <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--vp-paper-pure)] shadow-[var(--sh-sm)]">
+      <div className="shrink-0 border-b border-[var(--border)] bg-[var(--vp-paper)] p-2">
         <label htmlFor="inbox-search" className="sr-only">
           Buscar conversas
         </label>
@@ -53,7 +53,7 @@ export function InboxSidebar({
           value={q}
           onChange={(e) => setQ(e.target.value)}
           placeholder="Buscar por nome, telefone ou mensagem…"
-          className="w-full rounded-md border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)] outline-none placeholder:text-[var(--muted)] focus:border-[var(--vp-wine)] focus:ring-2 focus:ring-[var(--vp-gold)]/30"
+          className="w-full rounded-md border border-[var(--border)] bg-[var(--vp-paper-pure)] px-3 py-2 text-sm text-[var(--foreground)] outline-none placeholder:text-[var(--muted)] focus:border-[var(--vp-wine)] focus:ring-2 focus:ring-[var(--vp-gold)]/30"
           autoComplete="off"
           spellCheck={false}
         />
@@ -63,9 +63,9 @@ export function InboxSidebar({
           <li key={c.id}>
             <Link
               href={`/inbox?cid=${c.id}`}
-              className={`flex flex-col gap-1 px-4 py-3 transition-colors hover:bg-[var(--vp-surface-low)] ${
+              className={`flex flex-col gap-1 px-4 py-3 transition-colors hover:bg-[rgba(35,0,4,0.05)] ${
                 c.id === selectedId
-                  ? "border-l-[3px] border-l-[var(--vp-wine)] bg-[var(--vp-surface-low)]"
+                  ? "border-l-[3px] border-l-[var(--vp-wine)] bg-[rgba(35,0,4,0.09)]"
                   : "border-l-[3px] border-l-transparent"
               }`}
             >
