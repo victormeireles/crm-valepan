@@ -34,27 +34,62 @@ export function SendMessageForm({
   }
 
   return (
-    <form onSubmit={onSubmit} className="flex flex-col gap-3">
+    <form onSubmit={onSubmit} className="flex flex-col gap-2">
       <input type="hidden" name="conversation_id" value={conversationId} />
       <input type="hidden" name="phone" value={phone} />
-      <textarea
-        name="message"
-        required
-        placeholder="Digite a mensagem..."
-        rows={3}
-        className="min-h-[5.5rem] w-full resize-y rounded-xl border border-[var(--border)] bg-[var(--vp-paper-pure)] px-3 py-2.5 text-sm text-[var(--foreground)] shadow-sm placeholder:text-[var(--muted)] focus:border-[var(--vp-wine-soft)] focus:outline-none focus:ring-2 focus:ring-[var(--vp-gold-deep)]/30"
-      />
       {err ? <p className="text-xs text-[var(--vp-error)]">{err}</p> : null}
-      <button
-        type="submit"
-        disabled={loading}
-        className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[var(--vp-wine)] px-5 py-3.5 text-sm font-semibold text-[var(--vp-gold)] shadow-[var(--sh-md)] transition-[transform,box-shadow,background-color] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] hover:-translate-y-0.5 hover:bg-[var(--vp-wine-classic)] hover:shadow-[var(--sh-lg)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--vp-gold-deep)] disabled:pointer-events-none disabled:opacity-55"
-      >
-        <span className="material-symbols-outlined text-[20px] leading-none" aria-hidden>
-          send
-        </span>
-        <span>{loading ? "Enviando…" : "Enviar mensagem"}</span>
-      </button>
+
+      <div className="flex items-end gap-2">
+        <div className="flex min-h-12 flex-1 items-end gap-0.5 rounded-[1.5rem] border border-[var(--border)] bg-[var(--vp-paper-pure)] px-1 py-1 shadow-[var(--sh-sm)]">
+          <button
+            type="button"
+            className="flex size-10 shrink-0 items-center justify-center rounded-full text-[var(--vp-ink-muted)] transition-colors hover:bg-[rgba(35,0,4,0.06)] hover:text-[var(--vp-wine)]"
+            title="Anexos (em breve)"
+            aria-disabled="true"
+          >
+            <span className="material-symbols-outlined text-[22px] leading-none" aria-hidden>
+              add
+            </span>
+          </button>
+          <button
+            type="button"
+            className="flex size-10 shrink-0 items-center justify-center rounded-full text-[var(--vp-ink-muted)] transition-colors hover:bg-[rgba(35,0,4,0.06)] hover:text-[var(--vp-wine)]"
+            title="Emoji (em breve)"
+            aria-disabled="true"
+          >
+            <span className="material-symbols-outlined text-[22px] leading-none" aria-hidden>
+              sentiment_satisfied
+            </span>
+          </button>
+          <textarea
+            name="message"
+            required
+            rows={1}
+            placeholder="Mensagem"
+            className="max-h-32 min-h-[42px] flex-1 resize-none border-0 bg-transparent py-2.5 pr-2 text-sm leading-snug text-[var(--foreground)] placeholder:text-[var(--muted)] focus:outline-none focus:ring-0"
+          />
+        </div>
+
+        <button
+          type="submit"
+          disabled={loading}
+          className="flex size-12 shrink-0 items-center justify-center rounded-full bg-[var(--vp-wine)] text-[var(--vp-gold)] shadow-[var(--sh-md)] transition-[transform,background-color,box-shadow] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] hover:bg-[var(--vp-wine-classic)] hover:shadow-[var(--sh-lg)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--vp-gold-deep)] disabled:pointer-events-none disabled:opacity-50"
+        >
+          {loading ? (
+            <span
+              className="material-symbols-outlined animate-spin text-[22px] leading-none"
+              aria-hidden
+            >
+              progress_activity
+            </span>
+          ) : (
+            <span className="material-symbols-outlined text-[22px] leading-none" aria-hidden>
+              send
+            </span>
+          )}
+          <span className="sr-only">{loading ? "A enviar…" : "Enviar mensagem"}</span>
+        </button>
+      </div>
     </form>
   );
 }
