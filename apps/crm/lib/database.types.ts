@@ -336,6 +336,26 @@ export interface Database {
           data: Json;
         };
       };
+      v_conversation_last_message: {
+        Row: {
+          conversation_id: string;
+          lead_id: string;
+          last_direction: string;
+          last_sent_at: string;
+          last_body_preview: string | null;
+        };
+      };
+    };
+    Functions: {
+      dashboard_kpis_extra: {
+        Args: Record<string, never>;
+        Returns: {
+          leads_awaiting_reply: number;
+          new_leads_7d: number;
+          new_leads_prev_7d: number;
+          active_conversations_7d: number;
+        }[];
+      };
     };
   };
 }
