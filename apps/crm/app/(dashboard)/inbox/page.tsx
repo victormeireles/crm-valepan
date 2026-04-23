@@ -27,7 +27,7 @@ export default async function InboxPage({
     error: conversationsError,
   } = await crm
     .from("conversations")
-    .select("id, phone_e164, created_at, updated_at, leads(id, phone_e164, status)")
+    .select("id, phone_e164, created_at, updated_at, leads(id, phone_e164, status, contacts(full_name))")
     .order("updated_at", { ascending: false });
 
   const selectedId = cid ?? conversations?.[0]?.id ?? null;
@@ -76,8 +76,18 @@ export default async function InboxPage({
         <ul className="divide-y divide-[var(--border)] rounded-lg border border-[var(--border)] bg-[var(--card)]">
           {(conversations ?? []).map((c) => {
             const lead = nestOne(
-              c.leads as { id: string; status: string } | { id: string; status: string }[] | null,
+              c.leads as
+                | { id: string; status: string; contacts?: { full_name: string | null } | { full_name: string | null }[] | null }
+                | { id: string; status: string; contacts?: { full_name: string | null } | { full_name: string | null }[] | null }[]
+                | null,
             );
+            const contact = nestOne(
+              (lead?.contacts ?? null) as
+                | { full_name: string | null }
+                | { full_name: string | null }[]
+                | null,
+            );
+            const contactName = contact?.full_name?.trim() || null;
             return (
               <li key={c.id}>
                 <Link
@@ -86,7 +96,7 @@ export default async function InboxPage({
                     c.id === selectedId ? "bg-[var(--background)]" : ""
                   }`}
                 >
-                  <span className="font-medium">{c.phone_e164}</span>
+                  <span className="font-medium">{contactName ?? c.phone_e164}</span>
                   <span className="text-xs text-[var(--muted)]">
                     {lead ? `Lead · ${lead.status}` : "Sem lead"}
                   </span>
@@ -106,7 +116,28 @@ export default async function InboxPage({
             <>
               <div className="flex flex-shrink-0 flex-wrap items-center justify-between gap-2 border-b border-[var(--border)] pb-3">
                 <div>
-                  <h2 className="font-medium">{selected.phone_e164}</h2>
+                  {(() => {
+                    const selectedLead = nestOne(
+                      selected.leads as
+                        | { id: string; status: string; contacts?: { full_name: string | null } | { full_name: string | null }[] | null }
+                        | { id: string; status: string; contacts?: { full_name: string | null } | { full_name: string | null }[] | null }[]
+                        | null,
+                    );
+                    const selectedContact = nestOne(
+                      (selectedLead?.contacts ?? null) as
+                        | { full_name: string | null }
+                        | { full_name: string | null }[]
+                        | null,
+                    );
+                    const selectedContactName = selectedContact?.full_name?.trim() || null;
+                    return (
+                      <h2 className="font-medium">
+                        {selectedContactName
+                          ? `${selectedContactName} - ${selected.phone_e164}`
+                          : selected.phone_e164}
+                      </h2>
+                    );
+                  })()}
                   <p className="text-xs text-[var(--muted)]">
                     Atualizado em {new Date(selected.updated_at).toLocaleString("pt-BR")}
                   </p>

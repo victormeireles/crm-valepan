@@ -48,6 +48,8 @@ export type ZapiInbound = {
   pickSource?: string;
   /** LIDs no mesmo evento que o número real (recebidas costumam trazer os dois). */
   linkedLidKeys?: string[];
+  /** Nome do contato quando disponível no webhook (chatName/senderName). */
+  contactName?: string | null;
   messageId: string | null;
   body: string | null;
   fromMe: boolean;
@@ -298,6 +300,34 @@ function hasLikelyChatMessageShape(o: Record<string, unknown>): boolean {
   return false;
 }
 
+function isTruthyGroupFlag(v: unknown): boolean {
+  return v === true || v === "true" || v === 1 || v === "1";
+}
+
+function isGroupJidLike(v: unknown): boolean {
+  return typeof v === "string" && v.toLowerCase().includes("@g.us");
+}
+
+/**
+ * Grupos no WhatsApp podem vir marcados por `isGroup` ou por JID `...@g.us`.
+ * Bloqueamos ambos para manter o inbox somente com contatos 1:1.
+ */
+function isGroupPayload(
+  merged: Record<string, unknown>,
+  root: Record<string, unknown> | null,
+): boolean {
+  if (isTruthyGroupFlag(merged.isGroup) || isTruthyGroupFlag(root?.isGroup)) return true;
+  const candidates = [
+    pickJidFromKey(merged),
+    root ? pickJidFromKey(root) : "",
+    typeof merged.phone === "string" ? merged.phone : "",
+    typeof merged.chatId === "string" ? merged.chatId : "",
+    typeof root?.phone === "string" ? root.phone : "",
+    typeof root?.chatId === "string" ? root.chatId : "",
+  ];
+  return candidates.some((x) => isGroupJidLike(x));
+}
+
 /**
  * Ignora eventos que não são mensagem de chat (doc Z-API).
  * Evita 400/500 e “mensagens fantasmas” (ex.: só status READ/SENT).
@@ -309,6 +339,10 @@ export function planZapiWebhookAction(
   const root = body as Record<string, unknown>;
   const merged = mergePayloadLayers(body);
   if (!merged) return { action: "parse" };
+
+  if (isGroupPayload(merged, root)) {
+    return { action: "skip", reason: "group_message_filtered" };
+  }
 
   const rawType = pickRawWebhookType(merged, root);
   const t = rawType.trim().toLowerCase();
@@ -344,6 +378,45 @@ export function planZapiWebhookAction(
 
 function s(v: unknown): string | null {
   return typeof v === "string" && v.trim() ? v.trim() : null;
+}
+
+function looksLikePhoneOrJidLabel(name: string): boolean {
+  const t = name.trim().toLowerCase();
+  if (!t) return true;
+  if (t.includes("@lid") || t.includes("@s.whatsapp.net") || t.includes("@g.us")) return true;
+  const digits = t.replace(/\D/g, "");
+  if (digits.length >= 8 && !/[a-zA-Z\u00C0-\u024F]/.test(t)) return true;
+  return false;
+}
+
+function normalizeContactNameCandidate(v: unknown): string | null {
+  if (typeof v !== "string") return null;
+  const t = v.trim().replace(/\s+/g, " ");
+  if (!t) return null;
+  if (looksLikePhoneOrJidLabel(t)) return null;
+  if (t.length > 140) return t.slice(0, 140);
+  return t;
+}
+
+/**
+ * Para mensagens enviadas (`fromMe=true`), `chatName` costuma ser o nome do destinatário.
+ * Para recebidas, priorizamos `senderName`.
+ */
+function extractContactName(
+  merged: Record<string, unknown>,
+  root: Record<string, unknown> | null,
+  fromMe: boolean,
+): string | null {
+  const m = merged;
+  const r = root ?? {};
+  const ordered = fromMe
+    ? [m.chatName, r.chatName, m.pushName, r.pushName]
+    : [m.senderName, r.senderName, m.chatName, r.chatName, m.pushName, r.pushName];
+  for (const c of ordered) {
+    const name = normalizeContactNameCandidate(c);
+    if (name) return name;
+  }
+  return null;
 }
 
 /**
@@ -476,6 +549,7 @@ export function parseZapiWebhookPayload(body: unknown): ZapiInbound | null {
 
   const root =
     body && typeof body === "object" ? (body as Record<string, unknown>) : null;
+  if (isGroupPayload(o, root)) return null;
   const sentAtIso = extractSentAtIso(o) ?? extractSentAtIso(root);
 
   const rawType = pickRawWebhookType(o, root);
@@ -527,12 +601,14 @@ export function parseZapiWebhookPayload(body: unknown): ZapiInbound | null {
 
   const ev = eventType?.toLowerCase() ?? "";
   const fromMe = parseFromMeFlag(o, ev);
+  const contactName = extractContactName(o, root, fromMe);
 
   return {
     phoneRaw: phoneCandidate,
     phoneE164: normalized,
     pickSource: phonePick.pickSource,
     linkedLidKeys: collectLinkedLidKeysFromMerged(o),
+    contactName,
     messageId,
     body: text,
     fromMe,
@@ -613,6 +689,7 @@ export async function ingestZapiMessage(parsed: ZapiInbound) {
   const crm = crmTables(admin);
 
   let phoneE164ForCrm = parsed.phoneE164;
+  const originalParsedKey = parsed.phoneE164;
   if (phoneE164ForCrm.startsWith("lid:")) {
     const { data: lidRow, error: lidErr } = await crm
       .from("zapi_lid_map")
@@ -628,6 +705,72 @@ export async function ingestZapiMessage(parsed: ZapiInbound) {
         lid: lidKey,
         phone_e164: phoneE164ForCrm,
       });
+    }
+  }
+
+  /**
+   * Auto-merge de conversa quando o histórico antigo ficou em `lid:...` e agora já
+   * existe o mapeamento para o E.164 real. Isso evita duas threads para o mesmo contato.
+   */
+  if (
+    originalParsedKey.startsWith("lid:") &&
+    !phoneE164ForCrm.startsWith("lid:") &&
+    originalParsedKey !== phoneE164ForCrm
+  ) {
+    const { data: pairRows, error: pairErr } = await crm
+      .from("conversations")
+      .select("id, lead_id, phone_e164")
+      .eq("channel", "whatsapp")
+      .in("phone_e164", [originalParsedKey, phoneE164ForCrm]);
+
+    if (pairErr) {
+      console.warn("[zapi ingest] merge_lid_conversation lookup:", pairErr.message);
+    } else if (pairRows?.length) {
+      const lidConv = pairRows.find((r) => r.phone_e164 === originalParsedKey);
+      const e164Conv = pairRows.find((r) => r.phone_e164 === phoneE164ForCrm);
+
+      if (lidConv && !e164Conv) {
+        const { error: renameErr } = await crm
+          .from("conversations")
+          .update({ phone_e164: phoneE164ForCrm, updated_at: new Date().toISOString() })
+          .eq("id", lidConv.id);
+        if (renameErr) {
+          console.warn("[zapi ingest] merge_lid_conversation rename:", renameErr.message);
+        } else {
+          console.info("[zapi ingest] merge_lid_conversation renomeada", {
+            from: originalParsedKey,
+            to: phoneE164ForCrm,
+            conversation_id: lidConv.id,
+          });
+        }
+      } else if (lidConv && e164Conv && lidConv.id !== e164Conv.id) {
+        const { error: moveErr } = await crm
+          .from("messages")
+          .update({ conversation_id: e164Conv.id })
+          .eq("conversation_id", lidConv.id);
+        if (moveErr) {
+          console.warn("[zapi ingest] merge_lid_conversation move_messages:", moveErr.message);
+        } else {
+          const nowIso = new Date().toISOString();
+          await crm
+            .from("conversations")
+            .update({ updated_at: nowIso })
+            .eq("id", e164Conv.id);
+          const { error: delErr } = await crm
+            .from("conversations")
+            .delete()
+            .eq("id", lidConv.id);
+          if (delErr) {
+            console.warn("[zapi ingest] merge_lid_conversation delete_old:", delErr.message);
+          } else {
+            console.info("[zapi ingest] merge_lid_conversation concluído", {
+              lid_conversation_id: lidConv.id,
+              e164_conversation_id: e164Conv.id,
+              e164: phoneE164ForCrm,
+            });
+          }
+        }
+      }
     }
   }
 
@@ -791,6 +934,36 @@ export async function ingestZapiMessage(parsed: ZapiInbound) {
         stage_id: firstStageId,
         title: `WhatsApp ${phoneE164ForCrm}`,
       });
+    }
+  }
+
+  if (
+    parsed.contactName &&
+    !phoneE164ForCrm.startsWith("lid:")
+  ) {
+    const { data: contactRow, error: contactErr } = await crm
+      .from("contacts")
+      .upsert(
+        {
+          phone_e164: phoneE164ForCrm,
+          full_name: parsed.contactName,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "phone_e164" },
+      )
+      .select("id")
+      .single();
+
+    if (contactErr) {
+      console.warn("[zapi ingest] contacts upsert (name):", contactErr.message);
+    } else if (contactRow?.id) {
+      const { error: leadContactErr } = await crm
+        .from("leads")
+        .update({ contact_id: contactRow.id, updated_at: new Date().toISOString() })
+        .eq("id", leadId);
+      if (leadContactErr) {
+        console.warn("[zapi ingest] leads.contact_id update:", leadContactErr.message);
+      }
     }
   }
 
