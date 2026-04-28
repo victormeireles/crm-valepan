@@ -55,7 +55,7 @@ export default async function DashboardPage() {
   ] = await Promise.all([
     crm.from("leads").select("*", { count: "exact", head: true }),
     crm.from("tasks").select("*", { count: "exact", head: true }).eq("done", false),
-    crm.from("sample_shipments").select("*", { count: "exact", head: true }).neq("status", "delivered"),
+    crm.from("sample_shipments").select("*", { count: "exact", head: true }).neq("status", "ENVIADO"),
     crm.from("pipeline_stages").select("id, is_final"),
     crm.from("opportunities").select("stage_id"),
     crm

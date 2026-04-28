@@ -47,6 +47,8 @@ export interface Database {
           contact_id: string | null;
           owner_id: string | null;
           distributor_id: string | null;
+          client_category: string | null;
+          network_type: string | null;
           status: string;
           created_at: string;
           updated_at: string;
@@ -59,6 +61,8 @@ export interface Database {
           contact_id?: string | null;
           owner_id?: string | null;
           distributor_id?: string | null;
+          client_category?: string | null;
+          network_type?: string | null;
           status?: string;
         };
         Update: Partial<Database["crm"]["Tables"]["leads"]["Insert"]>;
@@ -106,6 +110,7 @@ export interface Database {
           channel: string;
           external_id: string | null;
           phone_e164: string;
+          classification: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -115,6 +120,7 @@ export interface Database {
           channel?: string;
           external_id?: string | null;
           phone_e164: string;
+          classification?: string | null;
         };
         Update: Partial<Database["crm"]["Tables"]["conversations"]["Insert"]>;
       };
@@ -232,6 +238,10 @@ export interface Database {
           company_id: string | null;
           contact_name: string | null;
           address_line: string | null;
+          send_via: string | null;
+          network: string | null;
+          business_hours: string | null;
+          bread_type: string | null;
           status: string;
           window_start: string | null;
           window_end: string | null;
@@ -245,6 +255,10 @@ export interface Database {
           company_id?: string | null;
           contact_name?: string | null;
           address_line?: string | null;
+          send_via?: string | null;
+          network?: string | null;
+          business_hours?: string | null;
+          bread_type?: string | null;
           status?: string;
           window_start?: string | null;
           window_end?: string | null;
@@ -312,6 +326,8 @@ export interface Database {
           full_name: string | null;
           phone_e164: string;
           email: string | null;
+          avatar_url: string | null;
+          avatar_updated_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -321,6 +337,8 @@ export interface Database {
           full_name?: string | null;
           phone_e164: string;
           email?: string | null;
+          avatar_url?: string | null;
+          avatar_updated_at?: string | null;
         };
         Update: Partial<Database["crm"]["Tables"]["contacts"]["Insert"]>;
       };

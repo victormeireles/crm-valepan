@@ -19,7 +19,7 @@ export default async function LeadDetailPage({
   const { data: lead } = await crm
     .from("leads")
     .select(
-      "*, companies(id, name, city, state, document), contacts(id, full_name, email, phone_e164)",
+      "*, companies(id, name, city, state, document), contacts(id, full_name, email, phone_e164), distributors(id, name)",
     )
     .eq("id", id)
     .maybeSingle();
@@ -32,6 +32,10 @@ export default async function LeadDetailPage({
   const contact = lead.contacts as
     | { id: string; full_name: string | null; email: string | null; phone_e164: string }
     | null;
+  const distributor = lead.distributors as { id: string; name: string } | null;
+
+  const displayName = (contact?.full_name ?? "").trim();
+  const heading = displayName.length > 0 ? displayName : lead.phone_e164;
 
   const { data: opps } = await crm
     .from("opportunities")
@@ -66,7 +70,10 @@ export default async function LeadDetailPage({
           <Link href="/leads" className="text-sm text-[var(--muted)] hover:underline">
             ← Leads
           </Link>
-          <h1 className="mt-1 text-lg font-semibold">{lead.phone_e164}</h1>
+          <h1 className="mt-1 text-lg font-semibold">{heading}</h1>
+          {displayName.length > 0 ? (
+            <p className="text-sm text-[var(--muted)]">{lead.phone_e164}</p>
+          ) : null}
           <p className="text-sm text-[var(--muted)]">
             Status: {lead.status} · Origem: {lead.source}
           </p>
@@ -74,6 +81,16 @@ export default async function LeadDetailPage({
         <LeadActions
           key={opportunity?.id ?? "no-opp"}
           leadId={id}
+          clientCategory={lead.client_category ?? null}
+          distributorName={(distributor?.name ?? "").trim().toUpperCase()}
+          contact={
+            contact
+              ? {
+                  id: contact.id,
+                  full_name: contact.full_name,
+                }
+              : null
+          }
           opportunity={
             opportunity
               ? {

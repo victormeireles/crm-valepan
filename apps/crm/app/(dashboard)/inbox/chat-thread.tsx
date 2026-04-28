@@ -16,6 +16,33 @@ function mergeById(older: InboxMessageRow[], base: InboxMessageRow[]) {
   );
 }
 
+function parseContactCard(body: string | null | undefined) {
+  const text = (body ?? "").trim();
+  if (!text) return null;
+  const mark =
+    text.startsWith("[Contato enviado]") || text.startsWith("[Contato]")
+      ? text
+      : null;
+  if (!mark) return null;
+
+  const withoutPrefix = text.replace(/^\[(Contato enviado|Contato)\]\s*/i, "");
+  const [nameRaw, phoneRaw] = withoutPrefix.split("·");
+  const name = (nameRaw ?? "").trim();
+  const phone = (phoneRaw ?? "").trim();
+  if (!name && !phone) return null;
+  return { name: name || "Contato", phone: phone || "—" };
+}
+
+function initials(name: string) {
+  const parts = name
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2);
+  if (parts.length === 0) return "?";
+  return parts.map((p) => p[0]?.toUpperCase() ?? "").join("") || "?";
+}
+
 export function ChatThread({
   conversationId,
   initialMessages,
@@ -126,6 +153,7 @@ export function ChatThread({
 
         {messages.map((m) => {
           const out = m.direction === "out";
+          const contactCard = parseContactCard(m.body);
           return (
             <div
               key={m.id}
@@ -138,11 +166,39 @@ export function ChatThread({
                     : "max-w-[min(88%,440px)] rounded-2xl rounded-bl-sm border border-[var(--border)] bg-[var(--vp-paper-pure)] px-3 py-2 text-sm text-[var(--foreground)] shadow-[var(--sh-sm)]"
                 }
               >
-                <p className="whitespace-pre-wrap break-words">
-                  {m.body?.trim()
-                    ? m.body
-                    : "Sem texto neste registro (mensagem antiga ou mídia sem legenda)."}
-                </p>
+                {contactCard ? (
+                  <div className="w-[min(100%,360px)] overflow-hidden rounded-xl border border-[rgba(80,20,24,0.22)] bg-[#f1dddd] text-[#3e1317]">
+                    <div className="flex items-center gap-2 border-b border-[rgba(80,20,24,0.14)] px-3 py-2">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#d7acac] text-xs font-semibold text-[#4a171c]">
+                        {initials(contactCard.name)}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold">{contactCard.name}</p>
+                        <p className="truncate text-xs text-[#6b2a2f]">{contactCard.phone}</p>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 divide-x divide-[rgba(80,20,24,0.14)]">
+                      <button
+                        type="button"
+                        className="px-2 py-2 text-xs font-medium text-[#6b2a2f] hover:bg-[rgba(80,20,24,0.08)]"
+                      >
+                        Conversar
+                      </button>
+                      <button
+                        type="button"
+                        className="px-2 py-2 text-xs font-medium text-[#6b2a2f] hover:bg-[rgba(80,20,24,0.08)]"
+                      >
+                        Adicionar a um grupo
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="whitespace-pre-wrap break-words">
+                    {m.body?.trim()
+                      ? m.body
+                      : "Sem texto neste registro (mensagem antiga ou mídia sem legenda)."}
+                  </p>
+                )}
                 <div
                   className={`mt-1.5 flex items-center gap-1.5 text-[10px] leading-none ${
                     out

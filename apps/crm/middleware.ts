@@ -40,9 +40,18 @@ export async function middleware(request: NextRequest) {
     },
   });
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  let user: { id: string } | null = null;
+  try {
+    const {
+      data: { user: authUser },
+    } = await supabase.auth.getUser();
+    user = authUser ? { id: authUser.id } : null;
+  } catch (e) {
+    // Em instabilidade de rede (ECONNRESET/fetch failed), não quebrar a navegação com loop de login.
+    // O app continuará e as páginas protegidas farão validação própria no server quando necessário.
+    console.warn("[middleware] supabase.auth.getUser falhou; seguindo sem redirect.", e);
+    return response;
+  }
 
   const path = request.nextUrl.pathname;
   const isProtected = protectedPrefixes.some((p) => path.startsWith(p));

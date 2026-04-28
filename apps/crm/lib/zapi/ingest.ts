@@ -1,6 +1,7 @@
 import { normalizeBrazilPhoneToE164 } from "@crm/shared/phone";
 import { agentDebugLog } from "@/lib/agent-debug-log";
 import { crmTables, createAdminSupabaseClient } from "@/lib/supabase/admin";
+import { fetchZapiProfilePictureLink } from "@/lib/zapi/profile-picture";
 
 /** Fallback quando o JID não é BR mas tem dígitos E.164 válidos (ex.: +351, +1). */
 function normalizeDigitsToE164Loose(digits: string): string | null {
@@ -937,17 +938,17 @@ export async function ingestZapiMessage(parsed: ZapiInbound) {
     }
   }
 
-  if (
-    parsed.contactName &&
-    !phoneE164ForCrm.startsWith("lid:")
-  ) {
+  if (!phoneE164ForCrm.startsWith("lid:")) {
+    const avatarUrl = await fetchZapiProfilePictureLink(phoneE164ForCrm);
+    const nowIso = new Date().toISOString();
     const { data: contactRow, error: contactErr } = await crm
       .from("contacts")
       .upsert(
         {
           phone_e164: phoneE164ForCrm,
-          full_name: parsed.contactName,
-          updated_at: new Date().toISOString(),
+          ...(parsed.contactName ? { full_name: parsed.contactName } : {}),
+          ...(avatarUrl ? { avatar_url: avatarUrl, avatar_updated_at: nowIso } : {}),
+          updated_at: nowIso,
         },
         { onConflict: "phone_e164" },
       )

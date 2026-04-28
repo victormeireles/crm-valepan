@@ -4,7 +4,11 @@ import { createLead } from "@/app/actions/leads";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-export function NewLeadForm() {
+export function NewLeadForm({
+  categoryMode = null,
+}: {
+  categoryMode?: "hamburgueria" | "distribuidor" | "parceiros" | "outros" | null;
+}) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -38,20 +42,35 @@ export function NewLeadForm() {
           className="rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1"
         />
       </label>
-      <label className="flex min-w-[180px] flex-col gap-1">
-        Origem
-        <input
-          name="source"
-          defaultValue="manual"
-          className="rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1"
-        />
-      </label>
+      {categoryMode ? (
+        <>
+          <input type="hidden" name="source" value="manual" />
+          <input type="hidden" name="client_category" value={categoryMode} />
+          <label className="flex min-w-[220px] flex-1 flex-col gap-1">
+            Nome
+            <input
+              name="contact_name"
+              placeholder="Nome do contato"
+              className="rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1"
+            />
+          </label>
+        </>
+      ) : (
+        <label className="flex min-w-[180px] flex-col gap-1">
+          Origem
+          <input
+            name="source"
+            defaultValue="manual"
+            className="rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1"
+          />
+        </label>
+      )}
       <button
         type="submit"
         disabled={loading}
         className="rounded bg-[var(--accent)] px-3 py-1.5 font-medium text-[var(--vp-gold)] disabled:opacity-50"
       >
-        {loading ? "Criando..." : "Novo lead"}
+        {loading ? "Salvando..." : categoryMode ? "Salvar" : "Novo lead"}
       </button>
       {err ? <p className="w-full text-xs text-[var(--vp-error)]">{err}</p> : null}
     </form>

@@ -1,6 +1,7 @@
 "use client";
 
 import { createSample } from "@/app/actions/samples";
+import { SEND_VIA_OPTIONS } from "@/lib/send-via-options";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
@@ -30,9 +31,23 @@ export function SampleForm() {
       className="flex max-w-lg flex-col gap-2 rounded-lg border border-[var(--border)] bg-[var(--card)] p-4 text-sm"
     >
       <h2 className="font-medium">Nova solicitação de amostra</h2>
-      <input name="contact_name" placeholder="Contato" className="rounded border border-[var(--border)] px-2 py-1" />
+      <select name="send_via" className="rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1">
+        <option value="">Enviar por</option>
+        {SEND_VIA_OPTIONS.map((opt) => (
+          <option key={opt} value={opt}>
+            {opt}
+          </option>
+        ))}
+      </select>
+      <input name="network" placeholder="Rede" className="rounded border border-[var(--border)] px-2 py-1" />
+      <input name="contact_name" placeholder="Nome" className="rounded border border-[var(--border)] px-2 py-1" />
       <input name="address_line" placeholder="Endereço" className="rounded border border-[var(--border)] px-2 py-1" />
-      <input name="item" required placeholder="Item / descrição" className="rounded border border-[var(--border)] px-2 py-1" />
+      <input
+        name="business_hours"
+        placeholder="Horário de funcionamento"
+        className="rounded border border-[var(--border)] px-2 py-1"
+      />
+      <input name="bread_type" required placeholder="Tipo de pão" className="rounded border border-[var(--border)] px-2 py-1" />
       {err ? <p className="text-xs text-[var(--vp-error)]">{err}</p> : null}
       <button
         type="submit"

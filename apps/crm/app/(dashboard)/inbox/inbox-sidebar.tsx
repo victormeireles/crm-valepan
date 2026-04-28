@@ -1,13 +1,16 @@
 "use client";
 
+import { updateConversationContactName } from "@/app/actions/inbox";
 import { formatRelativeShort } from "@/lib/format-relative";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 
 export type InboxSidebarRow = {
   id: string;
   displayName: string;
   phone_e164: string;
+  avatarUrl?: string | null;
   preview: string;
   lastAt: string;
   leadLine: string;
@@ -21,6 +24,24 @@ function norm(s: string) {
     .replace(/[\u0300-\u036f]/g, "");
 }
 
+function initials(name: string) {
+  const parts = name
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2);
+  if (parts.length === 0) return "?";
+  return parts.map((p) => p[0]?.toUpperCase() ?? "").join("") || "?";
+}
+
+function validAvatarUrl(v: string | null | undefined): string | null {
+  const t = (v ?? "").trim();
+  if (!t) return null;
+  const low = t.toLowerCase();
+  if (low === "null" || low === "undefined") return null;
+  return t;
+}
+
 export function InboxSidebar({
   conversations,
   selectedId,
@@ -28,7 +49,11 @@ export function InboxSidebar({
   conversations: InboxSidebarRow[];
   selectedId: string | null;
 }) {
+  const router = useRouter();
   const [q, setQ] = useState("");
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [savingId, setSavingId] = useState<string | null>(null);
+  const [errorById, setErrorById] = useState<Record<string, string | null>>({});
 
   const filtered = useMemo(() => {
     const needle = norm(q.trim());
@@ -60,17 +85,35 @@ export function InboxSidebar({
       </div>
       <ul className="min-h-0 flex-1 divide-y divide-[var(--border)] overflow-y-auto overscroll-contain">
         {filtered.map((c) => (
-          <li key={c.id}>
-            <Link
-              href={`/inbox?cid=${c.id}`}
-              className={`flex flex-col gap-1 px-4 py-3 transition-colors hover:bg-[rgba(35,0,4,0.05)] ${
+          <li
+            key={c.id}
+            className={`relative transition-colors hover:bg-[rgba(35,0,4,0.05)] ${
                 c.id === selectedId
                   ? "border-l-[3px] border-l-[var(--vp-wine)] bg-[rgba(35,0,4,0.09)]"
                   : "border-l-[3px] border-l-transparent"
               }`}
-            >
+          >
+            <Link href={`/inbox?cid=${c.id}`} className="block px-4 py-3 pr-10">
               <div className="flex items-start justify-between gap-2">
-                <span className="font-medium text-[var(--foreground)]">{c.displayName}</span>
+                <div className="flex min-w-0 items-start gap-2">
+                  {validAvatarUrl(c.avatarUrl) ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={validAvatarUrl(c.avatarUrl) as string}
+                      alt={`Foto de ${c.displayName}`}
+                      className="mt-0.5 h-9 w-9 shrink-0 rounded-full object-cover"
+                    />
+                  ) : (
+                    <div
+                      className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[rgba(35,0,4,0.14)] text-xs font-semibold text-[var(--vp-wine)]"
+                      aria-label={`Avatar de ${c.displayName}`}
+                      title={c.displayName}
+                    >
+                      {initials(c.displayName)}
+                    </div>
+                  )}
+                  <span className="truncate font-medium text-[var(--foreground)]">{c.displayName}</span>
+                </div>
                 <span
                   className="shrink-0 text-[10px] text-[var(--muted)]"
                   title={new Date(c.lastAt).toLocaleString("pt-BR")}
@@ -92,6 +135,62 @@ export function InboxSidebar({
                 ) : null}
               </div>
             </Link>
+            <div className="absolute right-2 top-2">
+              <button
+                type="button"
+                aria-label="Mais ações da conversa"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setOpenMenuId((prev) => (prev === c.id ? null : c.id));
+                }}
+                className="flex h-6 w-6 items-center justify-center rounded-md text-xs text-[var(--muted)] hover:bg-[rgba(35,0,4,0.08)] hover:text-[var(--foreground)]"
+              >
+                ▾
+              </button>
+              {openMenuId === c.id ? (
+                <div className="absolute right-0 z-10 mt-1 min-w-[9rem] rounded-md border border-[var(--border)] bg-[var(--vp-paper-pure)] p-1 shadow-[var(--sh-md)]">
+                  <button
+                    type="button"
+                    disabled={savingId === c.id}
+                    onClick={async (e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      const next = window.prompt("Editar nome do contato", c.displayName);
+                      if (next == null) {
+                        setOpenMenuId(null);
+                        return;
+                      }
+                      const name = next.trim();
+                      if (!name) {
+                        setErrorById((prev) => ({ ...prev, [c.id]: "Nome não pode ficar vazio." }));
+                        return;
+                      }
+                      setSavingId(c.id);
+                      setErrorById((prev) => ({ ...prev, [c.id]: null }));
+                      const res = await updateConversationContactName({
+                        conversationId: c.id,
+                        contactName: name,
+                      });
+                      setSavingId(null);
+                      if (!res.ok) {
+                        setErrorById((prev) => ({ ...prev, [c.id]: res.error ?? "Erro ao salvar nome." }));
+                        return;
+                      }
+                      setOpenMenuId(null);
+                      router.push(`/inbox?cid=${c.id}`);
+                      router.refresh();
+                    }}
+                    className="w-full rounded px-2 py-1.5 text-left text-xs text-[var(--foreground)] hover:bg-[rgba(35,0,4,0.07)] disabled:opacity-50"
+                  >
+                    {savingId === c.id ? "Salvando..." : "Editar nome"}
+                  </button>
+                </div>
+              ) : null}
+            </div>
+            {errorById[c.id] ? (
+              <p className="px-4 pb-2 text-[11px] text-[var(--vp-error)]">{errorById[c.id]}</p>
+            ) : null}
           </li>
         ))}
         {conversations.length === 0 && (

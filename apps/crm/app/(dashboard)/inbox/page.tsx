@@ -5,6 +5,7 @@ import {
 import { nestOne } from "@/lib/supabase/nested";
 import { createServerSupabaseClient, crmTables } from "@/lib/supabase/server";
 import { ChatThread } from "./chat-thread";
+import { ConversationClassificationSelect } from "./conversation-classification-select";
 import { InboxLiveRefresh } from "./inbox-live-refresh";
 import { InboxSidebar, type InboxSidebarRow } from "./inbox-sidebar";
 import { SendMessageForm } from "./send-message-form";
@@ -21,6 +22,24 @@ function previewLine(body: string | null | undefined): string {
   return t.length > PREVIEW_MAX ? `${t.slice(0, PREVIEW_MAX - 1)}…` : t;
 }
 
+function initials(name: string) {
+  const parts = name
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2);
+  if (parts.length === 0) return "?";
+  return parts.map((p) => p[0]?.toUpperCase() ?? "").join("") || "?";
+}
+
+function validAvatarUrl(v: string | null | undefined): string | null {
+  const t = (v ?? "").trim();
+  if (!t) return null;
+  const low = t.toLowerCase();
+  if (low === "null" || low === "undefined") return null;
+  return t;
+}
+
 export default async function InboxPage({
   searchParams,
 }: {
@@ -34,7 +53,9 @@ export default async function InboxPage({
     await Promise.all([
       crm
         .from("conversations")
-        .select("id, phone_e164, created_at, updated_at, leads(id, phone_e164, status, contacts(full_name))")
+        .select(
+          "id, phone_e164, classification, created_at, updated_at, leads(id, phone_e164, status, client_category, contacts(full_name, avatar_url))",
+        )
         .order("updated_at", { ascending: false }),
       crm
         .from("v_conversation_last_message")
@@ -80,8 +101,24 @@ export default async function InboxPage({
   const selectedLead = selected
     ? nestOne(
         selected.leads as
-          | { id: string; status: string; contacts?: { full_name: string | null } | { full_name: string | null }[] | null }
-          | { id: string; status: string; contacts?: { full_name: string | null } | { full_name: string | null }[] | null }[]
+          | {
+              id: string;
+              status: string;
+              client_category?: string | null;
+              contacts?:
+                | { full_name: string | null; avatar_url?: string | null }
+                | { full_name: string | null; avatar_url?: string | null }[]
+                | null;
+            }
+          | {
+              id: string;
+              status: string;
+              client_category?: string | null;
+              contacts?:
+                | { full_name: string | null; avatar_url?: string | null }
+                | { full_name: string | null; avatar_url?: string | null }[]
+                | null;
+            }[]
           | null,
       )
     : null;
@@ -89,8 +126,24 @@ export default async function InboxPage({
   const sidebarRows: InboxSidebarRow[] = conversationsSorted.map((c) => {
     const lead = nestOne(
       c.leads as
-        | { id: string; status: string; contacts?: { full_name: string | null } | { full_name: string | null }[] | null }
-        | { id: string; status: string; contacts?: { full_name: string | null } | { full_name: string | null }[] | null }[]
+        | {
+            id: string;
+            status: string;
+            client_category?: string | null;
+            contacts?:
+              | { full_name: string | null; avatar_url?: string | null }
+              | { full_name: string | null; avatar_url?: string | null }[]
+              | null;
+          }
+        | {
+            id: string;
+            status: string;
+            client_category?: string | null;
+            contacts?:
+              | { full_name: string | null; avatar_url?: string | null }
+              | { full_name: string | null; avatar_url?: string | null }[]
+              | null;
+          }[]
         | null,
     );
     const contact = nestOne(
@@ -100,11 +153,15 @@ export default async function InboxPage({
         | null,
     );
     const contactName = contact?.full_name?.trim() || null;
+    const avatarUrl = validAvatarUrl(
+      typeof contact?.avatar_url === "string" ? contact.avatar_url : null,
+    );
     const tail = tailById.get(c.id);
     return {
       id: c.id,
       displayName: contactName ?? c.phone_e164,
       phone_e164: c.phone_e164,
+      avatarUrl,
       preview: previewLine(tail?.last_body_preview),
       lastAt: tail?.last_sent_at ?? c.updated_at,
       leadLine: lead ? `Lead · ${lead.status}` : "Sem lead",
@@ -134,21 +191,46 @@ export default async function InboxPage({
           {selected ? (
             <>
               <div className="shrink-0 border-b border-[var(--border)] bg-[var(--vp-paper)] px-3 pb-3 pt-3">
-                <div>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
                   {(() => {
                     const selectedContact = nestOne(
                       (selectedLead?.contacts ?? null) as
-                        | { full_name: string | null }
-                        | { full_name: string | null }[]
+                        | { full_name: string | null; avatar_url?: string | null }
+                        | { full_name: string | null; avatar_url?: string | null }[]
                         | null,
                     );
                     const selectedContactName = selectedContact?.full_name?.trim() || null;
+                    const avatarUrl = validAvatarUrl(
+                      typeof selectedContact?.avatar_url === "string"
+                        ? selectedContact.avatar_url
+                        : null,
+                    );
+                    const titleName = selectedContactName ?? selected.phone_e164;
                     return (
-                      <h2 className="font-medium text-[var(--foreground)]">
-                        {selectedContactName
-                          ? `${selectedContactName} · ${selected.phone_e164}`
-                          : selected.phone_e164}
-                      </h2>
+                      <div className="flex items-center gap-2">
+                        {avatarUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={avatarUrl}
+                            alt={`Foto de ${titleName}`}
+                            className="h-9 w-9 shrink-0 rounded-full object-cover"
+                          />
+                        ) : (
+                          <div
+                            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[rgba(35,0,4,0.14)] text-xs font-semibold text-[var(--vp-wine)]"
+                            aria-label={`Avatar de ${titleName}`}
+                            title={titleName}
+                          >
+                            {initials(titleName)}
+                          </div>
+                        )}
+                        <h2 className="font-medium text-[var(--foreground)]">
+                          {selectedContactName
+                            ? `${selectedContactName} · ${selected.phone_e164}`
+                            : selected.phone_e164}
+                        </h2>
+                      </div>
                     );
                   })()}
                   <p className="text-xs text-[var(--muted)]">
@@ -160,6 +242,13 @@ export default async function InboxPage({
                       Aguarda a sua resposta (última mensagem foi do cliente).
                     </p>
                   ) : null}
+                  </div>
+                  <ConversationClassificationSelect
+                    conversationId={selected.id}
+                    classification={(selected as { classification?: string | null }).classification ?? null}
+                    leadId={selectedLead?.id ?? null}
+                    clientCategory={selectedLead?.client_category ?? null}
+                  />
                 </div>
               </div>
 

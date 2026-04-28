@@ -1,51 +1,212 @@
+import { nestOne } from "@/lib/supabase/nested";
+import { isClientCategoryValue } from "@/lib/client-categories";
+import { SEND_VIA_OPTIONS } from "@/lib/send-via-options";
 import { createServerSupabaseClient, crmTables } from "@/lib/supabase/server";
 import Link from "next/link";
 import { NewLeadForm } from "./new-lead-form";
+import { LeadCategoryRowEdit } from "./lead-category-row-edit";
 
-export default async function LeadsPage() {
+function leadRowLabel(l: {
+  phone_e164: string;
+  contacts:
+    | { full_name: string | null }
+    | { full_name: string | null }[]
+    | null
+    | undefined;
+}) {
+  const c = nestOne(l.contacts);
+  const name = (c?.full_name ?? "").trim();
+  return name.length > 0 ? name : l.phone_e164;
+}
+
+function leadContactName(l: {
+  contacts:
+    | { full_name: string | null }
+    | { full_name: string | null }[]
+    | null
+    | undefined;
+}) {
+  return (nestOne(l.contacts)?.full_name ?? "").trim();
+}
+
+export default async function LeadsPage({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const sp = (await searchParams) ?? {};
+  const rawCat = sp.client_category;
+  const clientCategory =
+    typeof rawCat === "string" && isClientCategoryValue(rawCat) ? rawCat : null;
+
   const supabase = await createServerSupabaseClient();
   const crm = crmTables(supabase);
 
-  const { data: leads } = await crm
+  let query = crm
     .from("leads")
-    .select("id, phone_e164, status, source, created_at, owner_id")
+    .select(
+      "id, phone_e164, status, source, created_at, owner_id, client_category, network_type, distributor_id, company_id, contacts(id,full_name), companies(id,city,document), distributors(id,name)",
+    )
     .order("updated_at", { ascending: false });
+
+  if (clientCategory && clientCategory !== "distribuidor") {
+    query = query.eq("client_category", clientCategory);
+  }
+
+  const { data: leads } = await query;
+  const leadRows = leads ?? [];
+  const distributorSourceRows =
+    clientCategory === "distribuidor"
+      ? leadRows.filter((lead) => {
+          const category = (lead.client_category ?? "").trim().toLowerCase();
+          const networkType = (lead.network_type ?? "").trim().toLowerCase();
+          return category === "distribuidor" || !!lead.distributor_id || networkType === "distribuidor";
+        })
+      : leadRows;
+
+  const distributorRows =
+    clientCategory === "distribuidor"
+      ? (() => {
+          const byDistributor = new Map<
+            string,
+            (typeof distributorSourceRows)[number]
+          >();
+          const pending: (typeof distributorSourceRows)[number][] = [];
+
+          for (const lead of distributorSourceRows) {
+            const distName = (nestOne(lead.distributors)?.name ?? "").trim().toUpperCase();
+            if (distName && SEND_VIA_OPTIONS.includes(distName as (typeof SEND_VIA_OPTIONS)[number])) {
+              if (!byDistributor.has(distName)) {
+                byDistributor.set(distName, lead);
+              }
+            } else {
+              pending.push(lead);
+            }
+          }
+
+          const pendingRows = pending.map((lead) => ({
+            distributorName: "",
+            lead,
+            distributorLocked: false,
+          }));
+
+          const fixedRows = SEND_VIA_OPTIONS.map((option) => {
+            const mapped = byDistributor.get(option) ?? null;
+            return {
+              distributorName: option,
+              lead: mapped,
+              distributorLocked: true,
+            };
+          });
+
+          return [...pendingRows, ...fixedRows];
+        })()
+      : [];
 
   return (
     <div className="space-y-4">
-      <h1 className="text-lg font-semibold">Leads</h1>
-      <NewLeadForm />
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h1 className="text-lg font-semibold">Leads</h1>
+        {clientCategory ? (
+          <p className="text-sm text-[var(--muted)]">
+            Filtro: <span className="font-medium text-[var(--foreground)]">{clientCategory}</span> ·{" "}
+            <Link className="text-[var(--accent)] hover:underline" href="/leads">
+              limpar
+            </Link>
+          </p>
+        ) : null}
+      </div>
+      <NewLeadForm categoryMode={clientCategory} />
       <div className="overflow-x-auto rounded-lg border border-[var(--border)] bg-[var(--card)]">
         <table className="w-full min-w-[640px] text-left text-sm">
           <thead className="border-b border-[var(--border)] text-[var(--muted)]">
-            <tr>
-              <th className="px-3 py-2">Telefone</th>
-              <th className="px-3 py-2">Status</th>
-              <th className="px-3 py-2">Origem</th>
-              <th className="px-3 py-2">Criado</th>
-            </tr>
+            {clientCategory ? (
+              <tr>
+                <th className="px-2 py-2">Rede</th>
+                <th className="px-2 py-2">Classificação</th>
+                <th className="px-2 py-2">CNPJ</th>
+                <th className="px-2 py-2">Nome</th>
+                <th className="px-2 py-2">Cidade</th>
+              </tr>
+            ) : (
+              <tr>
+                <th className="px-3 py-2">Nome</th>
+                <th className="px-3 py-2">Status</th>
+                <th className="px-3 py-2">Origem</th>
+                <th className="px-3 py-2">Criado</th>
+              </tr>
+            )}
           </thead>
           <tbody>
-            {(leads ?? []).map((l) => (
-              <tr
-                key={l.id}
-                className="border-b border-[var(--border)] last:border-0 transition-colors hover:bg-[var(--vp-surface-low)]"
-              >
-                <td className="px-3 py-2">
-                  <Link className="text-[var(--accent)] hover:underline" href={`/leads/${l.id}`}>
-                    {l.phone_e164}
-                  </Link>
-                </td>
-                <td className="px-3 py-2">{l.status}</td>
-                <td className="px-3 py-2">{l.source}</td>
-                <td className="px-3 py-2 text-[var(--muted)]">
-                  {new Date(l.created_at).toLocaleString("pt-BR")}
-                </td>
-              </tr>
-            ))}
+            {clientCategory === "distribuidor"
+              ? distributorRows.map((row) => (
+                  <tr
+                    key={`${row.distributorName || "pendente"}-${row.lead?.id ?? "empty"}`}
+                    className="border-b border-[var(--border)] last:border-0 transition-colors hover:bg-[var(--vp-surface-low)]"
+                  >
+                    <LeadCategoryRowEdit
+                      leadId={row.lead?.id ?? null}
+                      clientCategory="distribuidor"
+                      distributorName={row.distributorName}
+                      distributorLocked={row.distributorLocked}
+                      networkType={(row.lead?.network_type ?? "").trim().toLowerCase()}
+                      contactName={row.lead ? leadContactName(row.lead) : ""}
+                      leadPhone={row.lead?.phone_e164 ?? ""}
+                      city={row.lead ? (nestOne(row.lead.companies)?.city ?? "").trim() : ""}
+                      companyDocument={row.lead ? (nestOne(row.lead.companies)?.document ?? "").trim() : ""}
+                    />
+                  </tr>
+                ))
+              : clientCategory
+                ? leadRows.map((l) => (
+                    <tr
+                      key={l.id}
+                      className="border-b border-[var(--border)] last:border-0 transition-colors hover:bg-[var(--vp-surface-low)]"
+                    >
+                      <LeadCategoryRowEdit
+                        leadId={l.id}
+                        clientCategory={clientCategory}
+                        distributorName={(nestOne(l.distributors)?.name ?? "").trim().toUpperCase()}
+                        distributorLocked={false}
+                        networkType={(l.network_type ?? "").trim().toLowerCase()}
+                        contactName={leadContactName(l)}
+                        leadPhone={l.phone_e164 ?? ""}
+                        city={(nestOne(l.companies)?.city ?? "").trim()}
+                        companyDocument={(nestOne(l.companies)?.document ?? "").trim()}
+                      />
+                    </tr>
+                  ))
+              : leadRows.map((l) => (
+                  <tr
+                    key={l.id}
+                    className="border-b border-[var(--border)] last:border-0 transition-colors hover:bg-[var(--vp-surface-low)]"
+                  >
+                    <td className="px-3 py-2">
+                      <Link className="text-[var(--accent)] hover:underline" href={`/leads/${l.id}`}>
+                        {leadRowLabel(l)}
+                      </Link>
+                    </td>
+                    <td className="px-3 py-2">{l.status}</td>
+                    <td className="px-3 py-2">{l.source}</td>
+                    <td className="px-3 py-2 text-[var(--muted)]">
+                      {new Date(l.created_at).toLocaleString("pt-BR")}
+                    </td>
+                  </tr>
+                ))}
           </tbody>
         </table>
-        {(!leads || leads.length === 0) && (
+        {clientCategory === "distribuidor" &&
+          distributorSourceRows.length === 0 && (
+            <p className="p-6 text-center text-sm text-[var(--muted)]">
+              Nenhum lead nesta categoria.
+            </p>
+          )}
+        {clientCategory && clientCategory !== "distribuidor" && leadRows.length === 0 && (
+          <p className="p-6 text-center text-sm text-[var(--muted)]">
+            Nenhum lead nesta categoria.
+          </p>
+        )}
+        {!clientCategory && leadRows.length === 0 && (
           <p className="p-6 text-center text-sm text-[var(--muted)]">Nenhum lead.</p>
         )}
       </div>
