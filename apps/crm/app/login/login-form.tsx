@@ -14,6 +14,22 @@ export function LoginForm() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
+  async function signInWithTimeout(email: string, password: string) {
+    const supabase = createBrowserSupabaseClient();
+    const authPromise = supabase.auth.signInWithPassword({ email, password });
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      const id = setTimeout(() => {
+        clearTimeout(id);
+        reject(
+          new Error(
+            "Login demorou mais do que o esperado. Verifique sua conexão e tente novamente.",
+          ),
+        );
+      }, 15000);
+    });
+    return Promise.race([authPromise, timeoutPromise]);
+  }
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
@@ -26,18 +42,19 @@ export function LoginForm() {
       setError(err instanceof Error ? err.message : "Usuário inválido.");
       return;
     }
-    const supabase = createBrowserSupabaseClient();
-    const { error: err } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-    setLoading(false);
-    if (err) {
-      setError(err.message);
-      return;
+    try {
+      const { error: err } = await signInWithTimeout(email, password);
+      if (err) {
+        setError(err.message);
+        return;
+      }
+      router.push(next);
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erro inesperado ao autenticar.");
+    } finally {
+      setLoading(false);
     }
-    router.push(next);
-    router.refresh();
   }
 
   return (

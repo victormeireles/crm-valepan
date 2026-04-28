@@ -148,8 +148,8 @@ export default async function InboxPage({
     );
     const contact = nestOne(
       (lead?.contacts ?? null) as
-        | { full_name: string | null }
-        | { full_name: string | null }[]
+        | { full_name: string | null; avatar_url?: string | null }
+        | { full_name: string | null; avatar_url?: string | null }[]
         | null,
     );
     const contactName = contact?.full_name?.trim() || null;
