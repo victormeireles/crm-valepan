@@ -6,6 +6,10 @@ import Link from "next/link";
 import { NewLeadForm } from "./new-lead-form";
 import { LeadCategoryRowEdit } from "./lead-category-row-edit";
 
+/** Evita cache da lista após salvar (router.refresh + dados atualizados do Supabase). */
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 function leadRowLabel(l: {
   phone_e164: string;
   contacts:
@@ -85,7 +89,7 @@ export default async function LeadsPage({
           }
 
           const pendingRows = pending.map((lead) => ({
-            distributorName: "",
+            distributorName: (nestOne(lead.distributors)?.name ?? "").trim().toUpperCase(),
             lead,
             distributorLocked: false,
           }));
@@ -106,7 +110,9 @@ export default async function LeadsPage({
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h1 className="text-lg font-semibold">Leads</h1>
+        <h1 className="text-lg font-semibold">
+          {clientCategory === "distribuidor" ? "Carteira de Distribuidores" : "Leads"}
+        </h1>
         {clientCategory ? (
           <p className="text-sm text-[var(--muted)]">
             Filtro: <span className="font-medium text-[var(--foreground)]">{clientCategory}</span> ·{" "}
@@ -126,7 +132,9 @@ export default async function LeadsPage({
                 <th className="px-2 py-2">Classificação</th>
                 <th className="px-2 py-2">CNPJ</th>
                 <th className="px-2 py-2">Nome</th>
+                <th className="px-2 py-2">Telefone</th>
                 <th className="px-2 py-2">Cidade</th>
+                <th className="px-2 py-2">Opções</th>
               </tr>
             ) : (
               <tr>
@@ -149,6 +157,7 @@ export default async function LeadsPage({
                       clientCategory="distribuidor"
                       distributorName={row.distributorName}
                       distributorLocked={row.distributorLocked}
+                      leadStatus={(row.lead?.status ?? "").trim().toLowerCase()}
                       networkType={(row.lead?.network_type ?? "").trim().toLowerCase()}
                       contactName={row.lead ? leadContactName(row.lead) : ""}
                       leadPhone={row.lead?.phone_e164 ?? ""}
@@ -168,6 +177,7 @@ export default async function LeadsPage({
                         clientCategory={clientCategory}
                         distributorName={(nestOne(l.distributors)?.name ?? "").trim().toUpperCase()}
                         distributorLocked={false}
+                        leadStatus={(l.status ?? "").trim().toLowerCase()}
                         networkType={(l.network_type ?? "").trim().toLowerCase()}
                         contactName={leadContactName(l)}
                         leadPhone={l.phone_e164 ?? ""}

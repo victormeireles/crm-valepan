@@ -1,7 +1,7 @@
 "use client";
 
 import { updateConversationClassification } from "@/app/actions/inbox";
-import { updateLeadClientCategory } from "@/app/actions/leads";
+import { updateConversationLeadClientCategory } from "@/app/actions/leads";
 import {
   INBOX_CLASSIFICATION_OPTIONS,
   isInboxClassification,
@@ -83,7 +83,7 @@ export function ConversationClassificationSelect({
       </label>
       <select
         value={clientCategoryValue}
-        disabled={loadingClientCategory || !leadId}
+        disabled={loadingClientCategory}
         onChange={(e) => {
           const next = e.target.value as
             | ""
@@ -92,12 +92,11 @@ export function ConversationClassificationSelect({
             | "parceiros"
             | "outros";
           setClientCategoryValue(next);
-          if (!leadId) return;
           void (async () => {
             setLoadingClientCategory(true);
             setErr(null);
-            const res = await updateLeadClientCategory({
-              leadId,
+            const res = await updateConversationLeadClientCategory({
+              conversationId,
               category: next.length > 0 ? next : null,
             });
             setLoadingClientCategory(false);

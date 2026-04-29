@@ -14,6 +14,20 @@ export function LoginForm() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
+  function getAuthErrorMessage(err: unknown) {
+    if (err instanceof Error) {
+      const msg = err.message.trim();
+      if (
+        msg === "Failed to fetch" ||
+        msg.toLowerCase().includes("fetch failed")
+      ) {
+        return "Sem conexão com o servidor de autenticação. Verifique internet, VPN/firewall e tente novamente.";
+      }
+      return msg;
+    }
+    return "Erro inesperado ao autenticar.";
+  }
+
   async function signInWithTimeout(email: string, password: string) {
     const supabase = createBrowserSupabaseClient();
     const authPromise = supabase.auth.signInWithPassword({ email, password });
@@ -45,13 +59,13 @@ export function LoginForm() {
     try {
       const { error: err } = await signInWithTimeout(email, password);
       if (err) {
-        setError(err.message);
+        setError(getAuthErrorMessage(err));
         return;
       }
       router.push(next);
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Erro inesperado ao autenticar.");
+      setError(getAuthErrorMessage(err));
     } finally {
       setLoading(false);
     }
