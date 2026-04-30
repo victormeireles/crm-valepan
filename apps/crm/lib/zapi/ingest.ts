@@ -17,6 +17,9 @@ function normalizeDigitsToE164Loose(digits: string): string | null {
 function normalizeZapiChatKey(phoneCandidate: string): string | null {
   const t = phoneCandidate.trim();
   if (!t) return null;
+  if (t.toLowerCase().includes("@g.us")) {
+    return t.toLowerCase().replace(/\s+/g, "");
+  }
   if (t.toLowerCase().includes("@lid")) {
     const digits = (t.split("@")[0] ?? "").replace(/\D/g, "");
     if (digits.length < 8) return null;
@@ -58,6 +61,8 @@ export type ZapiInbound = {
   eventType: string | null;
   /** Quando o payload traz timestamp (ex.: momment/moment em ms). */
   sentAtIso: string | null;
+  /** Separa conversa de lead individual de grupo do WhatsApp. */
+  conversationKind: "lead" | "group";
 };
 
 function extractSentAtIso(source: Record<string, unknown> | null): string | null {
@@ -341,10 +346,6 @@ export function planZapiWebhookAction(
   const merged = mergePayloadLayers(body);
   if (!merged) return { action: "parse" };
 
-  if (isGroupPayload(merged, root)) {
-    return { action: "skip", reason: "group_message_filtered" };
-  }
-
   const rawType = pickRawWebhookType(merged, root);
   const t = rawType.trim().toLowerCase();
 
@@ -363,7 +364,7 @@ export function planZapiWebhookAction(
 
   if (ZAPI_CHAT_CALLBACKS.has(t)) return { action: "parse" };
 
-  const isGroup = merged.isGroup === true || merged.isGroup === "true";
+  const isGroup = isGroupPayload(merged, root);
   const participant =
     typeof merged.participantPhone === "string" && merged.participantPhone.trim()
       ? merged.participantPhone.trim()
@@ -550,13 +551,12 @@ export function parseZapiWebhookPayload(body: unknown): ZapiInbound | null {
 
   const root =
     body && typeof body === "object" ? (body as Record<string, unknown>) : null;
-  if (isGroupPayload(o, root)) return null;
   const sentAtIso = extractSentAtIso(o) ?? extractSentAtIso(root);
 
   const rawType = pickRawWebhookType(o, root);
   const eventType = normalizeEventType(rawType.length ? rawType : null);
 
-  const isGroup = o.isGroup === true || o.isGroup === "true";
+  const isGroup = isGroupPayload(o, root);
   const participant =
     typeof o.participantPhone === "string" && o.participantPhone.trim()
       ? o.participantPhone.trim()
@@ -615,6 +615,7 @@ export function parseZapiWebhookPayload(body: unknown): ZapiInbound | null {
     fromMe,
     eventType,
     sentAtIso,
+    conversationKind: isGroup ? "group" : "lead",
   };
 }
 
@@ -860,85 +861,86 @@ export async function ingestZapiMessage(parsed: ZapiInbound) {
     }
   }
 
-  const firstStageId = await resolveFirstStageId();
+  let leadId: string | null = null;
+  if (parsed.conversationKind === "lead") {
+    const firstStageId = await resolveFirstStageId();
 
-  let leadId: string;
-
-  const { data: existingLead } = await crm
-    .from("leads")
-    .select("id")
-    .eq("phone_e164", phoneE164ForCrm)
-    .maybeSingle();
-
-  if (existingLead?.id) {
-    leadId = existingLead.id;
-    const { data: existingOpp } = await crm
-      .from("opportunities")
-      .select("id")
-      .eq("lead_id", leadId)
-      .limit(1)
-      .maybeSingle();
-    if (!existingOpp) {
-      await crm.from("opportunities").insert({
-        lead_id: leadId,
-        stage_id: firstStageId,
-        title: `WhatsApp ${phoneE164ForCrm}`,
-      });
-    }
-  } else {
-    const { data: insertedLead, error: leadErr } = await crm
+    const { data: existingLead } = await crm
       .from("leads")
-      .insert({
-        phone_e164: phoneE164ForCrm,
-        source: "whatsapp",
-        status: "open",
-      })
       .select("id")
-      .single();
-    if (leadErr) {
-      if (leadErr.code === "23505") {
-        const { data: again } = await crm
-          .from("leads")
-          .select("id")
-          .eq("phone_e164", phoneE164ForCrm)
-          .single();
-        if (!again?.id) throw leadErr;
-        leadId = again.id;
-        const { data: oppRace } = await crm
-          .from("opportunities")
-          .select("id")
-          .eq("lead_id", leadId)
-          .limit(1)
-          .maybeSingle();
-        if (!oppRace) {
-          await crm.from("opportunities").insert({
-            lead_id: leadId,
-            stage_id: firstStageId,
-            title: `WhatsApp ${phoneE164ForCrm}`,
-          });
-        }
-      } else {
-        throw leadErr;
+      .eq("phone_e164", phoneE164ForCrm)
+      .maybeSingle();
+
+    if (existingLead?.id) {
+      leadId = existingLead.id;
+      const { data: existingOpp } = await crm
+        .from("opportunities")
+        .select("id")
+        .eq("lead_id", leadId)
+        .limit(1)
+        .maybeSingle();
+      if (!existingOpp) {
+        await crm.from("opportunities").insert({
+          lead_id: leadId,
+          stage_id: firstStageId,
+          title: `WhatsApp ${phoneE164ForCrm}`,
+        });
       }
     } else {
-      leadId = insertedLead!.id;
+      const { data: insertedLead, error: leadErr } = await crm
+        .from("leads")
+        .insert({
+          phone_e164: phoneE164ForCrm,
+          source: "whatsapp",
+          status: "open",
+        })
+        .select("id")
+        .single();
+      if (leadErr) {
+        if (leadErr.code === "23505") {
+          const { data: again } = await crm
+            .from("leads")
+            .select("id")
+            .eq("phone_e164", phoneE164ForCrm)
+            .single();
+          if (!again?.id) throw leadErr;
+          leadId = again.id;
+          const { data: oppRace } = await crm
+            .from("opportunities")
+            .select("id")
+            .eq("lead_id", leadId)
+            .limit(1)
+            .maybeSingle();
+          if (!oppRace) {
+            await crm.from("opportunities").insert({
+              lead_id: leadId,
+              stage_id: firstStageId,
+              title: `WhatsApp ${phoneE164ForCrm}`,
+            });
+          }
+        } else {
+          throw leadErr;
+        }
+      } else {
+        leadId = insertedLead!.id;
 
-      await crm.from("activity_logs").insert({
-        entity_type: "lead",
-        entity_id: leadId,
-        action: "created_from_whatsapp",
-        payload: { phone: phoneE164ForCrm },
-      });
+        await crm.from("activity_logs").insert({
+          entity_type: "lead",
+          entity_id: leadId,
+          action: "created_from_whatsapp",
+          payload: { phone: phoneE164ForCrm },
+        });
 
-      await crm.from("opportunities").insert({
-        lead_id: leadId,
-        stage_id: firstStageId,
-        title: `WhatsApp ${phoneE164ForCrm}`,
-      });
+        await crm.from("opportunities").insert({
+          lead_id: leadId,
+          stage_id: firstStageId,
+          title: `WhatsApp ${phoneE164ForCrm}`,
+        });
+      }
     }
   }
 
-  if (!phoneE164ForCrm.startsWith("lid:")) {
+  if (parsed.conversationKind === "lead" && !phoneE164ForCrm.startsWith("lid:")) {
     const avatarUrl = await fetchZapiProfilePictureLink(phoneE164ForCrm);
     const nowIso = new Date().toISOString();
     const { data: contactRow, error: contactErr } = await crm
@@ -957,7 +959,7 @@ export async function ingestZapiMessage(parsed: ZapiInbound) {
 
     if (contactErr) {
       console.warn("[zapi ingest] contacts upsert (name):", contactErr.message);
-    } else if (contactRow?.id) {
+    } else if (contactRow?.id && leadId) {
       const { error: leadContactErr } = await crm
         .from("leads")
         .update({ contact_id: contactRow.id, updated_at: new Date().toISOString() })
@@ -970,7 +972,7 @@ export async function ingestZapiMessage(parsed: ZapiInbound) {
 
   const { data: conv } = await crm
     .from("conversations")
-    .select("id")
+    .select("id, conversation_kind")
     .eq("channel", "whatsapp")
     .eq("phone_e164", phoneE164ForCrm)
     .maybeSingle();
@@ -978,6 +980,16 @@ export async function ingestZapiMessage(parsed: ZapiInbound) {
   let conversationId: string;
   if (conv?.id) {
     conversationId = conv.id;
+    if (conv.conversation_kind !== parsed.conversationKind) {
+      await crm
+        .from("conversations")
+        .update({
+          conversation_kind: parsed.conversationKind,
+          lead_id: parsed.conversationKind === "lead" ? leadId : null,
+          updated_at: parsed.sentAtIso ?? new Date().toISOString(),
+        })
+        .eq("id", conv.id);
+    }
   } else {
     const { data: ins, error: cErr } = await crm
       .from("conversations")
@@ -985,6 +997,7 @@ export async function ingestZapiMessage(parsed: ZapiInbound) {
         lead_id: leadId,
         channel: "whatsapp",
         phone_e164: phoneE164ForCrm,
+        conversation_kind: parsed.conversationKind,
       })
       .select("id")
       .single();

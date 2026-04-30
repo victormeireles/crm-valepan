@@ -1,13 +1,15 @@
+import { LeadIdentity } from "@/components/lead-identity";
 import {
   loadRecentConversationMessages,
   type InboxMessageRow,
 } from "@/lib/inbox/load-messages";
+import { displayCompanyName, displayPersonName } from "@/lib/lead-identity";
 import { nestOne } from "@/lib/supabase/nested";
 import { createServerSupabaseClient, crmTables } from "@/lib/supabase/server";
 import { ChatThread } from "./chat-thread";
-import { ConversationClassificationSelect } from "./conversation-classification-select";
 import { InboxLiveRefresh } from "./inbox-live-refresh";
 import { InboxSidebar, type InboxSidebarRow } from "./inbox-sidebar";
+import { LeadQualificationModal } from "./lead-qualification-modal";
 import { SendMessageForm } from "./send-message-form";
 
 /** Evita cache estático: mensagens novas precisam aparecer após webhook / envio. */
@@ -15,6 +17,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 const PREVIEW_MAX = 80;
+type InboxTab = "leads" | "groups";
 
 function previewLine(body: string | null | undefined): string {
   const t = (body ?? "").trim().replace(/\s+/g, " ");
@@ -43,9 +46,11 @@ function validAvatarUrl(v: string | null | undefined): string | null {
 export default async function InboxPage({
   searchParams,
 }: {
-  searchParams: Promise<{ cid?: string }>;
+  searchParams: Promise<{ cid?: string; tab?: string }>;
 }) {
-  const { cid } = await searchParams;
+  const { cid, tab } = await searchParams;
+  const activeTab: InboxTab = tab === "groups" ? "groups" : "leads";
+  const conversationKind = activeTab === "groups" ? "group" : "lead";
   const supabase = await createServerSupabaseClient();
   const crm = crmTables(supabase);
 
@@ -54,8 +59,9 @@ export default async function InboxPage({
       crm
         .from("conversations")
         .select(
-          "id, phone_e164, classification, created_at, updated_at, leads(id, phone_e164, status, client_category, contacts(full_name, avatar_url))",
+          "id, phone_e164, conversation_kind, classification, created_at, updated_at, leads(id, phone_e164, status, client_category, zip_code, weekly_bread_consumption, bread_type, bread_weight_grams, contacts(full_name, avatar_url), companies(id, name, document, city, state), distributors(name), opportunities(id, stage_id, updated_at))",
         )
+        .eq("conversation_kind", conversationKind)
         .order("updated_at", { ascending: false }),
       crm
         .from("v_conversation_last_message")
@@ -105,23 +111,111 @@ export default async function InboxPage({
               id: string;
               status: string;
               client_category?: string | null;
+              zip_code?: string | null;
+              weekly_bread_consumption?: number | null;
+              bread_type?: string | null;
+              bread_weight_grams?: number | null;
+              companies?:
+                | {
+                    id: string;
+                    name: string | null;
+                    document: string | null;
+                    city: string | null;
+                    state: string | null;
+                  }
+                | {
+                    id: string;
+                    name: string | null;
+                    document: string | null;
+                    city: string | null;
+                    state: string | null;
+                  }[]
+                | null;
+              opportunities?:
+                | { id: string; stage_id: string; updated_at: string }
+                | { id: string; stage_id: string; updated_at: string }[]
+                | null;
               contacts?:
                 | { full_name: string | null; avatar_url?: string | null }
                 | { full_name: string | null; avatar_url?: string | null }[]
+                | null;
+              distributors?:
+                | { name: string | null }
+                | { name: string | null }[]
                 | null;
             }
           | {
               id: string;
               status: string;
               client_category?: string | null;
+              zip_code?: string | null;
+              weekly_bread_consumption?: number | null;
+              bread_type?: string | null;
+              bread_weight_grams?: number | null;
+              companies?:
+                | {
+                    id: string;
+                    name: string | null;
+                    document: string | null;
+                    city: string | null;
+                    state: string | null;
+                  }
+                | {
+                    id: string;
+                    name: string | null;
+                    document: string | null;
+                    city: string | null;
+                    state: string | null;
+                  }[]
+                | null;
+              opportunities?:
+                | { id: string; stage_id: string; updated_at: string }
+                | { id: string; stage_id: string; updated_at: string }[]
+                | null;
               contacts?:
                 | { full_name: string | null; avatar_url?: string | null }
                 | { full_name: string | null; avatar_url?: string | null }[]
+                | null;
+              distributors?:
+                | { name: string | null }
+                | { name: string | null }[]
                 | null;
             }[]
           | null,
       )
     : null;
+
+  const selectedCompany = nestOne(
+    (selectedLead?.companies ?? null) as
+      | { id: string; name: string | null; document: string | null; city: string | null; state: string | null }
+      | {
+          id: string;
+          name: string | null;
+          document: string | null;
+          city: string | null;
+          state: string | null;
+        }[]
+      | null,
+  );
+
+  const selectedDistributor = nestOne(
+    (selectedLead?.distributors ?? null) as
+      | { name: string | null }
+      | { name: string | null }[]
+      | null,
+  );
+
+  const selectedOpportunity = nestOne(
+    (selectedLead?.opportunities ?? null) as
+      | { id: string; stage_id: string; updated_at: string }
+      | { id: string; stage_id: string; updated_at: string }[]
+      | null,
+  );
+
+  const { data: stages } = await crm
+    .from("pipeline_stages")
+    .select("id, name, sort_order")
+    .order("sort_order", { ascending: true });
 
   const sidebarRows: InboxSidebarRow[] = conversationsSorted.map((c) => {
     const lead = nestOne(
@@ -134,6 +228,14 @@ export default async function InboxPage({
               | { full_name: string | null; avatar_url?: string | null }
               | { full_name: string | null; avatar_url?: string | null }[]
               | null;
+            companies?:
+              | { name: string | null }
+              | { name: string | null }[]
+              | null;
+            distributors?:
+              | { name: string | null }
+              | { name: string | null }[]
+              | null;
           }
         | {
             id: string;
@@ -142,6 +244,14 @@ export default async function InboxPage({
             contacts?:
               | { full_name: string | null; avatar_url?: string | null }
               | { full_name: string | null; avatar_url?: string | null }[]
+              | null;
+            companies?:
+              | { name: string | null }
+              | { name: string | null }[]
+              | null;
+            distributors?:
+              | { name: string | null }
+              | { name: string | null }[]
               | null;
           }[]
         | null,
@@ -157,15 +267,52 @@ export default async function InboxPage({
       typeof contact?.avatar_url === "string" ? contact.avatar_url : null,
     );
     const tail = tailById.get(c.id);
+
+    const company = nestOne(
+      (lead?.companies ?? null) as
+        | { name: string | null }
+        | { name: string | null }[]
+        | null,
+    );
+    const distributor = nestOne(
+      (lead?.distributors ?? null) as
+        | { name: string | null }
+        | { name: string | null }[]
+        | null,
+    );
+    const companyLine =
+      c.conversation_kind === "group" || !lead
+        ? null
+        : displayCompanyName({
+            companyName: company?.name,
+            distributorName: distributor?.name,
+            clientCategory: lead.client_category,
+          });
+    const identityName =
+      c.conversation_kind === "group"
+        ? "Grupo"
+        : lead
+          ? displayPersonName(contact?.full_name)
+          : "Sem lead";
+
     return {
       id: c.id,
+      kind: c.conversation_kind === "group" ? "group" : "lead",
       displayName: contactName ?? c.phone_e164,
       phone_e164: c.phone_e164,
       avatarUrl,
       preview: previewLine(tail?.last_body_preview),
       lastAt: tail?.last_sent_at ?? c.updated_at,
-      leadLine: lead ? `Lead · ${lead.status}` : "Sem lead",
+      leadLine:
+        c.conversation_kind === "group"
+          ? "Conversa em grupo"
+          : lead
+            ? `Status: ${lead.status}`
+            : "Sem lead",
       awaiting: tail?.last_direction === "in",
+      identityName,
+      companyName: companyLine,
+      clientCategory: lead?.client_category ?? null,
     };
   });
 
@@ -184,7 +331,11 @@ export default async function InboxPage({
       ) : null}
       <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,40vh)_minmax(0,1fr)] gap-2 overflow-hidden lg:grid-cols-[minmax(260px,320px)_minmax(0,1fr)] lg:grid-rows-1">
         <div className="h-full min-h-0 overflow-hidden">
-          <InboxSidebar conversations={sidebarRows} selectedId={selectedId} />
+          <InboxSidebar
+            conversations={sidebarRows}
+            selectedId={selectedId}
+            activeTab={activeTab}
+          />
         </div>
 
         <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border-y border-r border-[var(--border)] border-l-[3px] border-l-[var(--vp-gold-classic)] bg-[var(--vp-paper-pure)] shadow-[var(--sh-sm)]">
@@ -200,36 +351,58 @@ export default async function InboxPage({
                         | { full_name: string | null; avatar_url?: string | null }[]
                         | null,
                     );
-                    const selectedContactName = selectedContact?.full_name?.trim() || null;
+                    const headerName =
+                      selected.conversation_kind === "group"
+                        ? "Grupo"
+                        : selectedLead
+                          ? displayPersonName(selectedContact?.full_name)
+                          : "Sem lead";
+                    const headerCompany =
+                      selected.conversation_kind === "group" || !selectedLead
+                        ? null
+                        : displayCompanyName({
+                            companyName: selectedCompany?.name,
+                            distributorName: selectedDistributor?.name,
+                            clientCategory: selectedLead.client_category,
+                          });
                     const avatarUrl = validAvatarUrl(
                       typeof selectedContact?.avatar_url === "string"
                         ? selectedContact.avatar_url
                         : null,
                     );
-                    const titleName = selectedContactName ?? selected.phone_e164;
+                    const avatarLabel = headerName;
                     return (
-                      <div className="flex items-center gap-2">
+                      <div className="flex min-w-0 items-start gap-2">
                         {avatarUrl ? (
                           // eslint-disable-next-line @next/next/no-img-element
                           <img
                             src={avatarUrl}
-                            alt={`Foto de ${titleName}`}
-                            className="h-9 w-9 shrink-0 rounded-full object-cover"
+                            alt={`Foto de ${avatarLabel}`}
+                            className="mt-0.5 h-9 w-9 shrink-0 rounded-full object-cover"
                           />
                         ) : (
                           <div
-                            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[rgba(35,0,4,0.14)] text-xs font-semibold text-[var(--vp-wine)]"
-                            aria-label={`Avatar de ${titleName}`}
-                            title={titleName}
+                            className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[rgba(35,0,4,0.14)] text-xs font-semibold text-[var(--vp-wine)]"
+                            aria-label={`Avatar de ${avatarLabel}`}
+                            title={avatarLabel}
                           >
-                            {initials(titleName)}
+                            {initials(avatarLabel)}
                           </div>
                         )}
-                        <h2 className="font-medium text-[var(--foreground)]">
-                          {selectedContactName
-                            ? `${selectedContactName} · ${selected.phone_e164}`
-                            : selected.phone_e164}
-                        </h2>
+                        <div className="min-w-0 flex-1">
+                          <LeadIdentity
+                            name={headerName}
+                            companyName={headerCompany}
+                            category={
+                              selected.conversation_kind === "lead"
+                                ? selectedLead?.client_category
+                                : null
+                            }
+                            phoneTitle={selected.phone_e164}
+                            size="md"
+                            layout="stacked"
+                          />
+                        </div>
                       </div>
                     );
                   })()}
@@ -243,12 +416,22 @@ export default async function InboxPage({
                     </p>
                   ) : null}
                   </div>
-                  <ConversationClassificationSelect
-                    conversationId={selected.id}
-                    classification={(selected as { classification?: string | null }).classification ?? null}
-                    leadId={selectedLead?.id ?? null}
-                    clientCategory={selectedLead?.client_category ?? null}
-                  />
+                  {selected.conversation_kind === "lead" ? (
+                    <LeadQualificationModal
+                      conversationId={selected.id}
+                      initialCategory={selectedLead?.client_category ?? null}
+                      initialStageId={selectedOpportunity?.stage_id ?? null}
+                      initialState={selectedCompany?.state ?? null}
+                      initialCity={selectedCompany?.city ?? null}
+                      initialZipCode={selectedLead?.zip_code ?? null}
+                      initialWeeklyBreadConsumption={selectedLead?.weekly_bread_consumption ?? null}
+                      initialCompanyName={selectedCompany?.name ?? null}
+                      initialCnpj={selectedCompany?.document ?? null}
+                      initialBreadType={selectedLead?.bread_type ?? null}
+                      initialBreadWeightGrams={selectedLead?.bread_weight_grams ?? null}
+                      stages={(stages ?? []).map((stage) => ({ id: stage.id, name: stage.name }))}
+                    />
+                  ) : null}
                 </div>
               </div>
 

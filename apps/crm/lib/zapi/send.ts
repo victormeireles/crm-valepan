@@ -3,6 +3,10 @@
  */
 export function formatPhoneForZapiSend(phone: string): string {
   const t = phone.trim();
+  if (t.toLowerCase().includes("@g.us")) {
+    const i = t.toLowerCase().indexOf("@g.us");
+    return t.slice(0, i + 5).replace(/\s/g, "");
+  }
   if (t.startsWith("lid:")) {
     const digits = t.slice(4).replace(/\D/g, "");
     return digits ? `${digits}@lid` : t;

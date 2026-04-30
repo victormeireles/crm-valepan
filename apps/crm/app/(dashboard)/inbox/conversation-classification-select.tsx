@@ -18,12 +18,10 @@ function normalizeValue(v: string | null | undefined): string {
 export function ConversationClassificationSelect({
   conversationId,
   classification,
-  leadId,
   clientCategory,
 }: {
   conversationId: string;
   classification: string | null;
-  leadId: string | null;
   clientCategory: string | null;
 }) {
   const router = useRouter();
@@ -105,6 +103,8 @@ export function ConversationClassificationSelect({
               setClientCategoryValue(normalizeClientCategory(clientCategory));
               return;
             }
+            // Garante que o RSC reflita os dados persistidos antes da navegação (evita lista “fantasma”).
+            await router.refresh();
             if (next.length > 0) {
               router.push(`/leads?client_category=${encodeURIComponent(next)}`);
               return;

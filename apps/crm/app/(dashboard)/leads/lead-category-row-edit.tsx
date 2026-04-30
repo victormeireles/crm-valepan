@@ -1,5 +1,6 @@
 "use client";
 
+import { CategoryBadge } from "@/components/lead-identity";
 import { removeLeadFromCategoryGrid, updateLeadCategoryContactInfo } from "@/app/actions/leads";
 import { NETWORK_TYPE_OPTIONS } from "@/lib/network-types";
 import { SEND_VIA_OPTIONS } from "@/lib/send-via-options";
@@ -239,14 +240,17 @@ export function LeadCategoryRowEdit(props: {
         />
       </td>
       <td className="px-2 py-1.5">
-        <input
-          className={fieldClass}
-          value={contactName}
-          onChange={(e) => setContactName(e.target.value)}
-          onKeyDown={onEnterSave}
-          disabled={fieldsDisabled}
-          placeholder="Nome do contato"
-        />
+        <div className="flex items-center gap-2">
+          <CategoryBadge category={props.clientCategory} size="sm" />
+          <input
+            className={`${fieldClass} min-w-0 flex-1`}
+            value={contactName}
+            onChange={(e) => setContactName(e.target.value)}
+            onKeyDown={onEnterSave}
+            disabled={fieldsDisabled}
+            placeholder="Nome do contato"
+          />
+        </div>
       </td>
       <td className="px-2 py-1.5">
         <input

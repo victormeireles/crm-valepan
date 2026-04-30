@@ -1,4 +1,6 @@
+import { LeadIdentity } from "@/components/lead-identity";
 import { formatRelativeShort } from "@/lib/format-relative";
+import { displayCompanyName, displayPersonName } from "@/lib/lead-identity";
 import { nestOne } from "@/lib/supabase/nested";
 import { createServerSupabaseClient, crmTables } from "@/lib/supabase/server";
 import Link from "next/link";
@@ -67,7 +69,9 @@ export default async function DashboardPage() {
     crm.rpc("dashboard_kpis_extra"),
     crm
       .from("leads")
-      .select("id, phone_e164, created_at, contacts(full_name)")
+      .select(
+        "id, phone_e164, created_at, client_category, contacts(full_name), companies(name), distributors(name)",
+      )
       .order("created_at", { ascending: false })
       .limit(5),
   ]);
@@ -188,20 +192,39 @@ export default async function DashboardPage() {
                   | { full_name: string | null }[]
                   | null,
               );
-              const name = contact?.full_name?.trim() || null;
+              const company = nestOne(
+                row.companies as
+                  | { name: string | null }
+                  | { name: string | null }[]
+                  | null,
+              );
+              const distributor = nestOne(
+                row.distributors as
+                  | { name: string | null }
+                  | { name: string | null }[]
+                  | null,
+              );
+              const personName = displayPersonName(contact?.full_name);
+              const companyLine = displayCompanyName({
+                companyName: company?.name,
+                distributorName: distributor?.name,
+                clientCategory: row.client_category,
+              });
               return (
                 <li key={row.id}>
                   <Link
                     href={`/leads/${row.id}`}
                     className="flex flex-wrap items-baseline justify-between gap-2 px-4 py-3 transition-colors hover:bg-[rgba(35,0,4,0.04)]"
                   >
-                    <div>
-                      <span className="font-medium text-[var(--foreground)]">
-                        {name ?? row.phone_e164}
-                      </span>
-                      {name ? (
-                        <span className="ml-2 text-sm text-[var(--muted)]">{row.phone_e164}</span>
-                      ) : null}
+                    <div className="min-w-0 flex-1">
+                      <LeadIdentity
+                        name={personName}
+                        companyName={companyLine}
+                        category={row.client_category}
+                        phoneTitle={row.phone_e164}
+                        size="sm"
+                        layout="stacked"
+                      />
                     </div>
                     <time
                       className="text-xs text-[var(--muted)]"

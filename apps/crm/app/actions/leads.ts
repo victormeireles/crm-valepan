@@ -309,9 +309,13 @@ export async function updateLeadClientCategory(input: { leadId: string; category
 
   const crm = crmTables(supabase);
   const raw = input.category?.trim() ?? "";
-  const category = raw.length === 0 ? null : raw;
-  if (category && !ALLOWED_CLIENT_CATEGORIES.includes(category as (typeof ALLOWED_CLIENT_CATEGORIES)[number])) {
-    return { ok: false as const, error: "Categoria inválida." };
+  let category: string | null = null;
+  if (raw.length > 0) {
+    const lowered = raw.toLowerCase();
+    if (!ALLOWED_CLIENT_CATEGORIES.includes(lowered as (typeof ALLOWED_CLIENT_CATEGORIES)[number])) {
+      return { ok: false as const, error: "Categoria inválida." };
+    }
+    category = lowered;
   }
 
   const { data: updated, error } = await crm
@@ -326,6 +330,17 @@ export async function updateLeadClientCategory(input: { leadId: string; category
 
   if (error) return { ok: false as const, error: error.message };
   if (!updated) return { ok: false as const, error: "Não foi possível salvar a categoria." };
+
+  if (category === "distribuidor") {
+    const portfolioRes = await ensureDistribuidorLeadLinkedToDistributorsTable(
+      crm,
+      input.leadId,
+      null,
+    );
+    if (!portfolioRes.ok) {
+      return { ok: false as const, error: portfolioRes.error };
+    }
+  }
 
   revalidatePath(`/leads/${input.leadId}`);
   revalidatePath("/leads");
@@ -428,12 +443,81 @@ export async function syncLeadToDistributorCategory(input: { leadId: string }) {
   return { ok: true as const };
 }
 
+/** Nome máximo em `crm.distributors.name` (alinhado a `updateLeadCategoryContactInfo`). */
+const DISTRIBUTOR_NAME_MAX_LEN = 80;
+
+const PLACEHOLDER_DISTRIBUTOR_PREFIX = "PENDENTE CARTEIRA · ";
+
+/**
+ * Garante um registro em `crm.distributors` e `leads.distributor_id` para leads classificados
+ * como distribuidor pelo inbox, mesmo sem rede/CNPJ — o usuário completa depois na carteira.
+ */
+async function ensureDistribuidorLeadLinkedToDistributorsTable(
+  crm: ReturnType<typeof crmTables>,
+  leadId: string,
+  phoneE164Fallback: string | null | undefined,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const { data: lead, error: leadErr } = await crm
+    .from("leads")
+    .select("id, distributor_id, phone_e164")
+    .eq("id", leadId)
+    .maybeSingle();
+  if (leadErr) return { ok: false, error: leadErr.message };
+  if (!lead?.id) return { ok: false, error: "Lead não encontrado." };
+  if (lead.distributor_id) return { ok: true };
+
+  const phone =
+    (phoneE164Fallback ?? "").trim() || (lead.phone_e164 ?? "").trim() || "sem telefone";
+  let name = `${PLACEHOLDER_DISTRIBUTOR_PREFIX}${phone}`;
+  if (name.length > DISTRIBUTOR_NAME_MAX_LEN) {
+    name = name.slice(0, DISTRIBUTOR_NAME_MAX_LEN);
+  }
+
+  const { data: existing, error: exErr } = await crm
+    .from("distributors")
+    .select("id")
+    .eq("name", name)
+    .maybeSingle();
+  if (exErr) return { ok: false, error: exErr.message };
+
+  let distributorId = existing?.id ?? null;
+  if (!distributorId) {
+    const { data: inserted, error: insErr } = await crm
+      .from("distributors")
+      .insert({
+        name,
+        active: true,
+        notes:
+          "Cadastro iniciado pela classificação no inbox (dados incompletos). Edite o nome ou vincule à rede oficial na Carteira de Distribuidores.",
+      })
+      .select("id")
+      .single();
+    if (insErr || !inserted) {
+      return { ok: false, error: insErr?.message ?? "Erro ao criar distribuidor na carteira." };
+    }
+    distributorId = inserted.id;
+  }
+
+  const { error: updErr } = await crm
+    .from("leads")
+    .update({
+      distributor_id: distributorId,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", leadId);
+  if (updErr) return { ok: false, error: updErr.message };
+
+  revalidatePath("/distributors");
+  return { ok: true };
+}
+
 export async function updateConversationLeadClientCategory(input: {
   conversationId: string;
   category: string | null;
 }) {
   const conversationId = input.conversationId.trim();
   if (!conversationId) return { ok: false as const, error: "Conversa inválida." };
+  const normalizedCategory = (input.category ?? "").trim().toLowerCase() || null;
 
   const supabase = await createServerSupabaseClient();
   const {
@@ -444,33 +528,269 @@ export async function updateConversationLeadClientCategory(input: {
   const crm = crmTables(supabase);
   const { data: conv, error: convErr } = await crm
     .from("conversations")
-    .select("id, lead_id")
+    .select("id, lead_id, phone_e164")
     .eq("id", conversationId)
     .maybeSingle();
   if (convErr) return { ok: false as const, error: convErr.message };
-  if (!conv?.lead_id) return { ok: false as const, error: "Conversa sem lead vinculado." };
+  if (!conv?.id) return { ok: false as const, error: "Conversa não encontrada." };
 
-  const categoryRes = await updateLeadClientCategory({
-    leadId: conv.lead_id,
-    category: input.category,
-  });
-  if (!categoryRes.ok) {
-    return { ok: false as const, error: categoryRes.error ?? "Erro ao salvar categoria." };
-  }
+  /** Se criamos/vinculamos lead no bootstrap, a categoria já foi persistida lá. */
+  let categoryPersistedViaBootstrap = false;
 
-  if ((input.category ?? "").trim().toLowerCase() === "distribuidor") {
-    const syncRes = await syncLeadToDistributorCategory({ leadId: conv.lead_id });
-    if (!syncRes.ok) {
+  let leadId = conv.lead_id;
+  if (!leadId && normalizedCategory) {
+    const bootstrapRes = await updateLeadCategoryContactInfo({
+      leadId: null,
+      clientCategory: normalizedCategory,
+      distributorName: null,
+      leadStatus: null,
+      networkType: null,
+      contactName: null,
+      leadPhone: conv.phone_e164,
+      city: null,
+      companyDocument: null,
+    });
+    if (!bootstrapRes.ok || !bootstrapRes.leadId) {
       return {
         ok: false as const,
-        error: syncRes.error ?? "Erro ao sincronizar distribuidor.",
+        error: bootstrapRes.error ?? "Não foi possível criar lead para a conversa.",
       };
+    }
+    leadId = bootstrapRes.leadId;
+
+    const { error: bindErr } = await crm
+      .from("conversations")
+      .update({
+        lead_id: leadId,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", conversationId);
+    if (bindErr) return { ok: false as const, error: bindErr.message };
+    categoryPersistedViaBootstrap = true;
+  }
+
+  if (!leadId) return { ok: false as const, error: "Conversa sem lead vinculado." };
+
+  if (!categoryPersistedViaBootstrap) {
+    const categoryRes = await updateLeadClientCategory({
+      leadId,
+      category: normalizedCategory,
+    });
+    if (!categoryRes.ok) {
+      return { ok: false as const, error: categoryRes.error ?? "Erro ao salvar categoria." };
+    }
+  }
+
+  if (normalizedCategory === "distribuidor") {
+    const syncRes = await syncLeadToDistributorCategory({ leadId });
+    if (!syncRes.ok) {
+      console.warn("[leads] syncLeadToDistributorCategory falhou após salvar categoria:", syncRes.error);
+    }
+    const portfolioRes = await ensureDistribuidorLeadLinkedToDistributorsTable(
+      crm,
+      leadId,
+      conv.phone_e164,
+    );
+    if (!portfolioRes.ok) {
+      return { ok: false as const, error: portfolioRes.error };
     }
   }
 
   revalidatePath("/inbox");
   revalidatePath("/leads", "page");
   revalidatePath("/leads", "layout");
+  return { ok: true as const };
+}
+
+function parseNullableNonNegativeInt(value: string | null | undefined) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return { ok: true as const, value: null as number | null };
+  if (!/^\d+$/.test(raw)) return { ok: false as const, error: "Use apenas números inteiros positivos." };
+  const num = Number.parseInt(raw, 10);
+  if (!Number.isFinite(num) || num < 0) {
+    return { ok: false as const, error: "Valor numérico inválido." };
+  }
+  return { ok: true as const, value: num };
+}
+
+export async function updateConversationLeadQualification(input: {
+  conversationId: string;
+  category: string | null;
+  stageId: string | null;
+  state: string | null;
+  city: string | null;
+  zipCode: string | null;
+  weeklyBreadConsumption: string | null;
+  companyName: string | null;
+  cnpj: string | null;
+  breadType: string | null;
+  breadWeightGrams: string | null;
+}) {
+  const conversationId = input.conversationId.trim();
+  if (!conversationId) return { ok: false as const, error: "Conversa inválida." };
+
+  const normalizedCategory = (input.category ?? "").trim().toLowerCase() || null;
+  if (
+    normalizedCategory &&
+    !ALLOWED_CLIENT_CATEGORIES.includes(normalizedCategory as (typeof ALLOWED_CLIENT_CATEGORIES)[number])
+  ) {
+    return { ok: false as const, error: "Categoria inválida." };
+  }
+
+  const weeklyParsed = parseNullableNonNegativeInt(input.weeklyBreadConsumption);
+  if (!weeklyParsed.ok) return { ok: false as const, error: "Quantidade semanal inválida." };
+
+  const gramsParsed = parseNullableNonNegativeInt(input.breadWeightGrams);
+  if (!gramsParsed.ok) return { ok: false as const, error: "Gramatura inválida." };
+
+  const state = String(input.state ?? "").trim().toUpperCase() || null;
+  const city = String(input.city ?? "").trim() || null;
+  const zipCode = String(input.zipCode ?? "").trim() || null;
+  const companyName = String(input.companyName ?? "").trim() || null;
+  const cnpj = String(input.cnpj ?? "").trim() || null;
+  const breadType = String(input.breadType ?? "").trim() || null;
+  const stageId = String(input.stageId ?? "").trim() || null;
+
+  const supabase = await createServerSupabaseClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false as const, error: "Não autenticado" };
+
+  const crm = crmTables(supabase);
+  const { data: conv, error: convErr } = await crm
+    .from("conversations")
+    .select("id, lead_id, phone_e164")
+    .eq("id", conversationId)
+    .maybeSingle();
+  if (convErr) return { ok: false as const, error: convErr.message };
+  if (!conv?.id) return { ok: false as const, error: "Conversa não encontrada." };
+
+  let leadId = conv.lead_id;
+  if (!leadId) {
+    const bootstrapRes = await updateLeadCategoryContactInfo({
+      leadId: null,
+      clientCategory: normalizedCategory ?? "outros",
+      distributorName: null,
+      leadStatus: null,
+      networkType: null,
+      contactName: null,
+      leadPhone: conv.phone_e164,
+      city: null,
+      companyDocument: null,
+    });
+    if (!bootstrapRes.ok || !bootstrapRes.leadId) {
+      return {
+        ok: false as const,
+        error: bootstrapRes.error ?? "Não foi possível criar lead para a conversa.",
+      };
+    }
+    leadId = bootstrapRes.leadId;
+    const { error: bindErr } = await crm
+      .from("conversations")
+      .update({
+        lead_id: leadId,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", conversationId);
+    if (bindErr) return { ok: false as const, error: bindErr.message };
+  }
+
+  const { data: leadRow, error: leadErr } = await crm
+    .from("leads")
+    .select("id, company_id")
+    .eq("id", leadId)
+    .maybeSingle();
+  if (leadErr) return { ok: false as const, error: leadErr.message };
+  if (!leadRow?.id) return { ok: false as const, error: "Lead não encontrado." };
+
+  let nextCompanyId = leadRow.company_id;
+  const hasCompanyData = !!(companyName || city || state || cnpj);
+  if (nextCompanyId) {
+    const { error: companyErr } = await crm
+      .from("companies")
+      .update({
+        name: companyName,
+        city,
+        state,
+        document: cnpj,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", nextCompanyId);
+    if (companyErr) return { ok: false as const, error: companyErr.message };
+  } else if (hasCompanyData) {
+    const { data: insertedCompany, error: insertedCompanyErr } = await crm
+      .from("companies")
+      .insert({
+        name: companyName ?? `Empresa ${conv.phone_e164}`,
+        city,
+        state,
+        document: cnpj,
+      })
+      .select("id")
+      .single();
+    if (insertedCompanyErr || !insertedCompany) {
+      return { ok: false as const, error: insertedCompanyErr?.message ?? "Erro ao criar empresa." };
+    }
+    nextCompanyId = insertedCompany.id;
+  }
+
+  const { error: leadUpdateErr } = await crm
+    .from("leads")
+    .update({
+      client_category: normalizedCategory,
+      company_id: nextCompanyId,
+      zip_code: zipCode,
+      weekly_bread_consumption: weeklyParsed.value,
+      bread_type: breadType,
+      bread_weight_grams: gramsParsed.value,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", leadId);
+  if (leadUpdateErr) return { ok: false as const, error: leadUpdateErr.message };
+
+  if (stageId) {
+    const { data: stage, error: stageErr } = await crm
+      .from("pipeline_stages")
+      .select("id")
+      .eq("id", stageId)
+      .maybeSingle();
+    if (stageErr) return { ok: false as const, error: stageErr.message };
+    if (!stage?.id) return { ok: false as const, error: "Etapa do funil inválida." };
+
+    const { data: opportunity } = await crm
+      .from("opportunities")
+      .select("id")
+      .eq("lead_id", leadId)
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (opportunity?.id) {
+      const { error: oppUpdateErr } = await crm
+        .from("opportunities")
+        .update({
+          stage_id: stage.id,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", opportunity.id);
+      if (oppUpdateErr) return { ok: false as const, error: oppUpdateErr.message };
+    } else {
+      const { error: oppInsertErr } = await crm.from("opportunities").insert({
+        lead_id: leadId,
+        company_id: nextCompanyId,
+        owner_id: user.id,
+        stage_id: stage.id,
+        title: `Oportunidade ${conv.phone_e164}`,
+      });
+      if (oppInsertErr) return { ok: false as const, error: oppInsertErr.message };
+    }
+  }
+
+  revalidatePath("/inbox");
+  revalidatePath("/leads", "page");
+  revalidatePath("/leads", "layout");
+  revalidatePath("/pipeline");
   return { ok: true as const };
 }
 

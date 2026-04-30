@@ -1,5 +1,6 @@
 "use client";
 
+import { LeadIdentity } from "@/components/lead-identity";
 import { updateConversationContactName } from "@/app/actions/inbox";
 import { formatRelativeShort } from "@/lib/format-relative";
 import Link from "next/link";
@@ -8,6 +9,8 @@ import { useMemo, useState } from "react";
 
 export type InboxSidebarRow = {
   id: string;
+  kind: "lead" | "group";
+  /** Para prompt «Editar nome» e busca */
   displayName: string;
   phone_e164: string;
   avatarUrl?: string | null;
@@ -15,6 +18,9 @@ export type InboxSidebarRow = {
   lastAt: string;
   leadLine: string;
   awaiting: boolean;
+  identityName: string;
+  companyName: string | null;
+  clientCategory: string | null;
 };
 
 function norm(s: string) {
@@ -45,9 +51,11 @@ function validAvatarUrl(v: string | null | undefined): string | null {
 export function InboxSidebar({
   conversations,
   selectedId,
+  activeTab,
 }: {
   conversations: InboxSidebarRow[];
   selectedId: string | null;
+  activeTab: "leads" | "groups";
 }) {
   const router = useRouter();
   const [q, setQ] = useState("");
@@ -60,7 +68,14 @@ export function InboxSidebar({
     if (!needle) return conversations;
     return conversations.filter((c) => {
       const hay = norm(
-        [c.displayName, c.phone_e164, c.preview, c.leadLine].join(" "),
+        [
+          c.displayName,
+          c.identityName,
+          c.companyName ?? "",
+          c.phone_e164,
+          c.preview,
+          c.leadLine,
+        ].join(" "),
       );
       return hay.includes(needle);
     });
@@ -69,6 +84,28 @@ export function InboxSidebar({
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-xl border-y border-r border-[var(--border)] border-l-[3px] border-l-[var(--vp-gold-classic)] bg-[var(--vp-paper-pure)] shadow-[var(--sh-sm)]">
       <div className="shrink-0 border-b border-[var(--border)] bg-[var(--vp-paper)] p-2">
+        <div className="mb-2 grid grid-cols-2 gap-1 rounded-md bg-[rgba(35,0,4,0.06)] p-1">
+          <Link
+            href="/inbox?tab=leads"
+            className={`rounded px-2 py-1 text-center text-xs font-medium ${
+              activeTab === "leads"
+                ? "bg-[var(--vp-paper-pure)] text-[var(--foreground)] shadow-[var(--sh-sm)]"
+                : "text-[var(--muted)] hover:text-[var(--foreground)]"
+            }`}
+          >
+            Leads
+          </Link>
+          <Link
+            href="/inbox?tab=groups"
+            className={`rounded px-2 py-1 text-center text-xs font-medium ${
+              activeTab === "groups"
+                ? "bg-[var(--vp-paper-pure)] text-[var(--foreground)] shadow-[var(--sh-sm)]"
+                : "text-[var(--muted)] hover:text-[var(--foreground)]"
+            }`}
+          >
+            Grupos
+          </Link>
+        </div>
         <label htmlFor="inbox-search" className="sr-only">
           Buscar conversas
         </label>
@@ -93,26 +130,35 @@ export function InboxSidebar({
                   : "border-l-[3px] border-l-transparent"
               }`}
           >
-            <Link href={`/inbox?cid=${c.id}`} className="block px-4 py-3 pr-10">
+            <Link href={`/inbox?tab=${activeTab}&cid=${c.id}`} className="block px-4 py-3 pr-10">
               <div className="flex items-start justify-between gap-2">
                 <div className="flex min-w-0 items-start gap-2">
                   {validAvatarUrl(c.avatarUrl) ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
                       src={validAvatarUrl(c.avatarUrl) as string}
-                      alt={`Foto de ${c.displayName}`}
+                      alt={`Foto de ${c.identityName}`}
                       className="mt-0.5 h-9 w-9 shrink-0 rounded-full object-cover"
                     />
                   ) : (
                     <div
                       className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[rgba(35,0,4,0.14)] text-xs font-semibold text-[var(--vp-wine)]"
-                      aria-label={`Avatar de ${c.displayName}`}
-                      title={c.displayName}
+                      aria-label={`Avatar de ${c.identityName}`}
+                      title={c.identityName}
                     >
-                      {initials(c.displayName)}
+                      {initials(c.identityName)}
                     </div>
                   )}
-                  <span className="truncate font-medium text-[var(--foreground)]">{c.displayName}</span>
+                  <div className="min-w-0 flex-1">
+                    <LeadIdentity
+                      name={c.identityName}
+                      companyName={c.companyName}
+                      category={c.clientCategory}
+                      phoneTitle={c.phone_e164}
+                      size="sm"
+                      layout="stacked"
+                    />
+                  </div>
                 </div>
                 <span
                   className="shrink-0 text-[10px] text-[var(--muted)]"
@@ -150,41 +196,47 @@ export function InboxSidebar({
               </button>
               {openMenuId === c.id ? (
                 <div className="absolute right-0 z-10 mt-1 min-w-[9rem] rounded-md border border-[var(--border)] bg-[var(--vp-paper-pure)] p-1 shadow-[var(--sh-md)]">
-                  <button
-                    type="button"
-                    disabled={savingId === c.id}
-                    onClick={async (e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      const next = window.prompt("Editar nome do contato", c.displayName);
-                      if (next == null) {
+                  {c.kind === "lead" ? (
+                    <button
+                      type="button"
+                      disabled={savingId === c.id}
+                      onClick={async (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const next = window.prompt("Editar nome do contato", c.displayName);
+                        if (next == null) {
+                          setOpenMenuId(null);
+                          return;
+                        }
+                        const name = next.trim();
+                        if (!name) {
+                          setErrorById((prev) => ({ ...prev, [c.id]: "Nome não pode ficar vazio." }));
+                          return;
+                        }
+                        setSavingId(c.id);
+                        setErrorById((prev) => ({ ...prev, [c.id]: null }));
+                        const res = await updateConversationContactName({
+                          conversationId: c.id,
+                          contactName: name,
+                        });
+                        setSavingId(null);
+                        if (!res.ok) {
+                          setErrorById((prev) => ({ ...prev, [c.id]: res.error ?? "Erro ao salvar nome." }));
+                          return;
+                        }
                         setOpenMenuId(null);
-                        return;
-                      }
-                      const name = next.trim();
-                      if (!name) {
-                        setErrorById((prev) => ({ ...prev, [c.id]: "Nome não pode ficar vazio." }));
-                        return;
-                      }
-                      setSavingId(c.id);
-                      setErrorById((prev) => ({ ...prev, [c.id]: null }));
-                      const res = await updateConversationContactName({
-                        conversationId: c.id,
-                        contactName: name,
-                      });
-                      setSavingId(null);
-                      if (!res.ok) {
-                        setErrorById((prev) => ({ ...prev, [c.id]: res.error ?? "Erro ao salvar nome." }));
-                        return;
-                      }
-                      setOpenMenuId(null);
-                      router.push(`/inbox?cid=${c.id}`);
-                      router.refresh();
-                    }}
-                    className="w-full rounded px-2 py-1.5 text-left text-xs text-[var(--foreground)] hover:bg-[rgba(35,0,4,0.07)] disabled:opacity-50"
-                  >
-                    {savingId === c.id ? "Salvando..." : "Editar nome"}
-                  </button>
+                        router.push(`/inbox?tab=${activeTab}&cid=${c.id}`);
+                        router.refresh();
+                      }}
+                      className="w-full rounded px-2 py-1.5 text-left text-xs text-[var(--foreground)] hover:bg-[rgba(35,0,4,0.07)] disabled:opacity-50"
+                    >
+                      {savingId === c.id ? "Salvando..." : "Editar nome"}
+                    </button>
+                  ) : (
+                    <span className="block px-2 py-1.5 text-xs text-[var(--muted)]">
+                      Sem ações disponíveis
+                    </span>
+                  )}
                 </div>
               ) : null}
             </div>

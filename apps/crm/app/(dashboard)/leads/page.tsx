@@ -1,3 +1,5 @@
+import { LeadIdentity } from "@/components/lead-identity";
+import { displayCompanyName, displayPersonName } from "@/lib/lead-identity";
 import { nestOne } from "@/lib/supabase/nested";
 import { isClientCategoryValue } from "@/lib/client-categories";
 import { SEND_VIA_OPTIONS } from "@/lib/send-via-options";
@@ -9,19 +11,6 @@ import { LeadCategoryRowEdit } from "./lead-category-row-edit";
 /** Evita cache da lista após salvar (router.refresh + dados atualizados do Supabase). */
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
-
-function leadRowLabel(l: {
-  phone_e164: string;
-  contacts:
-    | { full_name: string | null }
-    | { full_name: string | null }[]
-    | null
-    | undefined;
-}) {
-  const c = nestOne(l.contacts);
-  const name = (c?.full_name ?? "").trim();
-  return name.length > 0 ? name : l.phone_e164;
-}
 
 function leadContactName(l: {
   contacts:
@@ -49,7 +38,7 @@ export default async function LeadsPage({
   let query = crm
     .from("leads")
     .select(
-      "id, phone_e164, status, source, created_at, owner_id, client_category, network_type, distributor_id, company_id, contacts(id,full_name), companies(id,city,document), distributors(id,name)",
+      "id, phone_e164, status, source, created_at, owner_id, client_category, network_type, distributor_id, company_id, contacts(id,full_name), companies(id,name,city,document), distributors(id,name)",
     )
     .order("updated_at", { ascending: false });
 
@@ -192,8 +181,22 @@ export default async function LeadsPage({
                     className="border-b border-[var(--border)] last:border-0 transition-colors hover:bg-[var(--vp-surface-low)]"
                   >
                     <td className="px-3 py-2">
-                      <Link className="text-[var(--accent)] hover:underline" href={`/leads/${l.id}`}>
-                        {leadRowLabel(l)}
+                      <Link
+                        className="block min-w-0 text-[var(--accent)] hover:underline"
+                        href={`/leads/${l.id}`}
+                      >
+                        <LeadIdentity
+                          name={displayPersonName(nestOne(l.contacts)?.full_name)}
+                          companyName={displayCompanyName({
+                            companyName: nestOne(l.companies)?.name,
+                            distributorName: nestOne(l.distributors)?.name,
+                            clientCategory: l.client_category,
+                          })}
+                          category={l.client_category}
+                          phoneTitle={l.phone_e164}
+                          size="sm"
+                          layout="stacked"
+                        />
                       </Link>
                     </td>
                     <td className="px-3 py-2">{l.status}</td>

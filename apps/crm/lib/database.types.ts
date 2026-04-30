@@ -49,6 +49,10 @@ export interface Database {
           distributor_id: string | null;
           client_category: string | null;
           network_type: string | null;
+          zip_code: string | null;
+          weekly_bread_consumption: number | null;
+          bread_type: string | null;
+          bread_weight_grams: number | null;
           status: string;
           created_at: string;
           updated_at: string;
@@ -63,6 +67,10 @@ export interface Database {
           distributor_id?: string | null;
           client_category?: string | null;
           network_type?: string | null;
+          zip_code?: string | null;
+          weekly_bread_consumption?: number | null;
+          bread_type?: string | null;
+          bread_weight_grams?: number | null;
           status?: string;
         };
         Update: Partial<Database["crm"]["Tables"]["leads"]["Insert"]>;
@@ -106,20 +114,22 @@ export interface Database {
       conversations: {
         Row: {
           id: string;
-          lead_id: string;
+          lead_id: string | null;
           channel: string;
           external_id: string | null;
           phone_e164: string;
+          conversation_kind: "lead" | "group";
           classification: string | null;
           created_at: string;
           updated_at: string;
         };
         Insert: {
           id?: string;
-          lead_id: string;
+          lead_id?: string | null;
           channel?: string;
           external_id?: string | null;
           phone_e164: string;
+          conversation_kind?: "lead" | "group";
           classification?: string | null;
         };
         Update: Partial<Database["crm"]["Tables"]["conversations"]["Insert"]>;
@@ -357,7 +367,7 @@ export interface Database {
       v_conversation_last_message: {
         Row: {
           conversation_id: string;
-          lead_id: string;
+          lead_id: string | null;
           last_direction: string;
           last_sent_at: string;
           last_body_preview: string | null;

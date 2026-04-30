@@ -1,3 +1,5 @@
+import { LeadIdentity } from "@/components/lead-identity";
+import { displayCompanyName, displayPersonName } from "@/lib/lead-identity";
 import { nestOne } from "@/lib/supabase/nested";
 import { createServerSupabaseClient, crmTables } from "@/lib/supabase/server";
 
@@ -10,7 +12,7 @@ export default async function PipelinePage() {
   const { data: rows } = await crm
     .from("opportunities")
     .select(
-      "id, title, lead_id, stage_id, lost_reason, pipeline_stages(name, sort_order), leads(phone_e164)",
+      "id, title, lead_id, stage_id, lost_reason, pipeline_stages(name, sort_order), leads(phone_e164, client_category, contacts(full_name), companies(name), distributors(name))",
     )
     .order("updated_at", { ascending: false });
 
@@ -64,13 +66,60 @@ export default async function PipelinePage() {
             <h2 className="text-sm font-medium text-[var(--muted)]">{stage}</h2>
             <ul className="mt-2 space-y-2 text-sm">
               {(items ?? []).map((o) => {
-                const lead = nestOne(
-                  o.leads as { phone_e164: string } | { phone_e164: string }[] | null,
+                type LeadN = {
+                  phone_e164: string;
+                  client_category?: string | null;
+                  contacts?:
+                    | { full_name: string | null }
+                    | { full_name: string | null }[]
+                    | null;
+                  companies?: { name: string | null } | { name: string | null }[] | null;
+                  distributors?: { name: string | null } | { name: string | null }[] | null;
+                };
+                const lead = nestOne(o.leads as LeadN | LeadN[] | null);
+                const contact = nestOne(
+                  (lead?.contacts ?? null) as
+                    | { full_name: string | null }
+                    | { full_name: string | null }[]
+                    | null,
                 );
+                const company = nestOne(
+                  (lead?.companies ?? null) as
+                    | { name: string | null }
+                    | { name: string | null }[]
+                    | null,
+                );
+                const distributor = nestOne(
+                  (lead?.distributors ?? null) as
+                    | { name: string | null }
+                    | { name: string | null }[]
+                    | null,
+                );
+                const titleFallback = (o.title ?? "").trim();
+                const personName = lead
+                  ? displayPersonName(contact?.full_name)
+                  : titleFallback.length > 0
+                    ? titleFallback
+                    : "Oportunidade";
+                const companyLine = lead
+                  ? displayCompanyName({
+                      companyName: company?.name,
+                      distributorName: distributor?.name,
+                      clientCategory: lead?.client_category,
+                    })
+                  : null;
+                const leadHref = o.lead_id ? `/leads/${o.lead_id}` : "#";
                 return (
                   <li key={o.id} className="rounded border border-[var(--border)] px-2 py-1">
-                    <a className="font-medium hover:underline" href={`/leads/${o.lead_id}`}>
-                      {lead?.phone_e164 ?? o.title ?? o.id}
+                    <a className="block hover:underline" href={leadHref}>
+                      <LeadIdentity
+                        name={personName}
+                        companyName={companyLine}
+                        category={lead?.client_category}
+                        phoneTitle={lead?.phone_e164}
+                        size="sm"
+                        layout="stacked"
+                      />
                     </a>
                     {o.lost_reason ? (
                       <p className="text-xs text-[var(--muted)]">Motivo: {o.lost_reason}</p>

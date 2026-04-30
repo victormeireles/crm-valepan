@@ -37,10 +37,12 @@ export async function sendConversationMessage(formData: FormData) {
   try {
     const sent = await sendZapiText(phone, message);
     providerMessageId = sent.providerMessageId;
-    try {
-      await registerZapiLidMapForPhoneDigits(phone);
-    } catch (e) {
-      console.warn("[inbox] registerZapiLidMapForPhoneDigits:", e);
+    if (!phone.toLowerCase().includes("@g.us")) {
+      try {
+        await registerZapiLidMapForPhoneDigits(phone);
+      } catch (e) {
+        console.warn("[inbox] registerZapiLidMapForPhoneDigits:", e);
+      }
     }
   } catch (e) {
     return {

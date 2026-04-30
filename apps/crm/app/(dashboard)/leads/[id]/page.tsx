@@ -1,3 +1,6 @@
+import { LeadIdentity } from "@/components/lead-identity";
+import { displayCompanyName, displayPersonName } from "@/lib/lead-identity";
+import { nestOne } from "@/lib/supabase/nested";
 import { createServerSupabaseClient, crmTables } from "@/lib/supabase/server";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -26,16 +29,29 @@ export default async function LeadDetailPage({
 
   if (!lead) notFound();
 
-  const company = lead.companies as
-    | { id: string; name: string; city: string | null; state: string | null; document: string | null }
-    | null;
+  const company = nestOne(
+    lead.companies as
+      | { id: string; name: string; city: string | null; state: string | null; document: string | null }
+      | {
+          id: string;
+          name: string;
+          city: string | null;
+          state: string | null;
+          document: string | null;
+        }[]
+      | null,
+  );
   const contact = lead.contacts as
     | { id: string; full_name: string | null; email: string | null; phone_e164: string }
     | null;
   const distributor = lead.distributors as { id: string; name: string } | null;
 
-  const displayName = (contact?.full_name ?? "").trim();
-  const heading = displayName.length > 0 ? displayName : lead.phone_e164;
+  const heading = displayPersonName(contact?.full_name);
+  const companyLine = displayCompanyName({
+    companyName: company?.name,
+    distributorName: distributor?.name,
+    clientCategory: lead.client_category,
+  });
 
   const { data: opps } = await crm
     .from("opportunities")
@@ -70,10 +86,16 @@ export default async function LeadDetailPage({
           <Link href="/leads" className="text-sm text-[var(--muted)] hover:underline">
             ← Leads
           </Link>
-          <h1 className="mt-1 text-lg font-semibold">{heading}</h1>
-          {displayName.length > 0 ? (
-            <p className="text-sm text-[var(--muted)]">{lead.phone_e164}</p>
-          ) : null}
+          <div className="mt-1">
+            <LeadIdentity
+              name={heading}
+              companyName={companyLine}
+              category={lead.client_category}
+              phoneTitle={lead.phone_e164}
+              size="md"
+              layout="stacked"
+            />
+          </div>
           <p className="text-sm text-[var(--muted)]">
             Status: {lead.status} · Origem: {lead.source}
           </p>
