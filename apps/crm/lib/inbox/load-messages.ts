@@ -106,7 +106,7 @@ export async function loadRecentConversationMessages(
       .order("sent_at", { ascending: false })
       .limit(take);
     if (fallback.error) {
-      res = fallback as typeof res;
+      res = fallback as unknown as typeof res;
     } else {
       const data = normalizeLegacyRows(
         (fallback.data ?? []) as Array<{
@@ -116,7 +116,7 @@ export async function loadRecentConversationMessages(
           sent_at: string;
         }>,
       );
-      res = { ...fallback, data } as typeof res;
+      res = { ...fallback, data } as unknown as typeof res;
     }
   }
 
@@ -196,7 +196,7 @@ export async function loadOlderMessagesPage(
       .order("sent_at", { ascending: false })
       .limit(INBOX_MESSAGE_PAGE_SIZE);
     if (fallback.error) {
-      res = fallback as typeof res;
+      res = fallback as unknown as typeof res;
     } else {
       const data = normalizeLegacyRows(
         (fallback.data ?? []) as Array<{
@@ -206,7 +206,7 @@ export async function loadOlderMessagesPage(
           sent_at: string;
         }>,
       );
-      res = { ...fallback, data } as typeof res;
+      res = { ...fallback, data } as unknown as typeof res;
     }
   }
 

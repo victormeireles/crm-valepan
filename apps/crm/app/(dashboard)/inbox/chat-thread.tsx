@@ -57,6 +57,8 @@ function renderMedia(message: InboxMessageRow) {
   if (message.media_kind === "image" && mediaUrl) {
     return (
       <div className="space-y-2">
+        {/* URLs externas do WhatsApp: <Image> exigiria domínios em next.config */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={mediaUrl}
           alt={fileName}
