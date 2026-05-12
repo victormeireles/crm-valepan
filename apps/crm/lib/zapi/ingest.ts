@@ -499,6 +499,8 @@ function normalizeGroupDisplayNameCandidate(v: unknown): string | null {
   const t = v.trim().replace(/\s+/g, " ");
   if (!t) return null;
   if (t.includes("@g.us") || t.includes("@s.whatsapp.net") || t.includes("@lid")) return null;
+  /** Não usar rótulo que é só número (costuma ser telefone, não nome do grupo). */
+  if (looksLikePhoneOrJidLabel(t)) return null;
   if (t.length > 140) return t.slice(0, 140);
   return t;
 }
@@ -524,26 +526,116 @@ function extractContactName(
   return null;
 }
 
+function extractGroupDisplayNameFromRecord(rec: Record<string, unknown> | null): string | null {
+  if (!rec) return null;
+  const flatKeys = [
+    "groupName",
+    "subject",
+    "chatName",
+    "name",
+    "title",
+    "displayName",
+    "notify",
+    "notifyName",
+    "whatsappName",
+    "verifiedName",
+  ] as const;
+  for (const k of flatKeys) {
+    const parsed = normalizeGroupDisplayNameCandidate(rec[k]);
+    if (parsed) return parsed;
+  }
+  const chat = rec.chat;
+  if (chat && typeof chat === "object" && !Array.isArray(chat)) {
+    const c = chat as Record<string, unknown>;
+    for (const k of ["name", "subject", "displayName"] as const) {
+      const parsed = normalizeGroupDisplayNameCandidate(c[k]);
+      if (parsed) return parsed;
+    }
+  }
+  const gm = rec.groupMetadata;
+  if (gm && typeof gm === "object" && !Array.isArray(gm)) {
+    const parsed = normalizeGroupDisplayNameCandidate((gm as Record<string, unknown>).subject);
+    if (parsed) return parsed;
+  }
+  return null;
+}
+
 function extractGroupDisplayName(
   merged: Record<string, unknown>,
   root: Record<string, unknown> | null,
 ): string | null {
-  const m = merged;
-  const r = root ?? {};
-  const ordered = [
-    m.groupName,
-    r.groupName,
-    m.subject,
-    r.subject,
-    m.chatName,
-    r.chatName,
-    m.name,
-    r.name,
-  ];
-  for (const candidate of ordered) {
-    const parsed = normalizeGroupDisplayNameCandidate(candidate);
-    if (parsed) return parsed;
+  return extractGroupDisplayNameFromRecord(merged) ?? extractGroupDisplayNameFromRecord(root);
+}
+
+/** Variações de `phone` aceitas no path GET …/group-metadata/{phone} (doc Z-API). */
+function zapiGroupMetadataPhoneCandidates(jidLower: string): string[] {
+  const j = jidLower.trim().toLowerCase();
+  const hyphen = /^([\d]+-[\d]+)@g\.us$/i.exec(j);
+  if (hyphen?.[1]) {
+    return [hyphen[1], j];
   }
+  const plain = /^(\d+)@g\.us$/i.exec(j);
+  if (plain?.[1]) {
+    const d = plain[1];
+    return [`${d}-group`, d, j];
+  }
+  return [j];
+}
+
+const groupSubjectCache = new Map<string, string>();
+const groupSubjectMiss = new Set<string>();
+
+/**
+ * Busca o nome (subject) do grupo na Z-API quando o webhook não traz título suficiente.
+ * Usa cache em memória por processo para não martelar a API a cada mensagem.
+ */
+async function fetchZapiGroupSubjectByJid(groupJid: string): Promise<string | null> {
+  const key = groupJid.trim().toLowerCase();
+  if (groupSubjectCache.has(key)) return groupSubjectCache.get(key)!;
+  if (groupSubjectMiss.has(key)) return null;
+
+  const base = process.env.ZAPI_BASE_URL ?? "https://api.z-api.io";
+  const inst = process.env.ZAPI_INSTANCE_ID;
+  const token = process.env.ZAPI_TOKEN;
+  const clientToken = process.env.ZAPI_CLIENT_TOKEN;
+  if (!inst || !token) {
+    groupSubjectMiss.add(key);
+    return null;
+  }
+
+  const rootUrl = `${base.replace(/\/$/, "")}/instances/${inst}/token/${token}`;
+  const candidates = zapiGroupMetadataPhoneCandidates(key);
+
+  for (const phonePart of candidates) {
+    const url = `${rootUrl}/group-metadata/${encodeURIComponent(phonePart)}`;
+    const ctrl = new AbortController();
+    const to = setTimeout(() => ctrl.abort(), 12_000);
+    try {
+      const res = await fetch(url, {
+        method: "GET",
+        signal: ctrl.signal,
+        headers: {
+          "Content-Type": "application/json",
+          ...(clientToken ? { "Client-Token": clientToken } : {}),
+        },
+      });
+      if (!res.ok) continue;
+      const raw: unknown = await res.json().catch(() => null);
+      if (!raw || typeof raw !== "object") continue;
+      const sub = (raw as { subject?: unknown }).subject;
+      if (typeof sub !== "string" || !sub.trim()) continue;
+      const cleaned = sub.trim().replace(/\s+/g, " ");
+      const out = cleaned.length > 140 ? cleaned.slice(0, 140) : cleaned;
+      groupSubjectCache.set(key, out);
+      return out;
+    } catch {
+      // tenta próxima variação
+    } finally {
+      clearTimeout(to);
+    }
+  }
+
+  groupSubjectMiss.add(key);
   return null;
 }
 
@@ -1187,25 +1279,33 @@ export async function ingestZapiMessage(parsed: ZapiInbound) {
 
   const { data: conv } = await crm
     .from("conversations")
-    .select("id, conversation_kind")
+    .select("id, conversation_kind, group_display_name")
     .eq("channel", "whatsapp")
     .eq("phone_e164", phoneE164ForCrm)
     .maybeSingle();
+
+  let resolvedGroupDisplayName = parsed.groupDisplayName?.trim() || null;
+  const isRealGroupJid =
+    parsed.conversationKind === "group" && phoneE164ForCrm.toLowerCase().includes("@g.us");
+  if (isRealGroupJid && !resolvedGroupDisplayName && !(conv?.group_display_name ?? "").trim()) {
+    resolvedGroupDisplayName =
+      (await fetchZapiGroupSubjectByJid(phoneE164ForCrm))?.trim() || null;
+  }
 
   let conversationId: string;
   if (conv?.id) {
     conversationId = conv.id;
     if (
       conv.conversation_kind !== parsed.conversationKind ||
-      (parsed.conversationKind === "group" && parsed.groupDisplayName)
+      (parsed.conversationKind === "group" && resolvedGroupDisplayName)
     ) {
       await crm
         .from("conversations")
         .update({
           conversation_kind: parsed.conversationKind,
           lead_id: parsed.conversationKind === "lead" ? leadId : null,
-          ...(parsed.conversationKind === "group" && parsed.groupDisplayName
-            ? { group_display_name: parsed.groupDisplayName }
+          ...(parsed.conversationKind === "group" && resolvedGroupDisplayName
+            ? { group_display_name: resolvedGroupDisplayName }
             : {}),
           updated_at: parsed.sentAtIso ?? new Date().toISOString(),
         })
@@ -1219,8 +1319,8 @@ export async function ingestZapiMessage(parsed: ZapiInbound) {
         channel: "whatsapp",
         phone_e164: phoneE164ForCrm,
         conversation_kind: parsed.conversationKind,
-        ...(parsed.conversationKind === "group" && parsed.groupDisplayName
-          ? { group_display_name: parsed.groupDisplayName }
+        ...(parsed.conversationKind === "group" && resolvedGroupDisplayName
+          ? { group_display_name: resolvedGroupDisplayName }
           : {}),
       })
       .select("id")
