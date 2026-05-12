@@ -10,6 +10,13 @@ const appDir = path.join(root, "apps", "crm");
 const nextCli = path.join(root, "node_modules", "next", "dist", "bin", "next");
 const args = process.argv.slice(2);
 
+if (!fs.existsSync(nextCli)) {
+  console.error(
+    "[run-in-app] Next.js CLI nao encontrado em node_modules. Rode `npm install` na raiz do projeto e tente novamente."
+  );
+  process.exit(1);
+}
+
 function readPortFromEnvFile(filePath) {
   if (!fs.existsSync(filePath)) return undefined;
   const content = fs.readFileSync(filePath, "utf8");
@@ -45,5 +52,10 @@ const r = spawnSync(process.execPath, [nextCli, ...args], {
   env: process.env,
   shell: false,
 });
+
+if (r.error) {
+  console.error("[run-in-app] Falha ao iniciar o Next.js:", r.error.message);
+  process.exit(1);
+}
 
 process.exit(r.status ?? 1);

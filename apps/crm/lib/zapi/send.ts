@@ -157,7 +157,7 @@ export async function sendZapiContact(
   return { raw, providerMessageId };
 }
 
-type ZapiSendFileKind = "image" | "video" | "document";
+type ZapiSendFileKind = "image" | "video" | "audio" | "document";
 
 async function sendZapiFileByBase64(input: {
   toPhoneDigits: string;
@@ -179,6 +179,8 @@ async function sendZapiFileByBase64(input: {
       ? "/send-document/base64"
       : input.kind === "video"
         ? "/send-video"
+        : input.kind === "audio"
+          ? "/send-audio"
         : "/send-image";
   const url = `${base.replace(/\/$/, "")}/instances/${inst}/token/${token}${endpoint}`;
   const phoneParam = formatPhoneForZapiSend(input.toPhoneDigits);
@@ -191,6 +193,8 @@ async function sendZapiFileByBase64(input: {
     body.video = input.dataUrl;
     body.caption = input.caption ?? "";
     body.viewOnce = false;
+  } else if (input.kind === "audio") {
+    body.audio = input.dataUrl;
   } else {
     body.image = input.dataUrl;
     body.caption = input.caption ?? "";
@@ -257,5 +261,16 @@ export async function sendZapiDocument(
     kind: "document",
     dataUrl: documentDataUrl,
     fileName,
+  });
+}
+
+export async function sendZapiAudio(
+  toPhoneDigits: string,
+  audioDataUrl: string,
+) {
+  return sendZapiFileByBase64({
+    toPhoneDigits,
+    kind: "audio",
+    dataUrl: audioDataUrl,
   });
 }

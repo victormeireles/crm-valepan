@@ -35,9 +35,7 @@ export function displayPersonName(fullName: string | null | undefined): string {
   return t.length > 0 ? t : LEAD_NO_NAME_LABEL;
 }
 
-/**
- * Nome da empresa: prioriza `companies.name`; para categoria distribuidor, usa `distributors.name` se empresa vazia.
- */
+/** Nome da empresa: usa somente `companies.name` informado no cadastro. */
 export function displayCompanyName(input: {
   companyName: string | null | undefined;
   distributorName: string | null | undefined;
@@ -45,11 +43,8 @@ export function displayCompanyName(input: {
 }): string | null {
   const company = (input.companyName ?? "").trim();
   if (company.length > 0) return company;
-  const cat = (input.clientCategory ?? "").trim().toLowerCase();
-  if (cat === "distribuidor") {
-    const d = (input.distributorName ?? "").trim();
-    return d.length > 0 ? d : null;
-  }
+  void input.distributorName;
+  void input.clientCategory;
   return null;
 }
 

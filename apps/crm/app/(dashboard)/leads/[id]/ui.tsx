@@ -59,7 +59,10 @@ export function LeadActions({
   const [err, setErr] = useState<string | null>(null);
   const [distributorMsg, setDistributorMsg] = useState<string | null>(null);
 
-  const lostStage = stages.find((s) => s.name.toLowerCase().includes("perdido"));
+  const lostStage = stages.find((s) => {
+    const n = s.name.toLowerCase();
+    return n.includes("perdido") || n.includes("sem interesse");
+  });
 
   useEffect(() => {
     setCategory(clientCategory ?? "");
@@ -292,12 +295,12 @@ export function LeadActions({
       </label>
       {lostStage && stageId === lostStage.id ? (
         <label className="flex flex-col gap-1">
-          Motivo (perdido)
+          Motivo (sem interesse / perdido)
           <input
             className="rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1"
             value={lost}
             onChange={(e) => setLost(e.target.value)}
-            placeholder="Obrigatório para etapa Perdido"
+            placeholder="Obrigatório para etapa Sem interesse"
           />
         </label>
       ) : null}

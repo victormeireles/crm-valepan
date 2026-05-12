@@ -18,7 +18,8 @@
     "seed:admin": "node scripts/seed-admin.cjs",
     "db:push": "node scripts/db-push.cjs",
     "db:apply:linked": "node scripts/apply-migrations-linked.cjs",
-    "db:apply:zapi-lid-map": "node scripts/apply-zapi-lid-migration.cjs"
+    "db:apply:zapi-lid-map": "node scripts/apply-zapi-lid-migration.cjs",
+    "sync:group-names": "node scripts/sync-whatsapp-group-names.cjs"
   },
   "devDependencies": {
     "typescript": "^5.7.3"

@@ -5,11 +5,15 @@ do $$
 begin
   if not exists (select 1 from crm.pipeline_stages limit 1) then
     insert into crm.pipeline_stages (name, sort_order, is_final) values
-      ('Lead novo', 10, false),
-      ('Qualificação', 20, false),
-      ('Negociação', 40, false),
-      ('Amostra', 50, false),
-      ('Convertido', 100, true),
-      ('Perdido', 110, true);
+      ('QUALIFICAÇÃO', 10, false),
+      ('AMOSTRA', 20, false),
+      ('ENCAMINHADO PARA DISTRIBUIDOR', 30, false),
+      ('JÁ É CLIENTE', 40, false),
+      ('NÃO ATENDEMOS A REGIÃO', 50, false),
+      ('NÃO RESPONDE', 60, false),
+      ('NÃO TEMOS O PÃO', 70, false),
+      ('NEGOCIAÇÃO', 80, false),
+      ('SEM INTERESSE', 90, true),
+      ('CONVERTIDO', 100, true);
   end if;
 end $$;

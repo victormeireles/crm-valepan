@@ -11,6 +11,7 @@ import { createServerSupabaseClient, crmTables } from "@/lib/supabase/server";
 import { registerZapiLidMapForPhoneDigits } from "@/lib/zapi/phone-exists";
 import {
   fetchZapiContacts,
+  sendZapiAudio,
   sendZapiContact,
   sendZapiDocument,
   sendZapiImage,
@@ -61,6 +62,7 @@ export async function sendConversationMessage(formData: FormData) {
     conversation_id: conversationId,
     direction: "out",
     body: message,
+    message_status: "sent",
     ...(providerMessageId ? { provider_message_id: providerMessageId } : {}),
   });
   if (error) return { ok: false as const, error: error.message };
@@ -112,6 +114,32 @@ export async function loadEarlierInboxMessages(
     messages,
     hasMoreOlder: messages.length >= INBOX_MESSAGE_PAGE_SIZE,
   };
+}
+
+export async function markConversationRead(conversationId: string) {
+  const id = conversationId.trim();
+  if (!id) return { ok: false as const, error: "Conversa inválida." };
+
+  const supabase = await createServerSupabaseClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false as const, error: "Não autenticado" };
+
+  const crm = crmTables(supabase);
+  const nowIso = new Date().toISOString();
+  const { error } = await crm
+    .from("conversations")
+    .update({
+      last_read_at: nowIso,
+      updated_at: nowIso,
+    })
+    .eq("id", id);
+
+  if (error) return { ok: false as const, error: error.message };
+
+  revalidatePath("/inbox");
+  return { ok: true as const };
 }
 
 export async function updateConversationClassification(input: {
@@ -286,6 +314,7 @@ export async function sendConversationContactCard(input: {
     conversation_id: conversationId,
     direction: "out",
     body,
+    message_status: "sent",
     ...(providerMessageId ? { provider_message_id: providerMessageId } : {}),
   });
   if (error) return { ok: false as const, error: error.message };
@@ -354,6 +383,10 @@ export async function sendConversationAttachment(formData: FormData) {
       const sent = await sendZapiVideo(phone, dataUrl, "");
       providerMessageId = sent.providerMessageId;
       kindLabel = "vídeo";
+    } else if (mime.startsWith("audio/")) {
+      const sent = await sendZapiAudio(phone, dataUrl);
+      providerMessageId = sent.providerMessageId;
+      kindLabel = "áudio";
     } else {
       const sent = await sendZapiImage(phone, dataUrl, "");
       providerMessageId = sent.providerMessageId;
@@ -377,6 +410,17 @@ export async function sendConversationAttachment(formData: FormData) {
     conversation_id: conversationId,
     direction: "out",
     body,
+    message_status: "sent",
+    media_kind:
+      kindLabel === "foto"
+        ? "image"
+        : kindLabel === "vídeo"
+          ? "video"
+          : kindLabel === "áudio"
+            ? "audio"
+            : "document",
+    media_mime_type: file.type || null,
+    media_file_name: file.name || null,
     ...(providerMessageId ? { provider_message_id: providerMessageId } : {}),
   });
   if (error) return { ok: false as const, error: error.message };

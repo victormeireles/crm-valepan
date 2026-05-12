@@ -21,6 +21,7 @@ export type InboxSidebarRow = {
   identityName: string;
   companyName: string | null;
   clientCategory: string | null;
+  unread: boolean;
 };
 
 function norm(s: string) {
@@ -160,11 +161,20 @@ export function InboxSidebar({
                     />
                   </div>
                 </div>
-                <span
-                  className="shrink-0 text-[10px] text-[var(--muted)]"
-                  title={new Date(c.lastAt).toLocaleString("pt-BR")}
-                >
-                  {formatRelativeShort(c.lastAt)}
+                <span className="flex shrink-0 items-center gap-1">
+                  {c.unread ? (
+                    <span
+                      className="size-2 shrink-0 rounded-full bg-[var(--vp-wine)]"
+                      title="Mensagens não lidas"
+                      aria-label="Conversa com mensagens não lidas"
+                    />
+                  ) : null}
+                  <span
+                    className="text-[10px] text-[var(--muted)]"
+                    title={new Date(c.lastAt).toLocaleString("pt-BR")}
+                  >
+                    {formatRelativeShort(c.lastAt)}
+                  </span>
                 </span>
               </div>
               <p className="line-clamp-2 text-xs text-[var(--muted)]">{c.preview}</p>

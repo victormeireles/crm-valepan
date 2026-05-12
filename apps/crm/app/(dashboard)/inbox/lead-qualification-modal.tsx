@@ -2,7 +2,7 @@
 
 import { updateConversationLeadQualification } from "@/app/actions/leads";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 type StageOption = {
   id: string;
@@ -44,6 +44,37 @@ export function LeadQualificationModal(props: Props) {
   const [breadWeightGrams, setBreadWeightGrams] = useState(
     props.initialBreadWeightGrams != null ? String(props.initialBreadWeightGrams) : "",
   );
+
+  useEffect(() => {
+    setCategory(props.initialCategory ?? "");
+    setStageId(props.initialStageId ?? "");
+    setState(props.initialState ?? "");
+    setCity(props.initialCity ?? "");
+    setZipCode(props.initialZipCode ?? "");
+    setWeeklyBreadConsumption(
+      props.initialWeeklyBreadConsumption != null ? String(props.initialWeeklyBreadConsumption) : "",
+    );
+    setCompanyName(props.initialCompanyName ?? "");
+    setCnpj(props.initialCnpj ?? "");
+    setBreadType(props.initialBreadType ?? "");
+    setBreadWeightGrams(
+      props.initialBreadWeightGrams != null ? String(props.initialBreadWeightGrams) : "",
+    );
+    setError(null);
+    setOpen(false);
+  }, [
+    props.conversationId,
+    props.initialCategory,
+    props.initialStageId,
+    props.initialState,
+    props.initialCity,
+    props.initialZipCode,
+    props.initialWeeklyBreadConsumption,
+    props.initialCompanyName,
+    props.initialCnpj,
+    props.initialBreadType,
+    props.initialBreadWeightGrams,
+  ]);
 
   async function onSave() {
     setSaving(true);

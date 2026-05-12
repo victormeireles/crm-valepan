@@ -43,16 +43,111 @@ function initials(name: string) {
   return parts.map((p) => p[0]?.toUpperCase() ?? "").join("") || "?";
 }
 
+function isHttpUrl(value: string | null | undefined): value is string {
+  if (!value) return false;
+  return /^https?:\/\//i.test(value.trim());
+}
+
+function renderMedia(message: InboxMessageRow) {
+  if (!message.media_kind) return null;
+  const mediaUrl = isHttpUrl(message.media_url) ? message.media_url : null;
+  const fileName = message.media_file_name?.trim() || "arquivo";
+  const mime = message.media_mime_type?.trim() || undefined;
+
+  if (message.media_kind === "image" && mediaUrl) {
+    return (
+      <div className="space-y-2">
+        <img
+          src={mediaUrl}
+          alt={fileName}
+          className="max-h-[320px] w-full rounded-lg border border-[var(--border)] object-contain bg-black/5"
+          loading="lazy"
+        />
+        <a
+          href={mediaUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex text-xs font-semibold underline underline-offset-2"
+        >
+          Abrir imagem
+        </a>
+      </div>
+    );
+  }
+
+  if (message.media_kind === "video" && mediaUrl) {
+    return (
+      <div className="space-y-2">
+        <video controls className="max-h-[320px] w-full rounded-lg border border-[var(--border)]">
+          <source src={mediaUrl} type={mime} />
+        </video>
+        <a
+          href={mediaUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex text-xs font-semibold underline underline-offset-2"
+        >
+          Abrir vídeo
+        </a>
+      </div>
+    );
+  }
+
+  if (message.media_kind === "audio" && mediaUrl) {
+    return (
+      <div className="space-y-2">
+        <audio controls className="w-full">
+          <source src={mediaUrl} type={mime} />
+        </audio>
+        <a
+          href={mediaUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex text-xs font-semibold underline underline-offset-2"
+        >
+          Abrir áudio
+        </a>
+      </div>
+    );
+  }
+
+  if (mediaUrl) {
+    return (
+      <a
+        href={mediaUrl}
+        target="_blank"
+        rel="noreferrer"
+        className="inline-flex text-xs font-semibold underline underline-offset-2"
+      >
+        Baixar {fileName}
+      </a>
+    );
+  }
+
+  return (
+    <p className="text-xs opacity-80">
+      Mídia recebida, mas sem URL disponível no webhook para visualização.
+    </p>
+  );
+}
+
+function outboundStatusLabel(message: InboxMessageRow): string {
+  return message.message_status === "read" ? "Lida" : "Enviada";
+}
+
 export function ChatThread({
   conversationId,
   initialMessages,
   hasMoreOlder: hasMoreOlderInitial,
   messagesLoadError,
+  lastReadAtIso,
 }: {
   conversationId: string;
   initialMessages: InboxMessageRow[];
   hasMoreOlder: boolean;
   messagesLoadError?: string;
+  /** Mensagens com `sent_at` maior que este instante aparecem como novas desde a última leitura. */
+  lastReadAtIso?: string | null;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const skipScrollToBottomRef = useRef(false);
@@ -66,6 +161,12 @@ export function ChatThread({
     () => mergeById(olderMessages, initialMessages),
     [olderMessages, initialMessages],
   );
+
+  const firstNewSinceReadIdx = useMemo(() => {
+    const lr = (lastReadAtIso ?? "").trim();
+    if (!lr) return -1;
+    return messages.findIndex((m) => m.sent_at > lr);
+  }, [messages, lastReadAtIso]);
 
   useEffect(() => {
     if (skipScrollToBottomRef.current) {
@@ -151,19 +252,36 @@ export function ChatThread({
           <p className="text-center text-xs text-[var(--vp-error)]">{loadError}</p>
         ) : null}
 
-        {messages.map((m) => {
+        {messages.map((m, idx) => {
           const out = m.direction === "out";
           const contactCard = parseContactCard(m.body);
+          const isNewSinceRead =
+            firstNewSinceReadIdx >= 0 &&
+            idx >= firstNewSinceReadIdx &&
+            (lastReadAtIso ?? "").trim().length > 0;
           return (
+            <div key={m.id} className="w-full space-y-3">
+              {idx === firstNewSinceReadIdx && firstNewSinceReadIdx >= 0 ? (
+                <div
+                  className="flex items-center gap-2 py-1"
+                  role="separator"
+                  aria-label="Novas mensagens desde a última leitura"
+                >
+                  <div className="h-px flex-1 bg-[var(--border)]" />
+                  <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-[var(--vp-wine)]">
+                    Novas desde a última leitura
+                  </span>
+                  <div className="h-px flex-1 bg-[var(--border)]" />
+                </div>
+              ) : null}
             <div
-              key={m.id}
               className={`flex w-full ${out ? "justify-end" : "justify-start"}`}
             >
               <div
                 className={
                   out
-                    ? "max-w-[min(88%,440px)] rounded-2xl rounded-br-sm bg-[var(--vp-wine)] px-3 py-2 text-sm text-[var(--vp-gold)] shadow-[var(--sh-sm)]"
-                    : "max-w-[min(88%,440px)] rounded-2xl rounded-bl-sm border border-[var(--border)] bg-[var(--vp-paper-pure)] px-3 py-2 text-sm text-[var(--foreground)] shadow-[var(--sh-sm)]"
+                    ? `max-w-[min(88%,440px)] rounded-2xl rounded-br-sm bg-[var(--vp-wine)] px-3 py-2 text-sm text-[var(--vp-gold)] shadow-[var(--sh-sm)]${isNewSinceRead && out ? " ring-2 ring-[var(--vp-gold)]/35" : ""}`
+                    : `max-w-[min(88%,440px)] rounded-2xl rounded-bl-sm border bg-[var(--vp-paper-pure)] px-3 py-2 text-sm text-[var(--foreground)] shadow-[var(--sh-sm)]${isNewSinceRead && !out ? " border-[var(--vp-wine)]/45 ring-1 ring-[var(--vp-wine)]/25" : " border-[var(--border)]"}`
                 }
               >
                 {contactCard ? (
@@ -193,11 +311,14 @@ export function ChatThread({
                     </div>
                   </div>
                 ) : (
-                  <p className="whitespace-pre-wrap break-words">
-                    {m.body?.trim()
-                      ? m.body
-                      : "Sem texto neste registro (mensagem antiga ou mídia sem legenda)."}
-                  </p>
+                  <div className="space-y-2">
+                    {renderMedia(m)}
+                    <p className="whitespace-pre-wrap break-words">
+                      {m.body?.trim()
+                        ? m.body
+                        : "Sem texto neste registro (mensagem antiga ou mídia sem legenda)."}
+                    </p>
+                  </div>
                 )}
                 <div
                   className={`mt-1.5 flex items-center gap-1.5 text-[10px] leading-none ${
@@ -211,7 +332,7 @@ export function ChatThread({
                       out ? "text-[var(--vp-gold)]" : "text-[var(--foreground)]"
                     }`}
                   >
-                    {out ? "Enviada" : "Recebida"}
+                    {out ? outboundStatusLabel(m) : "Recebida"}
                   </span>
                   <span className="opacity-70">·</span>
                   <time dateTime={m.sent_at}>
@@ -224,6 +345,7 @@ export function ChatThread({
                   </time>
                 </div>
               </div>
+            </div>
             </div>
           );
         })}

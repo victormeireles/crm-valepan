@@ -11,10 +11,48 @@ export type InboxMessageRow = {
 
   body: string | null;
 
+  media_kind: "image" | "video" | "audio" | "document" | null;
+
+  media_url: string | null;
+
+  media_mime_type: string | null;
+
+  media_file_name: string | null;
+  message_status: "sent" | "read" | null;
+  read_at: string | null;
+
   sent_at: string;
 
 };
 
+const MESSAGES_SELECT_WITH_MEDIA =
+  "id, direction, body, media_kind, media_url, media_mime_type, media_file_name, message_status, read_at, sent_at";
+const MESSAGES_SELECT_LEGACY = "id, direction, body, sent_at";
+
+function isMissingMediaColumnError(error?: { message?: string; code?: string } | null) {
+  if (!error?.message) return false;
+  const msg = error.message.toLowerCase();
+  return (
+    msg.includes("media_kind") ||
+    msg.includes("media_url") ||
+    msg.includes("media_mime_type") ||
+    msg.includes("media_file_name")
+  );
+}
+
+function normalizeLegacyRows(
+  rows: Array<{ id: string; direction: "in" | "out"; body: string | null; sent_at: string }>,
+): InboxMessageRow[] {
+  return rows.map((row) => ({
+    ...row,
+    media_kind: null,
+    media_url: null,
+    media_mime_type: null,
+    media_file_name: null,
+    message_status: null,
+    read_at: null,
+  }));
+}
 
 
 type CrmClient = ReturnType<typeof crmTables>;
@@ -53,17 +91,34 @@ export async function loadRecentConversationMessages(
 
   const take = INBOX_MESSAGE_PAGE_SIZE + 1;
 
-  const res = await crm
-
+  let res = await crm
     .from("messages")
-
-    .select("id, direction, body, sent_at")
-
+    .select(MESSAGES_SELECT_WITH_MEDIA)
     .eq("conversation_id", conversationId)
-
     .order("sent_at", { ascending: false })
-
     .limit(take);
+
+  if (res.error && isMissingMediaColumnError(res.error)) {
+    const fallback = await crm
+      .from("messages")
+      .select(MESSAGES_SELECT_LEGACY)
+      .eq("conversation_id", conversationId)
+      .order("sent_at", { ascending: false })
+      .limit(take);
+    if (fallback.error) {
+      res = fallback as typeof res;
+    } else {
+      const data = normalizeLegacyRows(
+        (fallback.data ?? []) as Array<{
+          id: string;
+          direction: "in" | "out";
+          body: string | null;
+          sent_at: string;
+        }>,
+      );
+      res = { ...fallback, data } as typeof res;
+    }
+  }
 
   // #region agent log
   agentDebugLog({
@@ -124,19 +179,36 @@ export async function loadOlderMessagesPage(
 
 }> {
 
-  const res = await crm
-
+  let res = await crm
     .from("messages")
-
-    .select("id, direction, body, sent_at")
-
+    .select(MESSAGES_SELECT_WITH_MEDIA)
     .eq("conversation_id", conversationId)
-
     .lt("sent_at", beforeSentAt)
-
     .order("sent_at", { ascending: false })
-
     .limit(INBOX_MESSAGE_PAGE_SIZE);
+
+  if (res.error && isMissingMediaColumnError(res.error)) {
+    const fallback = await crm
+      .from("messages")
+      .select(MESSAGES_SELECT_LEGACY)
+      .eq("conversation_id", conversationId)
+      .lt("sent_at", beforeSentAt)
+      .order("sent_at", { ascending: false })
+      .limit(INBOX_MESSAGE_PAGE_SIZE);
+    if (fallback.error) {
+      res = fallback as typeof res;
+    } else {
+      const data = normalizeLegacyRows(
+        (fallback.data ?? []) as Array<{
+          id: string;
+          direction: "in" | "out";
+          body: string | null;
+          sent_at: string;
+        }>,
+      );
+      res = { ...fallback, data } as typeof res;
+    }
+  }
 
 
 

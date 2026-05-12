@@ -119,7 +119,9 @@ export interface Database {
           external_id: string | null;
           phone_e164: string;
           conversation_kind: "lead" | "group";
+          group_display_name: string | null;
           classification: string | null;
+          last_read_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -130,7 +132,9 @@ export interface Database {
           external_id?: string | null;
           phone_e164: string;
           conversation_kind?: "lead" | "group";
+          group_display_name?: string | null;
           classification?: string | null;
+          last_read_at?: string | null;
         };
         Update: Partial<Database["crm"]["Tables"]["conversations"]["Insert"]>;
       };
@@ -156,7 +160,13 @@ export interface Database {
           conversation_id: string;
           direction: "in" | "out";
           body: string | null;
+          media_kind: "image" | "video" | "audio" | "document" | null;
+          media_url: string | null;
+          media_mime_type: string | null;
+          media_file_name: string | null;
           provider_message_id: string | null;
+          message_status: "sent" | "read" | null;
+          read_at: string | null;
           sent_at: string;
           created_at: string;
         };
@@ -165,7 +175,13 @@ export interface Database {
           conversation_id: string;
           direction: "in" | "out";
           body?: string | null;
+          media_kind?: "image" | "video" | "audio" | "document" | null;
+          media_url?: string | null;
+          media_mime_type?: string | null;
+          media_file_name?: string | null;
           provider_message_id?: string | null;
+          message_status?: "sent" | "read" | null;
+          read_at?: string | null;
           sent_at?: string;
         };
       };

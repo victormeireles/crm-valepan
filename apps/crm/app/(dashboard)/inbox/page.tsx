@@ -10,6 +10,7 @@ import { ChatThread } from "./chat-thread";
 import { InboxLiveRefresh } from "./inbox-live-refresh";
 import { InboxSidebar, type InboxSidebarRow } from "./inbox-sidebar";
 import { LeadQualificationModal } from "./lead-qualification-modal";
+import { MarkConversationRead } from "./mark-conversation-read";
 import { SendMessageForm } from "./send-message-form";
 
 /** Evita cache estático: mensagens novas precisam aparecer após webhook / envio. */
@@ -23,6 +24,16 @@ function previewLine(body: string | null | undefined): string {
   const t = (body ?? "").trim().replace(/\s+/g, " ");
   if (!t) return "Sem mensagem ainda";
   return t.length > PREVIEW_MAX ? `${t.slice(0, PREVIEW_MAX - 1)}…` : t;
+}
+
+function isConversationUnread(
+  lastReadAt: string | null | undefined,
+  maxInboundSentAt: string | undefined,
+): boolean {
+  if (!maxInboundSentAt) return false;
+  const lr = (lastReadAt ?? "").trim();
+  if (!lr) return true;
+  return maxInboundSentAt > lr;
 }
 
 function initials(name: string) {
@@ -59,7 +70,7 @@ export default async function InboxPage({
       crm
         .from("conversations")
         .select(
-          "id, phone_e164, conversation_kind, classification, created_at, updated_at, leads(id, phone_e164, status, client_category, zip_code, weekly_bread_consumption, bread_type, bread_weight_grams, contacts(full_name, avatar_url), companies(id, name, document, city, state), distributors(name), opportunities(id, stage_id, updated_at))",
+          "id, phone_e164, conversation_kind, group_display_name, classification, created_at, updated_at, last_read_at, leads(id, phone_e164, status, client_category, zip_code, weekly_bread_consumption, bread_type, bread_weight_grams, contacts(full_name, avatar_url), companies(id, name, document, city, state), distributors(name), opportunities(id, stage_id, updated_at))",
         )
         .eq("conversation_kind", conversationKind)
         .order("updated_at", { ascending: false }),
@@ -80,6 +91,22 @@ export default async function InboxPage({
     cid && conversationsSorted.some((c) => c.id === cid) ? cid : null;
   const selectedId = validCid ?? conversationsSorted[0]?.id ?? null;
   const selected = conversationsSorted.find((c) => c.id === selectedId) ?? null;
+
+  const convIds = conversationsSorted.map((c) => c.id);
+  const maxInboundByConv = new Map<string, string>();
+  if (convIds.length > 0) {
+    const { data: inboundMsgs } = await crm
+      .from("messages")
+      .select("conversation_id, sent_at")
+      .eq("direction", "in")
+      .in("conversation_id", convIds);
+    for (const row of inboundMsgs ?? []) {
+      const convMsgId = row.conversation_id;
+      const t = row.sent_at;
+      const prev = maxInboundByConv.get(convMsgId);
+      if (!prev || t > prev) maxInboundByConv.set(convMsgId, t);
+    }
+  }
 
   let messages: InboxMessageRow[] = [];
   let hasMoreOlder = false;
@@ -290,7 +317,7 @@ export default async function InboxPage({
           });
     const identityName =
       c.conversation_kind === "group"
-        ? "Grupo"
+        ? c.group_display_name?.trim() || c.phone_e164
         : lead
           ? displayPersonName(contact?.full_name)
           : "Sem lead";
@@ -313,6 +340,10 @@ export default async function InboxPage({
       identityName,
       companyName: companyLine,
       clientCategory: lead?.client_category ?? null,
+      unread: isConversationUnread(
+        (c as { last_read_at?: string | null }).last_read_at,
+        maxInboundByConv.get(c.id),
+      ),
     };
   });
 
@@ -341,6 +372,10 @@ export default async function InboxPage({
         <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border-y border-r border-[var(--border)] border-l-[3px] border-l-[var(--vp-gold-classic)] bg-[var(--vp-paper-pure)] shadow-[var(--sh-sm)]">
           {selected ? (
             <>
+              <MarkConversationRead
+                conversationId={selected.id}
+                fingerprint={`${selectedTail?.last_sent_at ?? ""}|${selectedTail?.last_direction ?? ""}|${selectedTail?.last_body_preview ?? ""}`}
+              />
               <div className="shrink-0 border-b border-[var(--border)] bg-[var(--vp-paper)] px-3 pb-3 pt-3">
                 <div className="flex items-start justify-between gap-3">
                   <div>
@@ -353,7 +388,7 @@ export default async function InboxPage({
                     );
                     const headerName =
                       selected.conversation_kind === "group"
-                        ? "Grupo"
+                        ? selected.group_display_name?.trim() || selected.phone_e164
                         : selectedLead
                           ? displayPersonName(selectedContact?.full_name)
                           : "Sem lead";
@@ -442,6 +477,7 @@ export default async function InboxPage({
                   initialMessages={messages}
                   hasMoreOlder={hasMoreOlder}
                   messagesLoadError={messagesError?.message}
+                  lastReadAtIso={(selected as { last_read_at?: string | null }).last_read_at ?? null}
                 />
               </div>
 

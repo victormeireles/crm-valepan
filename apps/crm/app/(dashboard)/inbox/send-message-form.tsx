@@ -179,7 +179,7 @@ export function SendMessageForm({
       <input
         ref={mediaInputRef}
         type="file"
-        accept="image/*,video/*"
+        accept="image/*,video/*,audio/*"
         className="hidden"
         onChange={(e) => onPickAttachment(e, "media")}
       />
@@ -202,7 +202,7 @@ export function SendMessageForm({
                 role="menu"
                 className="absolute bottom-12 left-0 z-20 min-w-[11rem] rounded-xl border border-[var(--border)] bg-[var(--vp-paper-pure)] p-1.5 shadow-[var(--sh-md)]"
               >
-                {["Documento", "Fotos e vídeos", "Contato"].map((item) => (
+                {["Documento", "Fotos, vídeos e áudios", "Contato"].map((item) => (
                   <button
                     key={item}
                     type="button"
@@ -213,7 +213,7 @@ export function SendMessageForm({
                         documentInputRef.current?.click();
                         return;
                       }
-                      if (item === "Fotos e vídeos") {
+                      if (item === "Fotos, vídeos e áudios") {
                         setErr(null);
                         mediaInputRef.current?.click();
                         return;

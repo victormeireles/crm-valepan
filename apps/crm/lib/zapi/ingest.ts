@@ -54,6 +54,10 @@ export type ZapiInbound = {
   linkedLidKeys?: string[];
   /** Nome do contato quando disponível no webhook (chatName/senderName). */
   contactName?: string | null;
+  /** Nome do grupo quando o webhook trouxer subject/chatName. */
+  groupDisplayName?: string | null;
+  /** Status simplificado para mensagens de saída. */
+  messageStatus?: "sent" | "read" | null;
   messageId: string | null;
   body: string | null;
   fromMe: boolean;
@@ -63,6 +67,14 @@ export type ZapiInbound = {
   sentAtIso: string | null;
   /** Separa conversa de lead individual de grupo do WhatsApp. */
   conversationKind: "lead" | "group";
+  media:
+    | {
+        kind: "image" | "video" | "audio" | "document";
+        url: string | null;
+        mimeType: string | null;
+        fileName: string | null;
+      }
+    | null;
 };
 
 function extractSentAtIso(source: Record<string, unknown> | null): string | null {
@@ -189,9 +201,23 @@ function pickPhoneCandidate(
   participant: string,
   root: Record<string, unknown> | null,
 ): PhonePickTrace {
+  /**
+   * Em grupos, `participantPhone` costuma ser o remetente (E.164), não o chat.
+   * Só usamos participante como chave quando **não** houver JID do grupo em `key.remoteJid`.
+   */
+  const fromMergedKey = pickJidFromKey(o);
+  if (isGroup && fromMergedKey && fromMergedKey.toLowerCase().includes("@g.us")) {
+    return { raw: fromMergedKey, pickSource: "merged.key.remoteJid_group" };
+  }
+  if (root) {
+    const fromRootKey = pickJidFromKey(root);
+    if (isGroup && fromRootKey && fromRootKey.toLowerCase().includes("@g.us")) {
+      return { raw: fromRootKey, pickSource: "root.key.remoteJid_group" };
+    }
+  }
+
   if (isGroup && participant) return { raw: participant, pickSource: "participant_group" };
 
-  const fromMergedKey = pickJidFromKey(o);
   if (fromMergedKey) return { raw: fromMergedKey, pickSource: "merged.key.remoteJid" };
 
   if (root) {
@@ -238,7 +264,6 @@ function normalizeEventType(type: string | null): string | null {
 
 /** Status da mensagem, presença, conexão — mesma URL do inbox se o usuário colar a URL em tudo. */
 const ZAPI_NON_MESSAGE_CALLBACKS = new Set([
-  "messagestatuscallback",
   "connectedcallback",
   "disconnectedcallback",
   "presencechatcallback",
@@ -247,6 +272,7 @@ const ZAPI_NON_MESSAGE_CALLBACKS = new Set([
 const ZAPI_CHAT_CALLBACKS = new Set([
   "receivedcallback",
   "deliverycallback",
+  "messagestatuscallback",
   /** variantes / proxies */
   "receivecallback",
   "messagereceived",
@@ -382,6 +408,74 @@ function s(v: unknown): string | null {
   return typeof v === "string" && v.trim() ? v.trim() : null;
 }
 
+function normalizeMaybeUrl(v: unknown): string | null {
+  if (typeof v !== "string") return null;
+  const t = v.trim();
+  if (!t) return null;
+  if (/^https?:\/\//i.test(t)) return t;
+  return null;
+}
+
+function pickFirstUrlFromObject(obj: Record<string, unknown>): string | null {
+  for (const key of [
+    "url",
+    "link",
+    "downloadUrl",
+    "download_url",
+    "fileUrl",
+    "file_url",
+    "mediaUrl",
+    "media_url",
+    "directPath",
+  ] as const) {
+    const hit = normalizeMaybeUrl(obj[key]);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+function extractMediaMeta(
+  o: Record<string, unknown>,
+  depth = 0,
+):
+  | {
+      kind: "image" | "video" | "audio" | "document";
+      url: string | null;
+      mimeType: string | null;
+      fileName: string | null;
+    }
+  | null {
+  if (depth > 4) return null;
+  const blocks: Array<{ kind: "image" | "video" | "audio" | "document"; value: unknown }> = [
+    { kind: "image", value: o.image },
+    { kind: "video", value: o.video },
+    { kind: "audio", value: o.audio },
+    { kind: "document", value: o.document },
+  ];
+  for (const block of blocks) {
+    if (!block.value || typeof block.value !== "object" || Array.isArray(block.value)) continue;
+    const data = block.value as Record<string, unknown>;
+    const mimeType =
+      s(data.mimetype) ?? s(data.mimeType) ?? s(data.mime_type) ?? null;
+    const fileName = s(data.fileName) ?? s(data.filename) ?? s(data.name) ?? null;
+    const url = pickFirstUrlFromObject(data);
+    return { kind: block.kind, url, mimeType, fileName };
+  }
+  for (const wrap of [
+    "message",
+    "ephemeralMessage",
+    "viewOnceMessage",
+    "documentWithCaptionMessage",
+  ] as const) {
+    const inner = o[wrap];
+    if (inner && typeof inner === "object" && !Array.isArray(inner)) {
+      const hit = extractMediaMeta(inner as Record<string, unknown>, depth + 1);
+      if (hit) return hit;
+    }
+  }
+  return null;
+}
+
 function looksLikePhoneOrJidLabel(name: string): boolean {
   const t = name.trim().toLowerCase();
   if (!t) return true;
@@ -396,6 +490,15 @@ function normalizeContactNameCandidate(v: unknown): string | null {
   const t = v.trim().replace(/\s+/g, " ");
   if (!t) return null;
   if (looksLikePhoneOrJidLabel(t)) return null;
+  if (t.length > 140) return t.slice(0, 140);
+  return t;
+}
+
+function normalizeGroupDisplayNameCandidate(v: unknown): string | null {
+  if (typeof v !== "string") return null;
+  const t = v.trim().replace(/\s+/g, " ");
+  if (!t) return null;
+  if (t.includes("@g.us") || t.includes("@s.whatsapp.net") || t.includes("@lid")) return null;
   if (t.length > 140) return t.slice(0, 140);
   return t;
 }
@@ -417,6 +520,44 @@ function extractContactName(
   for (const c of ordered) {
     const name = normalizeContactNameCandidate(c);
     if (name) return name;
+  }
+  return null;
+}
+
+function extractGroupDisplayName(
+  merged: Record<string, unknown>,
+  root: Record<string, unknown> | null,
+): string | null {
+  const m = merged;
+  const r = root ?? {};
+  const ordered = [
+    m.groupName,
+    r.groupName,
+    m.subject,
+    r.subject,
+    m.chatName,
+    r.chatName,
+    m.name,
+    r.name,
+  ];
+  for (const candidate of ordered) {
+    const parsed = normalizeGroupDisplayNameCandidate(candidate);
+    if (parsed) return parsed;
+  }
+  return null;
+}
+
+function extractMessageStatus(
+  merged: Record<string, unknown>,
+  root: Record<string, unknown> | null,
+): "sent" | "read" | null {
+  const bucket = [merged.status, root?.status, merged.messageStatus, root?.messageStatus];
+  for (const raw of bucket) {
+    if (typeof raw !== "string") continue;
+    const low = raw.trim().toLowerCase();
+    if (!low) continue;
+    if (low.includes("read") || low === "opened" || low === "open") return "read";
+    if (low.includes("sent") || low.includes("delivery") || low.includes("delivered")) return "sent";
   }
   return null;
 }
@@ -580,7 +721,33 @@ export function parseZapiWebhookPayload(body: unknown): ZapiInbound | null {
   });
   // #endregion
 
-  if (!phoneCandidate) return null;
+  if (!phoneCandidate) {
+    const fallbackMessageId =
+      (typeof o.messageId === "string" && o.messageId) ||
+      (typeof o.zaapId === "string" && o.zaapId) ||
+      (typeof o.id === "string" && o.id) ||
+      null;
+    const fallbackStatus = extractMessageStatus(o, root);
+    if (eventType?.toLowerCase() === "messagestatuscallback" && fallbackMessageId && fallbackStatus) {
+      return {
+        phoneRaw: "",
+        phoneE164: "__status_only__",
+        pickSource: "status_callback",
+        linkedLidKeys: [],
+        contactName: null,
+        groupDisplayName: null,
+        messageStatus: fallbackStatus,
+        messageId: fallbackMessageId,
+        body: null,
+        fromMe: true,
+        eventType,
+        sentAtIso,
+        conversationKind: "lead",
+        media: null,
+      };
+    }
+    return null;
+  }
 
   const normalized = normalizeZapiChatKey(phoneCandidate);
   if (!normalized) return null;
@@ -603,6 +770,10 @@ export function parseZapiWebhookPayload(body: unknown): ZapiInbound | null {
   const ev = eventType?.toLowerCase() ?? "";
   const fromMe = parseFromMeFlag(o, ev);
   const contactName = extractContactName(o, root, fromMe);
+  const messageStatus = extractMessageStatus(o, root);
+  const conversationKind = isGroup ? "group" : "lead";
+  const groupDisplayName =
+    conversationKind === "group" ? extractGroupDisplayName(o, root) : null;
 
   return {
     phoneRaw: phoneCandidate,
@@ -615,7 +786,10 @@ export function parseZapiWebhookPayload(body: unknown): ZapiInbound | null {
     fromMe,
     eventType,
     sentAtIso,
-    conversationKind: isGroup ? "group" : "lead",
+    conversationKind,
+    groupDisplayName,
+    messageStatus,
+    media: extractMediaMeta(o),
   };
 }
 
@@ -833,8 +1007,44 @@ export async function ingestZapiMessage(parsed: ZapiInbound) {
 
   const providerId = parsed.messageId ?? undefined;
 
+  if (providerId && parsed.messageStatus === "read") {
+    const readAt = parsed.sentAtIso ?? new Date().toISOString();
+    const { data: readRows, error: readUpdateError } = await crm
+      .from("messages")
+      .update({
+        message_status: "read",
+        read_at: readAt,
+      })
+      .eq("provider_message_id", providerId)
+      .eq("direction", "out")
+      .or("message_status.is.null,message_status.neq.read")
+      .select("conversation_id");
+    if (readUpdateError) {
+      console.warn("[zapi ingest] message read status update:", readUpdateError.message);
+    } else if ((readRows ?? []).length > 0) {
+      const touchedConversationIds = [...new Set((readRows ?? []).map((row) => row.conversation_id))];
+      await crm
+        .from("conversations")
+        .update({ updated_at: readAt })
+        .in("id", touchedConversationIds);
+      return { ok: true as const, read_status_updated: true as const };
+    }
+  }
+
+  if (parsed.phoneE164 === "__status_only__") {
+    return { ok: true as const, skipped: "status_without_message_match" as const };
+  }
+
   const messageTimeFields =
     parsed.sentAtIso != null ? { sent_at: parsed.sentAtIso } : {};
+  const mediaFields = parsed.media
+    ? {
+        media_kind: parsed.media.kind,
+        media_url: parsed.media.url,
+        media_mime_type: parsed.media.mimeType,
+        media_file_name: parsed.media.fileName,
+      }
+    : {};
 
   if (providerId) {
     const { data: existing } = await crm
@@ -848,7 +1058,12 @@ export async function ingestZapiMessage(parsed: ZapiInbound) {
       if (newBody.length > 0 && oldBody.length === 0) {
         await crm
           .from("messages")
-          .update({ body: newBody, ...messageTimeFields })
+          .update({
+            body: newBody,
+            ...(direction === "out" ? { message_status: "sent" } : {}),
+            ...messageTimeFields,
+            ...mediaFields,
+          })
           .eq("id", existing.id);
         const ts = parsed.sentAtIso ?? new Date().toISOString();
         await crm
@@ -980,12 +1195,18 @@ export async function ingestZapiMessage(parsed: ZapiInbound) {
   let conversationId: string;
   if (conv?.id) {
     conversationId = conv.id;
-    if (conv.conversation_kind !== parsed.conversationKind) {
+    if (
+      conv.conversation_kind !== parsed.conversationKind ||
+      (parsed.conversationKind === "group" && parsed.groupDisplayName)
+    ) {
       await crm
         .from("conversations")
         .update({
           conversation_kind: parsed.conversationKind,
           lead_id: parsed.conversationKind === "lead" ? leadId : null,
+          ...(parsed.conversationKind === "group" && parsed.groupDisplayName
+            ? { group_display_name: parsed.groupDisplayName }
+            : {}),
           updated_at: parsed.sentAtIso ?? new Date().toISOString(),
         })
         .eq("id", conv.id);
@@ -998,6 +1219,9 @@ export async function ingestZapiMessage(parsed: ZapiInbound) {
         channel: "whatsapp",
         phone_e164: phoneE164ForCrm,
         conversation_kind: parsed.conversationKind,
+        ...(parsed.conversationKind === "group" && parsed.groupDisplayName
+          ? { group_display_name: parsed.groupDisplayName }
+          : {}),
       })
       .select("id")
       .single();
@@ -1059,6 +1283,7 @@ export async function ingestZapiMessage(parsed: ZapiInbound) {
         .from("messages")
         .update({
           provider_message_id: providerId,
+          message_status: "sent",
           ...messageTimeFields,
         })
         .eq("id", pending.id);
@@ -1090,6 +1315,8 @@ export async function ingestZapiMessage(parsed: ZapiInbound) {
         ? String(parsed.body).trim()
         : "[Sem prévia — tipo de mensagem não mapeado]",
     provider_message_id: providerId ?? null,
+    ...(direction === "out" ? { message_status: "sent" } : {}),
+    ...mediaFields,
     ...messageTimeFields,
   });
   if (mErr) {
