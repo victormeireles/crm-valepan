@@ -19,7 +19,8 @@
     "db:push": "node scripts/db-push.cjs",
     "db:apply:linked": "node scripts/apply-migrations-linked.cjs",
     "db:apply:zapi-lid-map": "node scripts/apply-zapi-lid-migration.cjs",
-    "sync:group-names": "node scripts/sync-whatsapp-group-names.cjs"
+    "sync:group-names": "node scripts/sync-whatsapp-group-names.cjs",
+    "merge:group-jids": "node scripts/merge-guided-group-conversations.cjs --file scripts/group-merge-input.csv"
   },
   "devDependencies": {
     "typescript": "^5.7.3"
