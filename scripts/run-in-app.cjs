@@ -17,39 +17,40 @@ if (!fs.existsSync(nextCli)) {
   process.exit(1);
 }
 
-function readPortFromEnvFile(filePath) {
-  if (!fs.existsSync(filePath)) return undefined;
-  const content = fs.readFileSync(filePath, "utf8");
-  for (const line of content.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-    const match = /^PORT\s*=\s*(.+)$/.exec(trimmed);
-    if (!match) continue;
-    const value = match[1].trim().replace(/^['"]|['"]$/g, "");
-    return value || undefined;
-  }
-  return undefined;
-}
-
 if (args.length === 0) {
   console.error("Uso: node scripts/run-in-app.cjs <comando next> [args...]");
   process.exit(1);
 }
 
-if (args[0] === "dev") {
-  const alreadyHasPort = args.includes("-p") || args.includes("--port");
-  if (!alreadyHasPort) {
-    const appEnvPath = path.join(appDir, ".env.local");
-    const rootEnvPath = path.join(root, ".env.local");
-    const port = readPortFromEnvFile(appEnvPath) ?? readPortFromEnvFile(rootEnvPath);
-    if (port) args.push("-p", port);
+/** Remove flags de porta para podermos fixar uma única porta em dev. */
+function stripPortFlags(argv) {
+  const out = [];
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === "-p" || a === "--port") {
+      i += 1;
+      continue;
+    }
+    if (a.startsWith("--port=")) continue;
+    out.push(a);
   }
+  return out;
+}
+
+let childEnv = process.env;
+
+if (args[0] === "dev") {
+  // Sempre http://localhost:3000 — ignora PORT em .env.local e evita o Next saltar para 3001.
+  const withoutPort = stripPortFlags(args);
+  args.length = 0;
+  args.push(...withoutPort, "-p", "3000");
+  childEnv = { ...process.env, PORT: "3000" };
 }
 
 const r = spawnSync(process.execPath, [nextCli, ...args], {
   cwd: appDir,
   stdio: "inherit",
-  env: process.env,
+  env: childEnv,
   shell: false,
 });
 

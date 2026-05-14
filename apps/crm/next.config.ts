@@ -13,6 +13,11 @@ const isDev = process.env.NODE_ENV !== "production";
 loadEnvConfig(monorepoRoot, isDev);
 loadEnvConfig(appDir, isDev);
 
+/** Em dev, porta fixa 3000 (alinha com `scripts/run-in-app.cjs` e evita `PORT` em `.env.local` mudar a URL). */
+if (isDev) {
+  process.env.PORT = "3000";
+}
+
 /** Alias para o formato esperado pelo Next (middleware / browser / RSC). Chave anon é pública por desenho no Supabase. */
 const resolvedPublicUrl =
   process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL ?? "";
