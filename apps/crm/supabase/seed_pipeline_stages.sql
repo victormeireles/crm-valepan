@@ -5,7 +5,7 @@ do $$
 begin
   if not exists (select 1 from crm.pipeline_stages limit 1) then
     insert into crm.pipeline_stages (name, sort_order, is_final) values
-      ('Leads', 5, false),
+      ('LEADS', 5, false),
       ('QUALIFICAÇÃO', 10, false),
       ('AMOSTRA', 20, false),
       ('ENCAMINHADO PARA DISTRIBUIDOR', 30, false),
