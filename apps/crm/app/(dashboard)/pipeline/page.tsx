@@ -105,18 +105,28 @@ export default async function PipelinePage() {
         </p>
       </div>
       {stages.length > 0 ? (
-        <div className="flex flex-wrap gap-2 text-xs">
-          {stages.map((s) => {
-            const count = initialCards.filter((c) => c.stage_id === s.id).length;
-            return (
-              <span
-                key={s.id}
-                className="rounded-full border border-[var(--border)] bg-[var(--card)] px-3 py-1 text-[var(--muted)]"
-              >
-                {s.name}: <strong className="text-[var(--foreground)]">{count}</strong>
-              </span>
-            );
-          })}
+        <div className="w-full min-w-0 overflow-x-auto pb-1 [scrollbar-gutter:stable]">
+          <div
+            className="grid gap-1 sm:gap-1.5"
+            style={{
+              gridTemplateColumns: `repeat(${stages.length}, minmax(52px, 1fr))`,
+              width: `max(100%, ${stages.length * 52}px)`,
+            }}
+          >
+            {stages.map((s) => {
+              const count = initialCards.filter((c) => c.stage_id === s.id).length;
+              return (
+                <span
+                  key={s.id}
+                  title={`${s.name}: ${count}`}
+                  className="truncate rounded-md border border-[var(--border)] bg-[var(--card)] px-1 py-1.5 text-center text-[10px] leading-tight text-[var(--muted)] sm:text-[11px]"
+                >
+                  <span className="block truncate font-medium text-[var(--foreground)]">{s.name}</span>
+                  <strong className="tabular-nums text-[var(--foreground)]">{count}</strong>
+                </span>
+              );
+            })}
+          </div>
         </div>
       ) : null}
 

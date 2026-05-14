@@ -101,15 +101,18 @@ function DroppableColumn({
   return (
     <section
       ref={setNodeRef}
-      className={`flex min-h-[10rem] min-w-[14rem] flex-1 flex-col rounded-lg border border-[var(--border)] bg-[var(--card)] p-3 ${
-        isOver ? "ring-2 ring-[var(--accent)] ring-offset-2 ring-offset-[var(--background)]" : ""
+      title={stageName}
+      className={`flex min-h-[min(62vh,26rem)] min-w-0 flex-col rounded-lg border border-[var(--border)] bg-[var(--card)] p-1.5 sm:p-2 ${
+        isOver ? "ring-2 ring-[var(--accent)] ring-offset-1 ring-offset-[var(--background)]" : ""
       }`}
     >
-      <h2 className="text-sm font-medium text-[var(--muted)]">
-        {stageName}{" "}
-        <span className="font-normal text-[var(--foreground)]">({count})</span>
+      <h2 className="line-clamp-3 text-center text-[10px] font-semibold leading-tight text-[var(--muted)] sm:text-[11px]">
+        <span className="text-[var(--foreground)]">{stageName}</span>{" "}
+        <span className="font-normal tabular-nums text-[var(--muted)]">({count})</span>
       </h2>
-      <ul className="mt-2 flex flex-1 flex-col gap-2">{children}</ul>
+      <ul className="mt-1.5 flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto overscroll-contain sm:mt-2 sm:gap-1.5">
+        {children}
+      </ul>
     </section>
   );
 }
@@ -151,13 +154,13 @@ function DraggableCard({
     <li
       ref={setNodeRef}
       style={style}
-      className={`flex gap-2 rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1.5 ${
+      className={`flex gap-1 rounded border border-[var(--border)] bg-[var(--background)] px-1 py-1 sm:gap-1.5 sm:px-1.5 sm:py-1.5 ${
         isDragging ? "opacity-40" : ""
       }`}
     >
       <button
         type="button"
-        className="mt-0.5 shrink-0 cursor-grab touch-none text-[var(--muted)] hover:text-[var(--foreground)] active:cursor-grabbing"
+        className="mt-0.5 shrink-0 cursor-grab touch-none px-0.5 text-[10px] text-[var(--muted)] hover:text-[var(--foreground)] active:cursor-grabbing sm:text-sm"
         aria-label={`Arrastar: ${card.personName}`}
         {...listeners}
         {...attributes}
@@ -376,17 +379,29 @@ export function PipelineBoard({
         </p>
       ) : null}
 
-      <div className="flex gap-4 overflow-x-auto pb-2">
-        {stages.map((stage) => {
-          const items = columns.get(stage.id) ?? [];
-          return (
-            <DroppableColumn key={stage.id} stageId={stage.id} stageName={stage.name} count={items.length}>
-              {items.map((card) => (
-                <DraggableCard key={card.id} card={card} stageId={stage.id} />
-              ))}
-            </DroppableColumn>
-          );
-        })}
+      <div className="w-full min-w-0 overflow-x-auto pb-1 [scrollbar-gutter:stable]">
+        <div
+          className="grid w-full min-w-0 gap-1.5 sm:gap-2"
+          style={
+            stages.length > 0
+              ? {
+                  gridTemplateColumns: `repeat(${stages.length}, minmax(52px, 1fr))`,
+                  width: `max(100%, ${stages.length * 52}px)`,
+                }
+              : undefined
+          }
+        >
+          {stages.map((stage) => {
+            const items = columns.get(stage.id) ?? [];
+            return (
+              <DroppableColumn key={stage.id} stageId={stage.id} stageName={stage.name} count={items.length}>
+                {items.map((card) => (
+                  <DraggableCard key={card.id} card={card} stageId={stage.id} />
+                ))}
+              </DroppableColumn>
+            );
+          })}
+        </div>
       </div>
 
       <DragOverlay>{activeCard ? <CardPreview card={activeCard} /> : null}</DragOverlay>
