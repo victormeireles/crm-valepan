@@ -37,14 +37,75 @@ function stripPortFlags(argv) {
   return out;
 }
 
+/** Remove -H/--hostname para aplicarmos um host previsível em dev. */
+function stripHostnameFlags(argv) {
+  const out = [];
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === "-H" || a === "--hostname") {
+      i += 1;
+      continue;
+    }
+    if (a.startsWith("--hostname=")) continue;
+    out.push(a);
+  }
+  return out;
+}
+
+/** Verifica se algo aceita TCP em 127.0.0.1:port (dev já a correr ou outro serviço). */
+function isLocalPortAcceptingConnections(port) {
+  const r = spawnSync(
+    process.execPath,
+    [
+      "-e",
+      "const n=require('net');" +
+        "const c=n.connect(" +
+        port +
+        ",'127.0.0.1',()=>{c.destroy();process.exit(2)});" +
+        "c.on('error',()=>process.exit(0));" +
+        "setTimeout(()=>process.exit(0),600);",
+    ],
+    { timeout: 1500, encoding: "utf8" },
+  );
+  return r.status === 2;
+}
+
 let childEnv = process.env;
 
 if (args[0] === "dev") {
-  // Sempre http://localhost:3000 — ignora PORT em .env.local e evita o Next saltar para 3001.
-  const withoutPort = stripPortFlags(args);
+  // Porta 3000 fixa; 0.0.0.0 evita bind só em :: (IPv6) no Windows, que por vezes falha com "localhost".
+  const cleaned = stripHostnameFlags(stripPortFlags(args));
   args.length = 0;
-  args.push(...withoutPort, "-p", "3000");
+  args.push(...cleaned, "-H", "0.0.0.0", "-p", "3000");
   childEnv = { ...process.env, PORT: "3000" };
+
+  if (isLocalPortAcceptingConnections(3000)) {
+    console.warn(
+      "[run-in-app] Porta 3000 ocupada (outro `next dev` ou serviço). A libertar automaticamente…",
+    );
+    const stopScript = path.join(__dirname, "stop-dev-3000.cjs");
+    spawnSync(process.execPath, [stopScript], {
+      cwd: root,
+      stdio: "inherit",
+      shell: false,
+    });
+    const until = Date.now() + 1000;
+    while (Date.now() < until) {
+      /* esperar o SO libertar o socket */
+    }
+    if (isLocalPortAcceptingConnections(3000)) {
+      console.error(
+        "\n[run-in-app] A porta 3000 continua ocupada. Rode: npm run dev:stop\n" +
+          "   Ou no PowerShell: Get-NetTCPConnection -LocalPort 3000\n",
+      );
+      process.exit(1);
+    }
+    console.warn("[run-in-app] Porta libertada. A iniciar o servidor…");
+  }
+
+  console.log(
+    "[run-in-app] Dev → http://localhost:3000 (ou http://127.0.0.1:3000). Se não abrir, verifique o proxy do Windows para endereços locais.",
+  );
 }
 
 const r = spawnSync(process.execPath, [nextCli, ...args], {

@@ -16,6 +16,13 @@ function num(v: unknown): number {
   return 0;
 }
 
+function normStageName(name: string) {
+  return name
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase();
+}
+
 function KpiCard({
   label,
   value,
@@ -58,7 +65,10 @@ export default async function DashboardPage() {
     crm.from("leads").select("*", { count: "exact", head: true }),
     crm.from("tasks").select("*", { count: "exact", head: true }).eq("done", false),
     crm.from("sample_shipments").select("*", { count: "exact", head: true }).neq("status", "ENVIADO"),
-    crm.from("pipeline_stages").select("id, is_final"),
+    crm
+      .from("pipeline_stages")
+      .select("id, name, sort_order, is_final")
+      .order("sort_order", { ascending: true }),
     crm.from("opportunities").select("stage_id"),
     crm
       .from("tasks")
@@ -76,11 +86,37 @@ export default async function DashboardPage() {
       .limit(5),
   ]);
 
-  const finalStageIds = new Set(
-    (stages ?? []).filter((s) => s.is_final).map((s) => s.id),
-  );
-  const openPipelineCount =
-    (opps ?? []).filter((o) => o.stage_id && !finalStageIds.has(o.stage_id)).length;
+  const stageRows = stages ?? [];
+  const finalStageIds = new Set(stageRows.filter((s) => s.is_final).map((s) => s.id));
+  const openPipelineCount = (opps ?? []).filter(
+    (o) => o.stage_id && !finalStageIds.has(o.stage_id),
+  ).length;
+
+  const totalOpps = (opps ?? []).length;
+  const countByStage = new Map<string, number>();
+  for (const o of opps ?? []) {
+    if (!o.stage_id) continue;
+    countByStage.set(o.stage_id, (countByStage.get(o.stage_id) ?? 0) + 1);
+  }
+
+  const funnelRows = stageRows.map((s) => {
+    const c = countByStage.get(s.id) ?? 0;
+    return {
+      id: s.id,
+      name: s.name,
+      sort_order: s.sort_order,
+      is_final: s.is_final,
+      count: c,
+      pctTotal: totalOpps > 0 ? Math.round((c / totalOpps) * 1000) / 10 : 0,
+    };
+  });
+  const maxStageCount = Math.max(1, ...funnelRows.map((r) => r.count));
+
+  const convertidoStage = stageRows.find((s) => normStageName(s.name).includes("convertido"));
+  const wonCount = convertidoStage ? (countByStage.get(convertidoStage.id) ?? 0) : 0;
+  const lostCount = stageRows
+    .filter((s) => s.is_final && s.id !== convertidoStage?.id)
+    .reduce((acc, s) => acc + (countByStage.get(s.id) ?? 0), 0);
 
   const cards = [
     { label: "Leads", value: leadCount ?? 0 },
@@ -172,6 +208,93 @@ export default async function DashboardPage() {
             value={activeConv ?? "—"}
             hint="Conversas distintas com pelo menos uma mensagem (qualquer direção) nos últimos 7 dias."
           />
+        </div>
+      </section>
+
+      <section className="space-y-4" aria-labelledby="dash-funnel">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h2
+              id="dash-funnel"
+              className="text-lg font-bold text-[var(--vp-wine)]"
+              style={{ fontFamily: "var(--font-display)" }}
+            >
+              Funil por etapa (números)
+            </h2>
+            <p className="mt-1 max-w-2xl text-sm text-[var(--muted)]">
+              Distribuição atual das oportunidades por etapa. Cada oportunidade aparece em uma única etapa; os
+              percentuais são sobre o total de oportunidades ({totalOpps}).
+            </p>
+          </div>
+          <Link
+            href="/pipeline"
+            className="shrink-0 rounded-lg border border-[var(--vp-gold-classic)] bg-[rgba(199,166,77,0.12)] px-3 py-2 text-xs font-semibold text-[var(--vp-wine)] transition-colors hover:bg-[rgba(199,166,77,0.2)]"
+          >
+            Ver no quadro Kanban
+          </Link>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-3">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--vp-paper-pure)] p-4 shadow-[var(--sh-sm)]">
+            <p className="text-xs font-semibold uppercase tracking-[0.06em] text-[var(--vp-ink-muted)]">
+              Em aberto (não finais)
+            </p>
+            <p className="mt-1 text-2xl font-bold tabular-nums text-[var(--vp-wine)]">{openPipelineCount}</p>
+          </div>
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--vp-paper-pure)] p-4 shadow-[var(--sh-sm)]">
+            <p className="text-xs font-semibold uppercase tracking-[0.06em] text-[var(--vp-ink-muted)]">
+              Convertidas
+            </p>
+            <p className="mt-1 text-2xl font-bold tabular-nums text-[var(--vp-wine)]">{wonCount}</p>
+            <p className="mt-1 text-xs text-[var(--muted)]">
+              {totalOpps > 0 ? `${Math.round((wonCount / totalOpps) * 1000) / 10}% do total` : "—"}
+            </p>
+          </div>
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--vp-paper-pure)] p-4 shadow-[var(--sh-sm)]">
+            <p className="text-xs font-semibold uppercase tracking-[0.06em] text-[var(--vp-ink-muted)]">
+              Encerradas sem conversão
+            </p>
+            <p className="mt-1 text-2xl font-bold tabular-nums text-[var(--vp-wine)]">{lostCount}</p>
+            <p className="mt-1 text-xs text-[var(--muted)]">
+              {totalOpps > 0 ? `${Math.round((lostCount / totalOpps) * 1000) / 10}% do total` : "—"}
+            </p>
+          </div>
+        </div>
+
+        <div className="overflow-hidden rounded-xl border-y border-r border-[var(--border)] border-l-[3px] border-l-[var(--vp-gold-classic)] bg-[var(--vp-paper-pure)] shadow-[var(--sh-sm)]">
+          {funnelRows.length === 0 ? (
+            <p className="p-6 text-center text-sm text-[var(--muted)]">Nenhuma etapa do funil configurada.</p>
+          ) : totalOpps === 0 ? (
+            <p className="p-6 text-center text-sm text-[var(--muted)]">Nenhuma oportunidade para exibir.</p>
+          ) : (
+            <ul className="divide-y divide-[var(--border)]">
+              {funnelRows.map((row) => (
+                <li key={row.id} className="px-4 py-3">
+                  <div className="flex flex-wrap items-baseline justify-between gap-2 gap-y-1">
+                    <span className="min-w-0 flex-1 text-sm font-medium text-[var(--vp-ink-body)]">
+                      {row.name}
+                      {row.is_final ? (
+                        <span className="ml-2 text-xs font-normal text-[var(--muted)]">(final)</span>
+                      ) : null}
+                    </span>
+                    <span className="shrink-0 text-sm tabular-nums text-[var(--vp-wine)]">
+                      <strong>{row.count}</strong>
+                      <span className="ml-2 text-xs font-normal text-[var(--muted)]">{row.pctTotal}%</span>
+                    </span>
+                  </div>
+                  <div
+                    className="mt-2 h-2.5 overflow-hidden rounded-full bg-[rgba(35,0,4,0.08)]"
+                    role="presentation"
+                  >
+                    <div
+                      className="h-full min-w-[2px] rounded-full bg-[var(--vp-gold-classic)] transition-[width] duration-300"
+                      style={{ width: `${(row.count / maxStageCount) * 100}%` }}
+                    />
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       </section>
 
