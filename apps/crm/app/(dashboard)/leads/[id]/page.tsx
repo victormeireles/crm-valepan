@@ -5,10 +5,25 @@ import { createServerSupabaseClient, crmTables } from "@/lib/supabase/server";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { LeadNoteForm } from "./lead-note-form";
+import { LeadOwnerForm } from "./lead-owner-form";
 import { LeadTaskForm } from "./lead-task-form";
+import { LeadTaskAssigneeSelect } from "./lead-task-assignee-select";
 import { TimelineEntry } from "./timeline-entry";
 import { ToggleTaskButton } from "../../tasks/toggle-task-button";
 import { LeadActions } from "./ui";
+
+const TEAM_ROLE_LABEL: Record<string, string> = {
+  admin: "Admin",
+  comercial: "Comercial",
+  gestao: "Gestão",
+  operacao: "Operação",
+};
+
+function formatTeamOption(p: { id: string; full_name: string | null; role: string }) {
+  const name = (p.full_name ?? "").trim() || "Sem nome";
+  const role = TEAM_ROLE_LABEL[p.role] ?? p.role;
+  return { id: p.id, label: `${name} (${role})` };
+}
 
 export default async function LeadDetailPage({
   params,
@@ -53,31 +68,40 @@ export default async function LeadDetailPage({
     clientCategory: lead.client_category,
   });
 
-  const { data: opps } = await crm
-    .from("opportunities")
-    .select("*, pipeline_stages(name)")
-    .eq("lead_id", id)
-    .order("created_at", { ascending: false });
+  const leadOwnerId = lead.owner_id ?? null;
+
+  const [
+    { data: opps },
+    { data: stages },
+    { data: timeline },
+    { data: leadTasksRaw },
+    { data: teamProfiles },
+  ] = await Promise.all([
+    crm
+      .from("opportunities")
+      .select("*, pipeline_stages(name)")
+      .eq("lead_id", id)
+      .order("created_at", { ascending: false }),
+    crm.from("pipeline_stages").select("id, name, sort_order").order("sort_order", { ascending: true }),
+    crm
+      .from("timeline_events")
+      .select("*")
+      .eq("lead_id", id)
+      .order("at", { ascending: false })
+      .limit(120),
+    crm
+      .from("tasks")
+      .select("id, title, due_at, done, assignee_id")
+      .eq("lead_id", id)
+      .order("done", { ascending: true })
+      .order("due_at", { ascending: true, nullsFirst: false }),
+    crm.from("profiles").select("id, full_name, role").order("full_name", { ascending: true }),
+  ]);
 
   const opportunity = opps?.[0] ?? null;
-
-  const { data: stages } = await crm
-    .from("pipeline_stages")
-    .select("id, name, sort_order")
-    .order("sort_order", { ascending: true });
-
-  const { data: timeline } = await crm
-    .from("timeline_events")
-    .select("*")
-    .eq("lead_id", id)
-    .order("at", { ascending: false })
-    .limit(80);
-
-  const { data: leadTasks } = await crm
-    .from("tasks")
-    .select("id, title, due_at, done")
-    .eq("lead_id", id)
-    .order("due_at", { ascending: true, nullsFirst: false });
+  const leadTasks = leadTasksRaw;
+  const teamOptions = (teamProfiles ?? []).map(formatTeamOption);
+  const assigneeLabel = new Map(teamOptions.map((o) => [o.id, o.label]));
 
   return (
     <div className="space-y-6">
@@ -99,6 +123,9 @@ export default async function LeadDetailPage({
           <p className="text-sm text-[var(--muted)]">
             Status: {lead.status} · Origem: {lead.source}
           </p>
+          <div className="mt-3 max-w-md">
+            <LeadOwnerForm leadId={id} ownerId={leadOwnerId} teamOptions={teamOptions} />
+          </div>
         </div>
         <LeadActions
           key={opportunity?.id ?? "no-opp"}
@@ -183,13 +210,29 @@ export default async function LeadDetailPage({
             {(leadTasks ?? []).map((t) => (
               <li
                 key={t.id}
-                className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border)] pb-2 text-sm last:border-0"
+                className="flex flex-col gap-2 border-b border-[var(--border)] pb-3 text-sm last:border-0 md:flex-row md:flex-wrap md:items-center md:justify-between"
               >
-                <span className={t.done ? "text-[var(--muted)] line-through" : ""}>{t.title}</span>
-                <span className="flex items-center gap-2 text-xs text-[var(--muted)]">
-                  {t.due_at ? new Date(t.due_at).toLocaleString("pt-BR") : "sem prazo"}
+                <div className="min-w-0 flex-1">
+                  <span className={`block ${t.done ? "text-[var(--muted)] line-through" : ""}`}>
+                    {t.title}
+                  </span>
+                  <span className="mt-1 block text-xs text-[var(--muted)]">
+                    {t.assignee_id
+                      ? (assigneeLabel.get(t.assignee_id) ?? "Responsável desconhecido")
+                      : "Não atribuído"}
+                  </span>
+                </div>
+                <div className="flex shrink-0 flex-wrap items-center gap-2">
+                  <LeadTaskAssigneeSelect
+                    taskId={t.id}
+                    assigneeId={t.assignee_id ?? null}
+                    teamOptions={teamOptions}
+                  />
+                  <span className="text-xs text-[var(--muted)] whitespace-nowrap">
+                    {t.due_at ? new Date(t.due_at).toLocaleString("pt-BR") : "Sem prazo"}
+                  </span>
                   <ToggleTaskButton taskId={t.id} done={t.done} />
-                </span>
+                </div>
               </li>
             ))}
             {(!leadTasks || leadTasks.length === 0) && (
@@ -198,7 +241,13 @@ export default async function LeadDetailPage({
           </ul>
           <div className="mt-4 border-t border-[var(--border)] pt-4">
             <h3 className="mb-2 text-xs font-medium text-[var(--muted)]">Nova tarefa</h3>
-            <LeadTaskForm leadId={id} />
+            <LeadTaskForm
+              key={`tf-${leadOwnerId ?? "none"}`}
+              leadId={id}
+              opportunityId={opportunity?.id ?? null}
+              teamOptions={teamOptions}
+              defaultAssigneeId={leadOwnerId}
+            />
           </div>
         </div>
         <div className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-4">

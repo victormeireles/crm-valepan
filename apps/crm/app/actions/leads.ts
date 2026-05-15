@@ -347,6 +347,48 @@ export async function updateLeadClientCategory(input: { leadId: string; category
   return { ok: true as const };
 }
 
+export async function updateLeadOwner(input: { leadId: string; ownerId: string | null }) {
+  const supabase = await createServerSupabaseClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false as const, error: "Não autenticado" };
+
+  const crm = crmTables(supabase);
+
+  if (input.ownerId) {
+    const { data: profile } = await crm.from("profiles").select("id").eq("id", input.ownerId).maybeSingle();
+    if (!profile?.id) return { ok: false as const, error: "Responsável inválido." };
+  }
+
+  const { data: updated, error } = await crm
+    .from("leads")
+    .update({
+      owner_id: input.ownerId,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", input.leadId)
+    .select("id")
+    .maybeSingle();
+
+  if (error) return { ok: false as const, error: error.message };
+  if (!updated) return { ok: false as const, error: "Não foi possível atualizar o responsável." };
+
+  await crm
+    .from("opportunities")
+    .update({
+      owner_id: input.ownerId,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("lead_id", input.leadId);
+
+  revalidatePath(`/leads/${input.leadId}`);
+  revalidatePath("/leads");
+  revalidatePath("/pipeline");
+  revalidatePath("/dashboard");
+  return { ok: true as const };
+}
+
 function firstOrNull<T>(value: T | T[] | null | undefined): T | null {
   if (!value) return null;
   return Array.isArray(value) ? (value[0] ?? null) : value;
