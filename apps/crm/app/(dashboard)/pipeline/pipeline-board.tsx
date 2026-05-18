@@ -14,9 +14,11 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
+import type { PipelineSignal } from "@/lib/pipeline-signals";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { PipelineSignalBadges } from "./pipeline-signal-badges";
 
 export type PipelineStageDTO = {
   id: string;
@@ -35,6 +37,8 @@ export type PipelineCardDTO = {
   companyLine: string | null;
   client_category: string | null;
   phone_e164: string | null;
+  ownerId: string | null;
+  signals: PipelineSignal[];
 };
 
 function stageNeedsLostReason(stageName: string) {
@@ -175,6 +179,7 @@ function DraggableCard({
         ) : (
           <div className="block">{body}</div>
         )}
+        <PipelineSignalBadges signals={card.signals} />
         {card.lost_reason ? (
           <p className="mt-1 text-xs text-[var(--muted)]">Motivo: {card.lost_reason}</p>
         ) : null}
