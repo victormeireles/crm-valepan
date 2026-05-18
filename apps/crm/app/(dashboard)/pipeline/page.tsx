@@ -141,14 +141,14 @@ export default async function PipelinePage({
   const { data: lastMessages } =
     leadIds.length > 0
       ? await crm
-          .from("v_conversation_last_message")
+          .from("v_lead_last_message")
           .select("lead_id, last_direction")
           .in("lead_id", leadIds)
-      : { data: [] as { lead_id: string | null; last_direction: string }[] };
+      : { data: [] as { lead_id: string; last_direction: string }[] };
 
   const lastDirectionByLead = new Map<string, string>();
   for (const row of lastMessages ?? []) {
-    if (row.lead_id) lastDirectionByLead.set(row.lead_id, row.last_direction);
+    lastDirectionByLead.set(row.lead_id, row.last_direction);
   }
 
   const stages: PipelineStageDTO[] = (stageRows ?? []).map((s) => ({

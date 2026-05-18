@@ -424,6 +424,14 @@ export interface Database {
           last_body_preview: string | null;
         };
       };
+      v_lead_last_message: {
+        Row: {
+          lead_id: string;
+          last_direction: string;
+          last_sent_at: string;
+          last_body_preview: string | null;
+        };
+      };
     };
     Functions: {
       dashboard_kpis_extra: {

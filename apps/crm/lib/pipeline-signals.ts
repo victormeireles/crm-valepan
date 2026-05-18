@@ -2,12 +2,18 @@
 
 export const PIPELINE_STALE_DAYS = 7;
 
-export const PIPELINE_SIGNALS = ["awaiting_reply", "stale", "followup_overdue"] as const;
+export const PIPELINE_SIGNALS = [
+  "awaiting_reply",
+  "replied",
+  "stale",
+  "followup_overdue",
+] as const;
 
 export type PipelineSignal = (typeof PIPELINE_SIGNALS)[number];
 
 export const PIPELINE_SIGNAL_LABELS: Record<PipelineSignal, string> = {
   awaiting_reply: "Sem resposta",
+  replied: "Respondido",
   stale: `Parado ${PIPELINE_STALE_DAYS}+ dias`,
   followup_overdue: "Follow-up atrasado",
 };
@@ -27,6 +33,8 @@ export function computePipelineSignals(input: {
 
   if (input.lastMessageDirection === "in") {
     signals.push("awaiting_reply");
+  } else if (input.lastMessageDirection === "out") {
+    signals.push("replied");
   }
 
   if (!input.isFinalStage) {

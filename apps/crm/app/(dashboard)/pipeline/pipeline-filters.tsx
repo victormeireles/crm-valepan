@@ -134,8 +134,9 @@ export function PipelineFilters({
       ) : null}
 
       <p className="text-[11px] leading-relaxed text-[var(--muted)]">
-        Sinais: última mensagem do cliente sem resposta; oportunidade aberta sem movimento há{" "}
-        {PIPELINE_STALE_DAYS}+ dias; próxima ação do funil vencida.
+        Sinais: última mensagem do cliente (sem resposta) ou da equipe no WhatsApp/chat (respondido);
+        oportunidade aberta sem movimento há {PIPELINE_STALE_DAYS}+ dias; próxima ação do funil
+        vencida.
       </p>
     </div>
   );
