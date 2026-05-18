@@ -9,12 +9,15 @@ export function LeadTaskForm({
   opportunityId,
   teamOptions,
   defaultAssigneeId,
+  onCreated,
 }: {
   leadId: string;
   opportunityId: string | null;
   teamOptions: { id: string; label: string }[];
   /** Quando definido (ex.: owner do lead), pré-seleciona o responsável da nova tarefa. */
   defaultAssigneeId: string | null;
+  /** Ex.: fechar modal do chat após criar. */
+  onCreated?: (title: string) => void;
 }) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
@@ -26,6 +29,7 @@ export function LeadTaskForm({
     setErr(null);
     const fd = new FormData(e.currentTarget);
     fd.set("lead_id", leadId);
+    const title = String(fd.get("title") ?? "").trim();
     const res = await createTask(fd);
     setLoading(false);
     if (!res.ok) {
@@ -38,6 +42,7 @@ export function LeadTaskForm({
       if (sel) sel.value = defaultAssigneeId;
     }
     router.refresh();
+    onCreated?.(title);
   }
 
   return (

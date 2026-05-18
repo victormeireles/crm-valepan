@@ -3,7 +3,10 @@
 import { LeadTaskForm } from "@/app/(dashboard)/leads/[id]/lead-task-form";
 import { ToggleTaskButton } from "@/app/(dashboard)/tasks/toggle-task-button";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+
+const AUTO_CLOSE_MS = 1800;
 
 export type InboxTaskRow = {
   id: string;
@@ -30,7 +33,10 @@ export function InboxTasksPanel({
   assigneeLabels: Record<string, string>;
   defaultAssigneeId: string | null;
 }) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
 
   const openCount = tasks.filter((t) => !t.done).length;
@@ -47,11 +53,31 @@ export function InboxTasksPanel({
     }
   }, [open]);
 
+  useEffect(() => {
+    return () => {
+      if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+    };
+  }, []);
+
+  function handleTaskCreated(title: string) {
+    setSuccessMsg(`Tarefa criada: «${title}»`);
+    router.refresh();
+    if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+    closeTimerRef.current = setTimeout(() => {
+      setOpen(false);
+      setSuccessMsg(null);
+      closeTimerRef.current = null;
+    }, AUTO_CLOSE_MS);
+  }
+
   return (
     <>
       <button
         type="button"
-        onClick={() => setOpen(true)}
+        onClick={() => {
+          setSuccessMsg(null);
+          setOpen(true);
+        }}
         className="shrink-0 rounded border border-[var(--border)] bg-[var(--vp-paper-pure)] px-2.5 py-1.5 text-xs font-semibold text-[var(--vp-wine)] transition-colors hover:bg-[rgba(35,0,4,0.05)]"
       >
         Tarefas
@@ -85,6 +111,15 @@ export function InboxTasksPanel({
           </header>
 
           <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+            {successMsg ? (
+              <p
+                className="mb-3 rounded-lg border border-[var(--vp-gold-classic)] bg-[rgba(199,166,77,0.18)] px-3 py-2.5 text-sm font-medium text-[var(--vp-wine)]"
+                role="status"
+                aria-live="polite"
+              >
+                {successMsg}
+              </p>
+            ) : null}
             <ul className="space-y-2">
               {pending.length === 0 ? (
                 <li className="text-sm text-[var(--muted)]">Nenhuma tarefa em aberto.</li>
@@ -133,6 +168,7 @@ export function InboxTasksPanel({
                 opportunityId={opportunityId}
                 teamOptions={teamOptions}
                 defaultAssigneeId={defaultAssigneeId}
+                onCreated={handleTaskCreated}
               />
               <p className="mt-2 text-[11px] leading-relaxed text-[var(--muted)]">
                 A tarefa aparece na ficha do lead, em Tarefas e, com prazo, na próxima ação do funil.
