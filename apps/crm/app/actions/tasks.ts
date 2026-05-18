@@ -3,6 +3,25 @@
 import { createServerSupabaseClient, crmTables } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 
+type Crm = ReturnType<typeof crmTables>;
+
+/** `tasks.assignee_id` referencia `crm.profiles`, não `auth.users`. */
+async function resolveTaskAssigneeId(
+  crm: Crm,
+  actorUserId: string,
+  assigneeRaw: string,
+): Promise<{ ok: true; id: string | null } | { ok: false; error: string }> {
+  const pick = assigneeRaw.length > 0 ? assigneeRaw : actorUserId;
+  const { data: prof } = await crm.from("profiles").select("id").eq("id", pick).maybeSingle();
+  if (!prof?.id) {
+    if (assigneeRaw.length > 0) {
+      return { ok: false, error: "Responsável pela tarefa inválido." };
+    }
+    return { ok: true, id: null };
+  }
+  return { ok: true, id: prof.id };
+}
+
 export async function createTask(formData: FormData) {
   const title = String(formData.get("title") ?? "").trim();
   if (!title) return { ok: false as const, error: "Título obrigatório" };
@@ -19,12 +38,8 @@ export async function createTask(formData: FormData) {
     typeof due === "string" && due.length > 0 ? new Date(due).toISOString() : null;
   const leadId = String(formData.get("lead_id") ?? "").trim() || null;
   const assigneeRaw = String(formData.get("assignee_id") ?? "").trim();
-  let assigneeId: string | null = user.id;
-  if (assigneeRaw.length > 0) {
-    const { data: prof } = await crm.from("profiles").select("id").eq("id", assigneeRaw).maybeSingle();
-    if (!prof?.id) return { ok: false as const, error: "Responsável pela tarefa inválido." };
-    assigneeId = assigneeRaw;
-  }
+  const assigneeId = await resolveTaskAssigneeId(crm, user.id, assigneeRaw);
+  if (!assigneeId.ok) return { ok: false as const, error: assigneeId.error };
 
   const oppRaw = String(formData.get("opportunity_id") ?? "").trim();
   let opportunityId: string | null = null;
@@ -43,7 +58,7 @@ export async function createTask(formData: FormData) {
   const { error } = await crm.from("tasks").insert({
     title,
     due_at: dueAt,
-    assignee_id: assigneeId,
+    assignee_id: assigneeId.id,
     done: false,
     lead_id: leadId,
     opportunity_id: opportunityId,
