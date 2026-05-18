@@ -161,7 +161,11 @@ export async function updateOpportunityStage(input: {
     entity_type: "opportunity",
     entity_id: input.opportunityId,
     action: "stage_changed",
-    payload: { stage_id: input.stageId, lost_reason: input.lostReason },
+    payload: {
+      stage_id: input.stageId,
+      stage_name: stage.name,
+      lost_reason: input.lostReason,
+    },
     actor_id: user?.id ?? null,
   });
 

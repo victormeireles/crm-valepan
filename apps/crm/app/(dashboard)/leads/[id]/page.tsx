@@ -260,6 +260,9 @@ export default async function LeadDetailPage({
 
       <section className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-4">
         <h2 className="text-sm font-medium">Timeline</h2>
+        <p className="mt-1 text-xs text-[var(--muted)]">
+          Mensagens, notas, tarefas, amostras e alterações do funil (últimos 120 eventos).
+        </p>
         <ul className="mt-3 space-y-3 text-sm">
           {(timeline ?? []).map((row) => (
             <TimelineEntry key={`${row.kind}-${row.event_id}`} row={row} />

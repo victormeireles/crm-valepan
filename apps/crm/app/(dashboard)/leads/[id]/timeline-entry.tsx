@@ -1,6 +1,8 @@
+import { timelineActivityLabel } from "@/lib/timeline-labels";
 import type { Json } from "@/lib/database.types";
+import Link from "next/link";
 
-type TimelineRow = {
+export type TimelineRow = {
   kind: string;
   event_id: string;
   at: string;
@@ -9,68 +11,18 @@ type TimelineRow = {
   data: Json;
 };
 
-function str(v: unknown): string | null {
-  return typeof v === "string" && v.trim().length > 0 ? v.trim() : null;
-}
-
-function activityDescription(data: Record<string, unknown>): { title: string; detail?: string } {
-  const action = str(data.action) ?? "";
-  const payload = (data.payload as Record<string, unknown> | null) ?? {};
-
-  switch (action) {
-    case "stage_changed": {
-      const stageName = str(data.stage_name);
-      const lost = str(payload.lost_reason);
-      return {
-        title: stageName ? `Etapa do funil: ${stageName}` : "Etapa do funil alterada",
-        detail: lost ? `Motivo: ${lost}` : undefined,
-      };
-    }
-    case "created":
-      return { title: "Oportunidade criada" };
-    case "owner_changed": {
-      const ownerName = str(data.owner_name);
-      return {
-        title: ownerName ? `Responsável do lead: ${ownerName}` : "Responsável do lead removido ou alterado",
-      };
-    }
-    case "created_manual": {
-      const phone = str(payload.phone);
-      const source = str(payload.source);
-      return {
-        title: "Lead criado manualmente",
-        detail: [source && `Origem: ${source}`, phone && `Telefone: ${phone}`].filter(Boolean).join(" · ") || undefined,
-      };
-    }
-    case "created_from_whatsapp": {
-      const phone = str(payload.phone);
-      return { title: "Lead criado via WhatsApp", detail: phone ?? undefined };
-    }
-    case "outbound_whatsapp_contact": {
-      const name = str(payload.contact_name);
-      const phone = str(payload.contact_phone);
-      return {
-        title: "Contato enviado por WhatsApp",
-        detail: [name, phone].filter(Boolean).join(" · ") || undefined,
-      };
-    }
-    case "outbound_whatsapp_attachment": {
-      const name = str(payload.file_name);
-      return { title: "Anexo enviado por WhatsApp", detail: name ?? undefined };
-    }
-    default:
-      return {
-        title: action ? `Atividade: ${action}` : "Atividade",
-      };
-  }
+function actorSuffix(data: Record<string, unknown>) {
+  const name = typeof data.actor_name === "string" ? data.actor_name.trim() : "";
+  return name ? ` · ${name}` : "";
 }
 
 export function TimelineEntry({ row }: { row: TimelineRow }) {
-  const data = row.data as Record<string, unknown>;
+  const data = (row.data ?? {}) as Record<string, unknown>;
 
   if (row.kind === "message") {
     const dir = data.direction === "out" ? "Saída" : "Entrada";
     const body = typeof data.body === "string" ? data.body : "";
+    const convId = typeof data.conversation_id === "string" ? data.conversation_id : null;
     return (
       <li className="border-b border-[var(--border)] pb-3 last:border-0">
         <div className="flex flex-wrap justify-between gap-2 text-xs text-[var(--muted)]">
@@ -78,6 +30,11 @@ export function TimelineEntry({ row }: { row: TimelineRow }) {
           <time dateTime={row.at}>{new Date(row.at).toLocaleString("pt-BR")}</time>
         </div>
         <p className="mt-1 whitespace-pre-wrap text-sm">{body || "(sem texto)"}</p>
+        {convId ? (
+          <Link href={`/inbox?cid=${convId}`} className="mt-1 inline-block text-xs text-[var(--vp-wine)] hover:underline">
+            Abrir conversa
+          </Link>
+        ) : null}
       </li>
     );
   }
@@ -99,33 +56,77 @@ export function TimelineEntry({ row }: { row: TimelineRow }) {
     const title = typeof data.title === "string" ? data.title : "Tarefa";
     const done = data.done === true;
     const due = data.due_at ? new Date(String(data.due_at)).toLocaleString("pt-BR") : null;
-    const assignee = str(data.assignee_name);
     return (
       <li className="border-b border-[var(--border)] pb-3 last:border-0">
         <div className="flex flex-wrap justify-between gap-2 text-xs text-[var(--muted)]">
-          <span>Tarefa {done ? "· concluída" : ""}</span>
+          <span>Tarefa criada{done ? " (já concluída)" : ""}</span>
           <time dateTime={row.at}>{new Date(row.at).toLocaleString("pt-BR")}</time>
         </div>
         <p className="mt-1 text-sm font-medium">{title}</p>
-        <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-[var(--muted)]">
-          {due ? <span>Prazo: {due}</span> : <span>Sem prazo</span>}
-          {assignee ? <span>Responsável: {assignee}</span> : null}
+        {due ? <p className="text-xs text-[var(--muted)]">Prazo: {due}</p> : null}
+      </li>
+    );
+  }
+
+  if (row.kind === "sample") {
+    const status = typeof data.status === "string" ? data.status : "—";
+    const contact = typeof data.contact_name === "string" ? data.contact_name : null;
+    const bread = typeof data.bread_type === "string" ? data.bread_type : null;
+    return (
+      <li className="border-b border-[var(--border)] pb-3 last:border-0">
+        <div className="flex flex-wrap justify-between gap-2 text-xs text-[var(--muted)]">
+          <span>Amostra</span>
+          <time dateTime={row.at}>{new Date(row.at).toLocaleString("pt-BR")}</time>
         </div>
+        <p className="mt-1 text-sm">
+          Status: <strong>{status}</strong>
+          {contact ? ` · ${contact}` : ""}
+        </p>
+        {bread ? <p className="text-xs text-[var(--muted)]">{bread}</p> : null}
+        <Link href="/samples" className="mt-1 inline-block text-xs text-[var(--vp-wine)] hover:underline">
+          Ver amostras
+        </Link>
       </li>
     );
   }
 
   if (row.kind === "activity") {
-    const { title, detail } = activityDescription(data);
-    const actor = str(data.actor_name);
+    const action = typeof data.action === "string" ? data.action : "activity";
+    const payload = (data.payload ?? {}) as Record<string, unknown>;
+    const label = timelineActivityLabel(action);
+
+    let detail: string | null = null;
+    if (action === "stage_changed") {
+      const stageName =
+        typeof payload.stage_name === "string"
+          ? payload.stage_name
+          : typeof payload.stage_id === "string"
+            ? payload.stage_id
+            : null;
+      if (stageName) detail = `Nova etapa: ${stageName}`;
+      const lost = typeof payload.lost_reason === "string" ? payload.lost_reason.trim() : "";
+      if (lost) detail = detail ? `${detail} · Motivo: ${lost}` : `Motivo: ${lost}`;
+    }
+    if (action === "task_completed" || action === "task_reopened") {
+      const title = typeof payload.title === "string" ? payload.title : null;
+      if (title) detail = title;
+    }
+    if (action === "owner_changed") {
+      const ownerName = typeof payload.owner_name === "string" ? payload.owner_name.trim() : "";
+      if (ownerName) detail = `Responsável: ${ownerName}`;
+      else detail = payload.owner_id ? "Novo responsável definido" : "Responsável removido";
+    }
+
     return (
       <li className="border-b border-[var(--border)] pb-3 last:border-0">
         <div className="flex flex-wrap justify-between gap-2 text-xs text-[var(--muted)]">
-          <span>Registo comercial{actor ? ` · ${actor}` : ""}</span>
+          <span>
+            {label}
+            {actorSuffix(data)}
+          </span>
           <time dateTime={row.at}>{new Date(row.at).toLocaleString("pt-BR")}</time>
         </div>
-        <p className="mt-1 text-sm font-medium">{title}</p>
-        {detail ? <p className="mt-0.5 text-xs text-[var(--muted)]">{detail}</p> : null}
+        {detail ? <p className="mt-1 text-sm">{detail}</p> : null}
       </li>
     );
   }
@@ -136,7 +137,6 @@ export function TimelineEntry({ row }: { row: TimelineRow }) {
         <span>{row.kind}</span>
         <time dateTime={row.at}>{new Date(row.at).toLocaleString("pt-BR")}</time>
       </div>
-      <pre className="mt-1 whitespace-pre-wrap break-words text-xs">{JSON.stringify(data, null, 2)}</pre>
     </li>
   );
 }

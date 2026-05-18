@@ -1,5 +1,4 @@
--- Timeline: associar activity_logs ao lead (e oportunidade) + enriquecer dados para a UI.
--- Remove duplicatas já cobertas por notas/mensagens na mesma vista.
+-- Timeline: activity_logs com lead_id/opportunity_id; amostras; sem duplicar notas/mensagens.
 
 create or replace view crm.timeline_events as
 select
@@ -8,9 +7,10 @@ select
   m.sent_at as at,
   l.id as lead_id,
   (
-    select o.id from crm.opportunities o
+    select o.id
+    from crm.opportunities o
     where o.lead_id = l.id
-    order by o.created_at desc
+    order by o.updated_at desc
     limit 1
   ) as opportunity_id,
   jsonb_build_object(
@@ -38,60 +38,71 @@ select
   t.created_at,
   t.lead_id,
   t.opportunity_id,
-  jsonb_build_object(
-    'title', t.title,
-    'due_at', t.due_at,
-    'done', t.done,
-    'assignee_id', t.assignee_id,
-    'assignee_name', tp.full_name
-  )
+  jsonb_build_object('title', t.title, 'due_at', t.due_at, 'done', t.done)
 from crm.tasks t
-left join crm.profiles tp on tp.id = t.assignee_id
 where t.lead_id is not null
+union all
+select
+  'sample'::text,
+  s.id,
+  s.created_at,
+  s.lead_id,
+  (
+    select o.id
+    from crm.opportunities o
+    where o.lead_id = s.lead_id
+    order by o.updated_at desc
+    limit 1
+  ) as opportunity_id,
+  jsonb_build_object(
+    'status', s.status,
+    'contact_name', s.contact_name,
+    'bread_type', s.bread_type
+  ) as data
+from crm.sample_shipments s
+where s.lead_id is not null
 union all
 select
   'activity'::text,
   a.id,
   a.created_at,
-  case
-    when a.entity_type = 'lead' then a.entity_id
-    when a.entity_type = 'opportunity' then o.lead_id
-    else null::uuid
-  end as lead_id,
+  coalesce(
+    case when a.entity_type = 'lead' then a.entity_id end,
+    opp_entity.lead_id
+  ) as lead_id,
   case
     when a.entity_type = 'opportunity' then a.entity_id
-    when a.entity_type = 'lead' then (
-      select o2.id from crm.opportunities o2
-      where o2.lead_id = a.entity_id
-      order by o2.created_at desc
-      limit 1
-    )
-    else null::uuid
+    when a.entity_type = 'lead' then opp_lead.id
+    else null
   end as opportunity_id,
   jsonb_build_object(
     'action', a.action,
     'entity_type', a.entity_type,
     'entity_id', a.entity_id,
-    'payload', coalesce(a.payload, '{}'::jsonb),
+    'payload', a.payload,
     'actor_id', a.actor_id,
-    'actor_name', ap.full_name,
-    'stage_name', ps.name,
-    'owner_name', owner_profile.full_name
-  )
+    'actor_name', prof.full_name
+  ) as data
 from crm.activity_logs a
-left join crm.opportunities o
-  on a.entity_type = 'opportunity' and o.id = a.entity_id
-left join crm.profiles ap on ap.id = a.actor_id
-left join crm.pipeline_stages ps
-  on a.action = 'stage_changed'
-  and length(coalesce(a.payload->>'stage_id', '')) = 36
-  and ps.id = (a.payload->>'stage_id')::uuid
-left join crm.profiles owner_profile
-  on a.action = 'owner_changed'
-  and length(coalesce(a.payload->>'owner_id', '')) = 36
-  and owner_profile.id = (a.payload->>'owner_id')::uuid
-where
-  not (a.action = 'note_added' and a.entity_type = 'lead')
-  and not (a.action = 'outbound_whatsapp' and a.entity_type = 'lead');
+left join crm.opportunities opp_entity
+  on a.entity_type = 'opportunity' and opp_entity.id = a.entity_id
+left join lateral (
+  select o.id
+  from crm.opportunities o
+  where o.lead_id = a.entity_id
+  order by o.updated_at desc
+  limit 1
+) opp_lead on a.entity_type = 'lead'
+left join crm.profiles prof on prof.id = a.actor_id
+where a.action not in (
+  'note_added',
+  'outbound_whatsapp',
+  'outbound_whatsapp_contact',
+  'outbound_whatsapp_attachment'
+)
+and coalesce(
+  case when a.entity_type = 'lead' then a.entity_id end,
+  opp_entity.lead_id
+) is not null;
 
 grant select on crm.timeline_events to authenticated;

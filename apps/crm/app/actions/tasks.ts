@@ -65,7 +65,7 @@ export async function toggleTaskDone(taskId: string, done: boolean) {
   const crm = crmTables(supabase);
   const { data: taskRow } = await crm
     .from("tasks")
-    .select("lead_id")
+    .select("lead_id, title")
     .eq("id", taskId)
     .maybeSingle();
 
@@ -74,6 +74,17 @@ export async function toggleTaskDone(taskId: string, done: boolean) {
     .update({ done, updated_at: new Date().toISOString() })
     .eq("id", taskId);
   if (error) return { ok: false as const, error: error.message };
+
+  if (taskRow?.lead_id) {
+    await crm.from("activity_logs").insert({
+      entity_type: "lead",
+      entity_id: taskRow.lead_id,
+      action: done ? "task_completed" : "task_reopened",
+      actor_id: user.id,
+      payload: { task_id: taskId, title: taskRow.title },
+    });
+  }
+
   revalidatePath("/tasks");
   revalidatePath("/dashboard");
   if (taskRow?.lead_id) revalidatePath(`/leads/${taskRow.lead_id}`);

@@ -382,6 +382,27 @@ export async function updateLeadOwner(input: { leadId: string; ownerId: string |
     })
     .eq("lead_id", input.leadId);
 
+  let ownerName: string | null = null;
+  if (input.ownerId) {
+    const { data: ownerProfile } = await crm
+      .from("profiles")
+      .select("full_name")
+      .eq("id", input.ownerId)
+      .maybeSingle();
+    ownerName = ownerProfile?.full_name?.trim() ?? null;
+  }
+
+  await crm.from("activity_logs").insert({
+    entity_type: "lead",
+    entity_id: input.leadId,
+    action: "owner_changed",
+    actor_id: user.id,
+    payload: {
+      owner_id: input.ownerId,
+      owner_name: ownerName,
+    },
+  });
+
   revalidatePath(`/leads/${input.leadId}`);
   revalidatePath("/leads");
   revalidatePath("/pipeline");
