@@ -11,7 +11,21 @@ import { InboxLiveRefresh } from "./inbox-live-refresh";
 import { InboxSidebar, type InboxSidebarRow } from "./inbox-sidebar";
 import { LeadQualificationModal } from "./lead-qualification-modal";
 import { MarkConversationRead } from "./mark-conversation-read";
+import { InboxTasksPanel, type InboxTaskRow } from "./inbox-tasks-panel";
 import { SendMessageForm } from "./send-message-form";
+
+const TEAM_ROLE_LABEL: Record<string, string> = {
+  admin: "Admin",
+  comercial: "Comercial",
+  gestao: "Gestão",
+  operacao: "Operação",
+};
+
+function formatTeamOption(p: { id: string; full_name: string | null; role: string }) {
+  const name = (p.full_name ?? "").trim() || "Sem nome";
+  const role = TEAM_ROLE_LABEL[p.role] ?? p.role;
+  return { id: p.id, label: `${name} (${role})` };
+}
 
 /** Evita cache estático: mensagens novas precisam aparecer após webhook / envio. */
 export const dynamic = "force-dynamic";
@@ -70,7 +84,7 @@ export default async function InboxPage({
       crm
         .from("conversations")
         .select(
-          "id, phone_e164, conversation_kind, group_display_name, classification, created_at, updated_at, last_read_at, leads(id, phone_e164, status, client_category, zip_code, weekly_bread_consumption, bread_type, bread_weight_grams, contacts(full_name, avatar_url), companies(id, name, document, city, state), distributors(name), opportunities(id, stage_id, updated_at))",
+          "id, phone_e164, conversation_kind, group_display_name, classification, created_at, updated_at, last_read_at, leads(id, phone_e164, status, owner_id, client_category, zip_code, weekly_bread_consumption, bread_type, bread_weight_grams, contacts(full_name, avatar_url), companies(id, name, document, city, state), distributors(name), opportunities(id, stage_id, updated_at))",
         )
         .eq("conversation_kind", conversationKind)
         .order("updated_at", { ascending: false }),
@@ -243,6 +257,37 @@ export default async function InboxPage({
     .from("pipeline_stages")
     .select("id, name, sort_order")
     .order("sort_order", { ascending: true });
+
+  let inboxLeadTasks: InboxTaskRow[] = [];
+  let inboxTeamOptions: { id: string; label: string }[] = [];
+  let inboxOpportunityId = selectedOpportunity?.id ?? null;
+  let inboxLeadOwnerId: string | null = null;
+
+  if (selectedLead?.id) {
+    const leadId = selectedLead.id;
+    inboxLeadOwnerId = (selectedLead as { owner_id?: string | null }).owner_id ?? null;
+    const [leadTasksResult, teamProfilesResult, latestOppResult] = await Promise.all([
+      crm
+        .from("tasks")
+        .select("id, title, due_at, done, assignee_id")
+        .eq("lead_id", leadId)
+        .order("done", { ascending: true })
+        .order("due_at", { ascending: true, nullsFirst: false }),
+      crm.from("profiles").select("id, full_name, role").order("full_name", { ascending: true }),
+      crm
+        .from("opportunities")
+        .select("id")
+        .eq("lead_id", leadId)
+        .order("updated_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+    ]);
+    inboxLeadTasks = (leadTasksResult.data ?? []) as InboxTaskRow[];
+    inboxTeamOptions = (teamProfilesResult.data ?? []).map(formatTeamOption);
+    inboxOpportunityId = latestOppResult.data?.id ?? selectedOpportunity?.id ?? null;
+  }
+
+  const inboxAssigneeLabels = Object.fromEntries(inboxTeamOptions.map((o) => [o.id, o.label]));
 
   const sidebarRows: InboxSidebarRow[] = conversationsSorted.map((c) => {
     const lead = nestOne(
@@ -451,21 +496,39 @@ export default async function InboxPage({
                     </p>
                   ) : null}
                   </div>
-                  {selected.conversation_kind === "lead" ? (
-                    <LeadQualificationModal
-                      conversationId={selected.id}
-                      initialCategory={selectedLead?.client_category ?? null}
-                      initialStageId={selectedOpportunity?.stage_id ?? null}
-                      initialState={selectedCompany?.state ?? null}
-                      initialCity={selectedCompany?.city ?? null}
-                      initialZipCode={selectedLead?.zip_code ?? null}
-                      initialWeeklyBreadConsumption={selectedLead?.weekly_bread_consumption ?? null}
-                      initialCompanyName={selectedCompany?.name ?? null}
-                      initialCnpj={selectedCompany?.document ?? null}
-                      initialBreadType={selectedLead?.bread_type ?? null}
-                      initialBreadWeightGrams={selectedLead?.bread_weight_grams ?? null}
-                      stages={(stages ?? []).map((stage) => ({ id: stage.id, name: stage.name }))}
-                    />
+                  {selected.conversation_kind === "lead" && selectedLead?.id ? (
+                    <div className="flex shrink-0 flex-wrap items-center gap-2">
+                      <InboxTasksPanel
+                        leadId={selectedLead.id}
+                        leadLabel={displayPersonName(
+                          nestOne(
+                            (selectedLead.contacts ?? null) as
+                              | { full_name: string | null }
+                              | { full_name: string | null }[]
+                              | null,
+                          )?.full_name,
+                        )}
+                        opportunityId={inboxOpportunityId}
+                        tasks={inboxLeadTasks}
+                        teamOptions={inboxTeamOptions}
+                        assigneeLabels={inboxAssigneeLabels}
+                        defaultAssigneeId={inboxLeadOwnerId}
+                      />
+                      <LeadQualificationModal
+                        conversationId={selected.id}
+                        initialCategory={selectedLead?.client_category ?? null}
+                        initialStageId={selectedOpportunity?.stage_id ?? null}
+                        initialState={selectedCompany?.state ?? null}
+                        initialCity={selectedCompany?.city ?? null}
+                        initialZipCode={selectedLead?.zip_code ?? null}
+                        initialWeeklyBreadConsumption={selectedLead?.weekly_bread_consumption ?? null}
+                        initialCompanyName={selectedCompany?.name ?? null}
+                        initialCnpj={selectedCompany?.document ?? null}
+                        initialBreadType={selectedLead?.bread_type ?? null}
+                        initialBreadWeightGrams={selectedLead?.bread_weight_grams ?? null}
+                        stages={(stages ?? []).map((stage) => ({ id: stage.id, name: stage.name }))}
+                      />
+                    </div>
                   ) : null}
                 </div>
               </div>

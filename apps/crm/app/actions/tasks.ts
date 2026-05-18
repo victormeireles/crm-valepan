@@ -50,8 +50,21 @@ export async function createTask(formData: FormData) {
   });
 
   if (error) return { ok: false as const, error: error.message };
+
+  if (opportunityId && dueAt) {
+    await crm
+      .from("opportunities")
+      .update({
+        next_action_at: dueAt,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", opportunityId);
+  }
+
   revalidatePath("/tasks");
   revalidatePath("/dashboard");
+  revalidatePath("/inbox");
+  revalidatePath("/pipeline");
   if (leadId) revalidatePath(`/leads/${leadId}`);
   return { ok: true as const };
 }
@@ -87,6 +100,8 @@ export async function toggleTaskDone(taskId: string, done: boolean) {
 
   revalidatePath("/tasks");
   revalidatePath("/dashboard");
+  revalidatePath("/inbox");
+  revalidatePath("/pipeline");
   if (taskRow?.lead_id) revalidatePath(`/leads/${taskRow.lead_id}`);
   return { ok: true as const };
 }
@@ -118,6 +133,7 @@ export async function updateTaskAssignee(input: {
   if (error) return { ok: false as const, error: error.message };
   revalidatePath("/tasks");
   revalidatePath("/dashboard");
+  revalidatePath("/inbox");
   if (taskRow?.lead_id) revalidatePath(`/leads/${taskRow.lead_id}`);
   return { ok: true as const };
 }
