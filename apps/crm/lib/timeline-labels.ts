@@ -4,6 +4,7 @@ export const TIMELINE_ACTIVITY_LABELS: Record<string, string> = {
   created_from_whatsapp: "Lead criado via WhatsApp",
   created: "Oportunidade criada",
   stage_changed: "Etapa do funil alterada",
+  stage_automation_tasks: "Tarefas automáticas da etapa",
   owner_changed: "Responsável alterado",
   task_completed: "Tarefa concluída",
   task_reopened: "Tarefa reaberta",

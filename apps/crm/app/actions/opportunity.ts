@@ -1,5 +1,6 @@
 "use server";
 
+import { applyPipelineStageEntryAutomations } from "@/lib/pipeline-stage-automations";
 import { createAdminSupabaseClient, crmTables as crmAdminTables } from "@/lib/supabase/admin";
 import { createServerSupabaseClient, crmTables as crmServerTables } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
@@ -50,10 +51,12 @@ export async function updateOpportunityStage(input: {
   const { data: oppRow } = await crm
     .from("opportunities")
     .select(
-      "lead_id, company_id, title, leads(phone_e164, company_id, contacts(full_name)), companies(name)",
+      "lead_id, company_id, title, stage_id, owner_id, leads(phone_e164, company_id, owner_id, contacts(full_name)), companies(name)",
     )
     .eq("id", input.opportunityId)
     .maybeSingle();
+
+  const previousStageId = oppRow?.stage_id ?? null;
 
   const enteringSampleStage = isSampleStageName(stage.name);
   if (enteringSampleStage && !oppRow?.lead_id) {
@@ -169,13 +172,44 @@ export async function updateOpportunityStage(input: {
     actor_id: user?.id ?? null,
   });
 
+  const leadNested = oppRow?.leads as
+    | { owner_id: string | null }
+    | { owner_id: string | null }[]
+    | null;
+  const leadOwner = Array.isArray(leadNested) ? leadNested[0]?.owner_id : leadNested?.owner_id;
+
+  const automation = await applyPipelineStageEntryAutomations(crm, {
+    opportunityId: input.opportunityId,
+    leadId: oppRow?.lead_id ?? null,
+    stageId: input.stageId,
+    previousStageId,
+    assigneeId: oppRow?.owner_id ?? leadOwner ?? null,
+    actorId: user?.id ?? null,
+  });
+
+  if (automation.created > 0) {
+    await crm.from("activity_logs").insert({
+      entity_type: "opportunity",
+      entity_id: input.opportunityId,
+      action: "stage_automation_tasks",
+      payload: {
+        stage_id: input.stageId,
+        stage_name: stage.name,
+        task_titles: automation.taskTitles,
+        created: automation.created,
+      },
+      actor_id: user?.id ?? null,
+    });
+    revalidatePath("/tasks");
+  }
+
   revalidatePath("/pipeline");
   revalidatePath("/leads");
   if (enteringSampleStage) {
     revalidatePath("/samples");
     revalidatePath("/dashboard");
   }
-  return { ok: true as const };
+  return { ok: true as const, tasksCreated: automation.created };
 }
 
 export async function createOpportunityForLead(leadId: string) {

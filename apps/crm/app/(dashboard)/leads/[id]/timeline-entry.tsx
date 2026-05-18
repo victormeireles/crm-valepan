@@ -116,6 +116,12 @@ export function TimelineEntry({ row }: { row: TimelineRow }) {
       if (ownerName) detail = `Responsável: ${ownerName}`;
       else detail = payload.owner_id ? "Novo responsável definido" : "Responsável removido";
     }
+    if (action === "stage_automation_tasks") {
+      const titles = Array.isArray(payload.task_titles)
+        ? (payload.task_titles as unknown[]).filter((t): t is string => typeof t === "string")
+        : [];
+      if (titles.length > 0) detail = titles.join(" · ");
+    }
 
     return (
       <li className="border-b border-[var(--border)] pb-3 last:border-0">

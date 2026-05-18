@@ -84,6 +84,41 @@ export interface Database {
           created_at: string;
         };
       };
+      pipeline_stage_task_templates: {
+        Row: {
+          id: string;
+          stage_id: string;
+          title: string;
+          due_days_offset: number | null;
+          sort_order: number;
+          active: boolean;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          stage_id: string;
+          title: string;
+          due_days_offset?: number | null;
+          sort_order?: number;
+          active?: boolean;
+        };
+        Update: Partial<Database["crm"]["Tables"]["pipeline_stage_task_templates"]["Insert"]>;
+      };
+      pipeline_stage_automation_log: {
+        Row: {
+          id: string;
+          opportunity_id: string;
+          template_id: string;
+          task_id: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          opportunity_id: string;
+          template_id: string;
+          task_id?: string | null;
+        };
+      };
       opportunities: {
         Row: {
           id: string;

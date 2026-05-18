@@ -223,6 +223,7 @@ export function PipelineBoard({
   const [columns, setColumns] = useState(() => groupByStage(stages, initialCards));
   const [activeCard, setActiveCard] = useState<PipelineCardDTO | null>(null);
   const [bannerError, setBannerError] = useState<string | null>(null);
+  const [bannerSuccess, setBannerSuccess] = useState<string | null>(null);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [pendingLost, setPendingLost] = useState<{
     opportunityId: string;
@@ -269,6 +270,7 @@ export function PipelineBoard({
       lostReason: string | null,
     ): Promise<boolean> => {
       setBannerError(null);
+      setBannerSuccess(null);
       setSavingId(opportunityId);
       const prev = cloneColumns(columnsRef.current);
       const optimistic = moveCard(columnsRef.current, opportunityId, fromStageId, toStageId);
@@ -291,6 +293,14 @@ export function PipelineBoard({
         columnsRef.current = prev;
         setBannerError(res.error ?? "Não foi possível atualizar a etapa.");
         return false;
+      }
+      if (res.tasksCreated > 0) {
+        const n = res.tasksCreated;
+        setBannerSuccess(
+          n === 1
+            ? "1 tarefa automática criada para esta etapa."
+            : `${n} tarefas automáticas criadas para esta etapa.`,
+        );
       }
       router.refresh();
       return true;
@@ -381,6 +391,11 @@ export function PipelineBoard({
       {bannerError ? (
         <p className="rounded border border-[var(--vp-error)] bg-[var(--card)] px-3 py-2 text-sm text-[var(--vp-error)]">
           {bannerError}
+        </p>
+      ) : null}
+      {bannerSuccess ? (
+        <p className="rounded border border-[var(--vp-gold-classic)] bg-[var(--card)] px-3 py-2 text-sm text-[var(--vp-wine)]">
+          {bannerSuccess}
         </p>
       ) : null}
 

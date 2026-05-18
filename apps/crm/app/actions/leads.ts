@@ -1,6 +1,7 @@
 "use server";
 
 import { normalizeBrazilPhoneToE164 } from "@crm/shared/phone";
+import { applyPipelineStageEntryAutomations } from "@/lib/pipeline-stage-automations";
 import { revalidatePath } from "next/cache";
 import { isNetworkTypeOption } from "@/lib/network-types";
 import { isSendViaOption } from "@/lib/send-via-options";
@@ -823,11 +824,14 @@ export async function updateConversationLeadQualification(input: {
 
     const { data: opportunity } = await crm
       .from("opportunities")
-      .select("id")
+      .select("id, stage_id, owner_id")
       .eq("lead_id", leadId)
       .order("updated_at", { ascending: false })
       .limit(1)
       .maybeSingle();
+
+    let opportunityId: string | null = opportunity?.id ?? null;
+    const previousStageId = opportunity?.stage_id ?? null;
 
     if (opportunity?.id) {
       const { error: oppUpdateErr } = await crm
@@ -839,14 +843,46 @@ export async function updateConversationLeadQualification(input: {
         .eq("id", opportunity.id);
       if (oppUpdateErr) return { ok: false as const, error: oppUpdateErr.message };
     } else {
-      const { error: oppInsertErr } = await crm.from("opportunities").insert({
-        lead_id: leadId,
-        company_id: nextCompanyId,
-        owner_id: user.id,
-        stage_id: stage.id,
-        title: `Oportunidade ${conv.phone_e164}`,
+      const { data: insertedOpp, error: oppInsertErr } = await crm
+        .from("opportunities")
+        .insert({
+          lead_id: leadId,
+          company_id: nextCompanyId,
+          owner_id: user.id,
+          stage_id: stage.id,
+          title: `Oportunidade ${conv.phone_e164}`,
+        })
+        .select("id")
+        .single();
+      if (oppInsertErr || !insertedOpp) {
+        return { ok: false as const, error: oppInsertErr?.message ?? "Erro ao criar oportunidade." };
+      }
+      opportunityId = insertedOpp.id;
+    }
+
+    if (opportunityId) {
+      const automation = await applyPipelineStageEntryAutomations(crm, {
+        opportunityId,
+        leadId,
+        stageId: stage.id,
+        previousStageId,
+        assigneeId: opportunity?.owner_id ?? user.id,
+        actorId: user.id,
       });
-      if (oppInsertErr) return { ok: false as const, error: oppInsertErr.message };
+      if (automation.created > 0) {
+        await crm.from("activity_logs").insert({
+          entity_type: "opportunity",
+          entity_id: opportunityId,
+          action: "stage_automation_tasks",
+          payload: {
+            stage_id: stage.id,
+            task_titles: automation.taskTitles,
+            created: automation.created,
+          },
+          actor_id: user.id,
+        });
+        revalidatePath("/tasks");
+      }
     }
   }
 
