@@ -7,12 +7,12 @@
     "packages/*"
   ],
   "scripts": {
-    "predev": "node scripts/sync-env.cjs",
     "prebuild": "node scripts/sync-env.cjs",
-    "dev": "node scripts/run-in-app.cjs dev --turbopack",
+    "dev": "node scripts/dev.cjs",
     "dev:webpack": "node scripts/sync-env.cjs && node scripts/run-in-app.cjs dev --webpack",
     "dev:stop": "node scripts/stop-dev-3000.cjs",
-    "dev:fresh": "node scripts/sync-env.cjs && node scripts/stop-dev-3000.cjs && node scripts/run-in-app.cjs dev --turbopack",
+    "dev:check": "node scripts/dev-check.cjs",
+    "dev:fresh": "node scripts/dev.cjs",
     "dev:node": "node scripts/sync-env.cjs && node scripts/run-in-app.cjs dev --turbopack",
     "build": "node scripts/run-in-app.cjs build",
     "lint": "node scripts/run-in-app.cjs lint",

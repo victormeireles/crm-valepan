@@ -107,9 +107,25 @@ export function TimelineEntry({ row }: { row: TimelineRow }) {
       const lost = typeof payload.lost_reason === "string" ? payload.lost_reason.trim() : "";
       if (lost) detail = detail ? `${detail} · Motivo: ${lost}` : `Motivo: ${lost}`;
     }
-    if (action === "task_completed" || action === "task_reopened") {
+    if (
+      action === "task_completed" ||
+      action === "task_reopened" ||
+      action === "task_deleted"
+    ) {
       const title = typeof payload.title === "string" ? payload.title : null;
       if (title) detail = title;
+    }
+    if (action === "task_rescheduled") {
+      const title = typeof payload.title === "string" ? payload.title : null;
+      const fromDue = typeof payload.from_due_at === "string" ? payload.from_due_at : null;
+      const toDue = typeof payload.to_due_at === "string" ? payload.to_due_at : null;
+      const fmt = (iso: string) =>
+        new Date(iso).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+      if (title && fromDue && toDue) {
+        detail = `${title}: ${fmt(fromDue)} → ${fmt(toDue)}`;
+      } else if (title) {
+        detail = title;
+      }
     }
     if (action === "owner_changed") {
       const ownerName = typeof payload.owner_name === "string" ? payload.owner_name.trim() : "";

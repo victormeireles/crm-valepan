@@ -1,8 +1,15 @@
 "use client";
 
 import { updateConversationLeadQualification } from "@/app/actions/leads";
+import { CityAutocompleteInput } from "@/components/city-autocomplete-input";
+import { formatLocalizedInteger } from "@/lib/parse-localized-integer";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+
+function formatInitialInt(value: number | null): string {
+  if (value == null) return "";
+  return formatLocalizedInteger(value);
+}
 
 type StageOption = {
   id: string;
@@ -36,13 +43,13 @@ export function LeadQualificationModal(props: Props) {
   const [city, setCity] = useState(props.initialCity ?? "");
   const [zipCode, setZipCode] = useState(props.initialZipCode ?? "");
   const [weeklyBreadConsumption, setWeeklyBreadConsumption] = useState(
-    props.initialWeeklyBreadConsumption != null ? String(props.initialWeeklyBreadConsumption) : "",
+    formatInitialInt(props.initialWeeklyBreadConsumption),
   );
   const [companyName, setCompanyName] = useState(props.initialCompanyName ?? "");
   const [cnpj, setCnpj] = useState(props.initialCnpj ?? "");
   const [breadType, setBreadType] = useState(props.initialBreadType ?? "");
   const [breadWeightGrams, setBreadWeightGrams] = useState(
-    props.initialBreadWeightGrams != null ? String(props.initialBreadWeightGrams) : "",
+    formatInitialInt(props.initialBreadWeightGrams),
   );
 
   useEffect(() => {
@@ -51,15 +58,11 @@ export function LeadQualificationModal(props: Props) {
     setState(props.initialState ?? "");
     setCity(props.initialCity ?? "");
     setZipCode(props.initialZipCode ?? "");
-    setWeeklyBreadConsumption(
-      props.initialWeeklyBreadConsumption != null ? String(props.initialWeeklyBreadConsumption) : "",
-    );
+    setWeeklyBreadConsumption(formatInitialInt(props.initialWeeklyBreadConsumption));
     setCompanyName(props.initialCompanyName ?? "");
     setCnpj(props.initialCnpj ?? "");
     setBreadType(props.initialBreadType ?? "");
-    setBreadWeightGrams(
-      props.initialBreadWeightGrams != null ? String(props.initialBreadWeightGrams) : "",
-    );
+    setBreadWeightGrams(formatInitialInt(props.initialBreadWeightGrams));
     setError(null);
     setOpen(false);
   }, [
@@ -169,10 +172,13 @@ export function LeadQualificationModal(props: Props) {
 
               <label className="flex flex-col gap-1 text-xs">
                 Cidade
-                <input
-                  className="rounded border border-[var(--border)] bg-[var(--vp-paper)] px-2 py-1.5 text-sm"
+                <CityAutocompleteInput
+                  className="w-full rounded border border-[var(--border)] bg-[var(--vp-paper)] px-2 py-1.5 text-sm"
                   value={city}
-                  onChange={(e) => setCity(e.target.value)}
+                  onChange={setCity}
+                  stateFilter={state}
+                  placeholder="Digite para ver sugestões"
+                  disabled={saving}
                 />
               </label>
 
@@ -191,7 +197,8 @@ export function LeadQualificationModal(props: Props) {
                   className="rounded border border-[var(--border)] bg-[var(--vp-paper)] px-2 py-1.5 text-sm"
                   value={weeklyBreadConsumption}
                   onChange={(e) => setWeeklyBreadConsumption(e.target.value)}
-                  inputMode="numeric"
+                  inputMode="decimal"
+                  placeholder="Ex.: 40.000"
                 />
               </label>
 
@@ -228,7 +235,8 @@ export function LeadQualificationModal(props: Props) {
                   className="rounded border border-[var(--border)] bg-[var(--vp-paper)] px-2 py-1.5 text-sm"
                   value={breadWeightGrams}
                   onChange={(e) => setBreadWeightGrams(e.target.value)}
-                  inputMode="numeric"
+                  inputMode="decimal"
+                  placeholder="Ex.: 30 ou 30g"
                 />
               </label>
             </div>

@@ -5,11 +5,59 @@ import { applyPipelineStageEntryAutomations } from "@/lib/pipeline-stage-automat
 import { revalidatePath } from "next/cache";
 import { isNetworkTypeOption } from "@/lib/network-types";
 import { isSendViaOption } from "@/lib/send-via-options";
+import { isMissingNetworkTypeColumnError } from "@/lib/leads/list-query";
+import { parseNullableNonNegativeInt } from "@/lib/parse-localized-integer";
+import { displayCompanyName, displayPersonName } from "@/lib/lead-identity";
+import { nestOne } from "@/lib/supabase/nested";
 import { createServerSupabaseClient, crmTables } from "@/lib/supabase/server";
 
+const LEAD_PICKER_SELECT =
+  "id, phone_e164, client_category, contacts(full_name), companies(name), distributors(name)";
+
+type LeadPickerRow = {
+  id: string;
+  phone_e164: string;
+  client_category: string | null;
+  contacts?: { full_name: string | null } | { full_name: string | null }[] | null;
+  companies?: { name: string | null } | { name: string | null }[] | null;
+  distributors?: { name: string | null } | { name: string | null }[] | null;
+};
+
+export type LeadPickerOption = {
+  id: string;
+  label: string;
+  personName: string;
+  companyName: string | null;
+};
+
+function sanitizeLeadSearchFragment(value: string) {
+  return value.replace(/[%_]/g, "").trim();
+}
+
+function leadRowToPickerOption(row: LeadPickerRow): LeadPickerOption {
+  const contact = nestOne(row.contacts ?? null);
+  const company = nestOne(row.companies ?? null);
+  const distributor = nestOne(row.distributors ?? null);
+  const personName = displayPersonName(contact?.full_name);
+  const companyLine = displayCompanyName({
+    companyName: company?.name,
+    distributorName: distributor?.name,
+    clientCategory: row.client_category,
+  });
+  const label = companyLine ? `${personName} · ${companyLine}` : personName;
+  return { id: row.id, label, personName, companyName: companyLine };
+}
+
+function mergePickerOptions(rows: LeadPickerRow[]): LeadPickerOption[] {
+  const byId = new Map<string, LeadPickerOption>();
+  for (const row of rows) {
+    if (!byId.has(row.id)) byId.set(row.id, leadRowToPickerOption(row));
+  }
+  return [...byId.values()].slice(0, 12);
+}
+
 function isMissingNetworkTypeError(err: { message?: string; code?: string } | null | undefined) {
-  const msg = (err?.message ?? "").toLowerCase();
-  return msg.includes("network_type") && msg.includes("schema cache");
+  return isMissingNetworkTypeColumnError(err);
 }
 
 function isLeadPhoneUniqueConflict(err: { message?: string; code?: string } | null | undefined) {
@@ -438,13 +486,20 @@ export async function syncLeadToDistributorCategory(input: { leadId: string }) {
   if (!user) return { ok: false as const, error: "Não autenticado" };
 
   const crm = crmTables(supabase);
-  const { data: lead, error: leadErr } = await crm
+  let { data: lead, error: leadErr } = await crm
     .from("leads")
     .select(
       "id, phone_e164, network_type, contacts(full_name), companies(city,document), distributors(name)",
     )
     .eq("id", leadId)
     .maybeSingle();
+  if (leadErr && isMissingNetworkTypeError(leadErr)) {
+    ({ data: lead, error: leadErr } = await crm
+      .from("leads")
+      .select("id, phone_e164, contacts(full_name), companies(city,document), distributors(name)")
+      .eq("id", leadId)
+      .maybeSingle());
+  }
   if (leadErr) return { ok: false as const, error: leadErr.message };
   if (!lead?.id) return { ok: false as const, error: "Lead não encontrado." };
 
@@ -666,17 +721,6 @@ export async function updateConversationLeadClientCategory(input: {
   return { ok: true as const };
 }
 
-function parseNullableNonNegativeInt(value: string | null | undefined) {
-  const raw = String(value ?? "").trim();
-  if (!raw) return { ok: true as const, value: null as number | null };
-  if (!/^\d+$/.test(raw)) return { ok: false as const, error: "Use apenas números inteiros positivos." };
-  const num = Number.parseInt(raw, 10);
-  if (!Number.isFinite(num) || num < 0) {
-    return { ok: false as const, error: "Valor numérico inválido." };
-  }
-  return { ok: true as const, value: num };
-}
-
 export async function updateConversationLeadQualification(input: {
   conversationId: string;
   category: string | null;
@@ -704,7 +748,9 @@ export async function updateConversationLeadQualification(input: {
   const weeklyParsed = parseNullableNonNegativeInt(input.weeklyBreadConsumption);
   if (!weeklyParsed.ok) return { ok: false as const, error: "Quantidade semanal inválida." };
 
-  const gramsParsed = parseNullableNonNegativeInt(input.breadWeightGrams);
+  const gramsParsed = parseNullableNonNegativeInt(input.breadWeightGrams, {
+    allowUnitSuffix: true,
+  });
   if (!gramsParsed.ok) return { ok: false as const, error: "Gramatura inválida." };
 
   const state = String(input.state ?? "").trim().toUpperCase() || null;
@@ -1360,4 +1406,56 @@ export async function removeLeadFromCategoryGrid(input: { leadId: string }) {
   revalidatePath("/leads");
   revalidatePath(`/leads/${leadId}`);
   return { ok: true as const };
+}
+
+/** Busca leads por nome, empresa ou telefone (autocomplete em tarefas e similares). */
+export async function searchLeadsForPicker(input: { q: string }) {
+  const q = sanitizeLeadSearchFragment(input.q);
+  if (q.length < 2) {
+    return { ok: true as const, leads: [] as LeadPickerOption[] };
+  }
+
+  const supabase = await createServerSupabaseClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false as const, error: "Não autenticado" };
+
+  const crm = crmTables(supabase);
+  const pattern = `%${q}%`;
+  const digits = q.replace(/\D/g, "");
+
+  const [byPhone, contactRes, companyRes] = await Promise.all([
+    crm.from("leads").select(LEAD_PICKER_SELECT).ilike("phone_e164", pattern).limit(12),
+    crm.from("contacts").select("id").ilike("full_name", pattern).limit(24),
+    crm.from("companies").select("id").ilike("name", pattern).limit(24),
+  ]);
+
+  const contactIds = (contactRes.data ?? []).map((c) => c.id);
+  const companyIds = (companyRes.data ?? []).map((c) => c.id);
+
+  const extraQueries = await Promise.all([
+    contactIds.length > 0
+      ? crm.from("leads").select(LEAD_PICKER_SELECT).in("contact_id", contactIds).limit(12)
+      : Promise.resolve({ data: [] as LeadPickerRow[] }),
+    companyIds.length > 0
+      ? crm.from("leads").select(LEAD_PICKER_SELECT).in("company_id", companyIds).limit(12)
+      : Promise.resolve({ data: [] as LeadPickerRow[] }),
+    digits.length >= 4
+      ? crm
+          .from("leads")
+          .select(LEAD_PICKER_SELECT)
+          .ilike("phone_e164", `%${digits}%`)
+          .limit(12)
+      : Promise.resolve({ data: [] as LeadPickerRow[] }),
+  ]);
+
+  const merged = mergePickerOptions([
+    ...((byPhone.data ?? []) as LeadPickerRow[]),
+    ...((extraQueries[0].data ?? []) as LeadPickerRow[]),
+    ...((extraQueries[1].data ?? []) as LeadPickerRow[]),
+    ...((extraQueries[2].data ?? []) as LeadPickerRow[]),
+  ]);
+
+  return { ok: true as const, leads: merged };
 }

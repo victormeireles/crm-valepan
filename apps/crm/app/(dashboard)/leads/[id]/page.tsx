@@ -9,6 +9,8 @@ import { LeadOwnerForm } from "./lead-owner-form";
 import { LeadTaskForm } from "./lead-task-form";
 import { LeadTaskAssigneeSelect } from "./lead-task-assignee-select";
 import { TimelineEntry } from "./timeline-entry";
+import { buildTaskCalendarEvent } from "@/lib/calendar-events";
+import { CalendarEventLinesDisplay } from "../../tasks/calendar-event-display";
 import { ToggleTaskButton } from "../../tasks/toggle-task-button";
 import { LeadActions } from "./ui";
 
@@ -212,10 +214,18 @@ export default async function LeadDetailPage({
                 key={t.id}
                 className="flex flex-col gap-2 border-b border-[var(--border)] pb-3 text-sm last:border-0 md:flex-row md:flex-wrap md:items-center md:justify-between"
               >
-                <div className="min-w-0 flex-1">
-                  <span className={`block ${t.done ? "text-[var(--muted)] line-through" : ""}`}>
-                    {t.title}
-                  </span>
+                <div className={`min-w-0 flex-1 ${t.done ? "opacity-80" : ""}`}>
+                  <CalendarEventLinesDisplay
+                    ev={buildTaskCalendarEvent({
+                      id: t.id,
+                      title: t.title,
+                      at: t.due_at ?? new Date(0).toISOString(),
+                      done: t.done,
+                      leadId: id,
+                      leadName: heading,
+                      companyName: companyLine,
+                    })}
+                  />
                   <span className="mt-1 block text-xs text-[var(--muted)]">
                     {t.assignee_id
                       ? (assigneeLabel.get(t.assignee_id) ?? "Responsável desconhecido")
@@ -229,7 +239,7 @@ export default async function LeadDetailPage({
                     teamOptions={teamOptions}
                   />
                   <span className="text-xs text-[var(--muted)] whitespace-nowrap">
-                    {t.due_at ? new Date(t.due_at).toLocaleString("pt-BR") : "Sem prazo"}
+                    {t.due_at ? new Date(t.due_at).toLocaleDateString("pt-BR") : "Sem prazo"}
                   </span>
                   <ToggleTaskButton taskId={t.id} done={t.done} />
                 </div>

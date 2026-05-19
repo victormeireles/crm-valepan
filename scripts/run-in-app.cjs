@@ -1,7 +1,7 @@
 /**
  * Executa o CLI do Next.js com cwd em apps/crm (evita depender do npm no PATH em scripts aninhados no Windows).
  */
-const { spawnSync } = require("child_process");
+const { spawn, spawnSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 
@@ -76,7 +76,7 @@ if (args[0] === "dev") {
   // Porta 3000 fixa; 0.0.0.0 evita bind só em :: (IPv6) no Windows, que por vezes falha com "localhost".
   const cleaned = stripHostnameFlags(stripPortFlags(args));
   args.length = 0;
-  args.push(...cleaned, "-H", "0.0.0.0", "-p", "3000");
+  args.push(...cleaned, "-H", "127.0.0.1", "-p", "3000");
   childEnv = { ...process.env, PORT: "3000" };
 
   if (isLocalPortAcceptingConnections(3000)) {
@@ -106,6 +106,21 @@ if (args[0] === "dev") {
   console.log(
     "[run-in-app] Dev → http://localhost:3000 (ou http://127.0.0.1:3000). Se não abrir, verifique o proxy do Windows para endereços locais.",
   );
+}
+
+if (args[0] === "dev") {
+  const child = spawn(process.execPath, [nextCli, ...args], {
+    cwd: appDir,
+    stdio: "inherit",
+    env: childEnv,
+    shell: false,
+  });
+  child.on("error", (err) => {
+    console.error("[run-in-app] Falha ao iniciar o Next.js:", err.message);
+    process.exit(1);
+  });
+  child.on("exit", (code) => process.exit(code ?? 1));
+  return;
 }
 
 const r = spawnSync(process.execPath, [nextCli, ...args], {

@@ -59,7 +59,7 @@ export function LeadTaskForm({
         <span className="text-xs text-[var(--muted)]">Prazo</span>
         <input
           name="due_at"
-          type="datetime-local"
+          type="date"
           className="rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1"
         />
       </label>

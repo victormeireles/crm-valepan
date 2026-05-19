@@ -1,5 +1,6 @@
 "use server";
 
+import { parseDueAtFormValue } from "@/lib/calendar-events";
 import { createServerSupabaseClient, crmTables } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 
@@ -34,9 +35,12 @@ export async function createTask(formData: FormData) {
 
   const crm = crmTables(supabase);
   const due = formData.get("due_at");
-  const dueAt =
-    typeof due === "string" && due.length > 0 ? new Date(due).toISOString() : null;
+  const dueAt = typeof due === "string" ? parseDueAtFormValue(due) : null;
   const leadId = String(formData.get("lead_id") ?? "").trim() || null;
+  if (leadId) {
+    const { data: leadRow } = await crm.from("leads").select("id").eq("id", leadId).maybeSingle();
+    if (!leadRow?.id) return { ok: false as const, error: "Lead inválido." };
+  }
   const assigneeRaw = String(formData.get("assignee_id") ?? "").trim();
   const assigneeId = await resolveTaskAssigneeId(crm, user.id, assigneeRaw);
   if (!assigneeId.ok) return { ok: false as const, error: assigneeId.error };
@@ -150,5 +154,124 @@ export async function updateTaskAssignee(input: {
   revalidatePath("/dashboard");
   revalidatePath("/inbox");
   if (taskRow?.lead_id) revalidatePath(`/leads/${taskRow.lead_id}`);
+  return { ok: true as const };
+}
+
+function revalidateTaskSurfaces(leadId: string | null | undefined) {
+  revalidatePath("/tasks");
+  revalidatePath("/dashboard");
+  revalidatePath("/inbox");
+  revalidatePath("/pipeline");
+  if (leadId) revalidatePath(`/leads/${leadId}`);
+}
+
+async function syncOpportunityNextAction(crm: Crm, opportunityId: string) {
+  const { data: tasks } = await crm
+    .from("tasks")
+    .select("due_at")
+    .eq("opportunity_id", opportunityId)
+    .eq("done", false)
+    .not("due_at", "is", null)
+    .order("due_at", { ascending: true })
+    .limit(1);
+
+  const nextAt = tasks?.[0]?.due_at ?? null;
+  await crm
+    .from("opportunities")
+    .update({ next_action_at: nextAt, updated_at: new Date().toISOString() })
+    .eq("id", opportunityId);
+}
+
+export async function deleteTask(taskId: string) {
+  const supabase = await createServerSupabaseClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false as const, error: "Não autenticado" };
+
+  const crm = crmTables(supabase);
+  const { data: taskRow } = await crm
+    .from("tasks")
+    .select("lead_id, title, opportunity_id")
+    .eq("id", taskId)
+    .maybeSingle();
+
+  if (!taskRow) return { ok: false as const, error: "Tarefa não encontrada." };
+
+  const { error } = await crm.from("tasks").delete().eq("id", taskId);
+  if (error) return { ok: false as const, error: error.message };
+
+  if (taskRow.opportunity_id) {
+    await syncOpportunityNextAction(crm, taskRow.opportunity_id);
+  }
+
+  if (taskRow.lead_id) {
+    await crm.from("activity_logs").insert({
+      entity_type: "lead",
+      entity_id: taskRow.lead_id,
+      action: "task_deleted",
+      actor_id: user.id,
+      payload: { task_id: taskId, title: taskRow.title },
+    });
+  }
+
+  revalidateTaskSurfaces(taskRow.lead_id);
+  return { ok: true as const };
+}
+
+export async function updateTaskDueAt(taskId: string, newDueAtIso: string) {
+  const supabase = await createServerSupabaseClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false as const, error: "Não autenticado" };
+
+  const dueAtIso = parseDueAtFormValue(newDueAtIso);
+  if (!dueAtIso) {
+    return { ok: false as const, error: "Data inválida." };
+  }
+
+  const crm = crmTables(supabase);
+  const { data: taskRow } = await crm
+    .from("tasks")
+    .select("lead_id, title, opportunity_id, due_at")
+    .eq("id", taskId)
+    .maybeSingle();
+
+  if (!taskRow) return { ok: false as const, error: "Tarefa não encontrada." };
+
+  const { error } = await crm
+    .from("tasks")
+    .update({ due_at: dueAtIso, updated_at: new Date().toISOString() })
+    .eq("id", taskId);
+
+  if (error) return { ok: false as const, error: error.message };
+
+  if (taskRow.opportunity_id) {
+    await crm
+      .from("opportunities")
+      .update({
+        next_action_at: dueAtIso,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", taskRow.opportunity_id);
+  }
+
+  if (taskRow.lead_id) {
+    await crm.from("activity_logs").insert({
+      entity_type: "lead",
+      entity_id: taskRow.lead_id,
+      action: "task_rescheduled",
+      actor_id: user.id,
+      payload: {
+        task_id: taskId,
+        title: taskRow.title,
+        from_due_at: taskRow.due_at,
+        to_due_at: dueAtIso,
+      },
+    });
+  }
+
+  revalidateTaskSurfaces(taskRow.lead_id);
   return { ok: true as const };
 }

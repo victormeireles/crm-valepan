@@ -8,6 +8,8 @@ export const TIMELINE_ACTIVITY_LABELS: Record<string, string> = {
   owner_changed: "Responsável alterado",
   task_completed: "Tarefa concluída",
   task_reopened: "Tarefa reaberta",
+  task_deleted: "Tarefa excluída",
+  task_rescheduled: "Prazo da tarefa alterado",
 };
 
 export function timelineActivityLabel(action: string) {

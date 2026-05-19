@@ -41,7 +41,10 @@ if (pids.length === 0) {
 for (const pid of pids) {
   console.log(`[stop-dev] Encerrando PID ${pid}…`);
   if (os.platform() === "win32") {
-    const r = spawnSync("taskkill", ["/PID", pid, "/F"], { stdio: "inherit", shell: false });
+    const r = spawnSync("taskkill", ["/PID", pid, "/F", "/T"], {
+      stdio: "inherit",
+      shell: false,
+    });
     if (r.status !== 0 && r.status !== 128) {
       console.error(`[stop-dev] taskkill falhou para PID ${pid} (pode precisar de permissões de administrador).`);
     }

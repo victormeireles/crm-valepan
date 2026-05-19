@@ -3,6 +3,7 @@ import { displayCompanyName, displayPersonName } from "@/lib/lead-identity";
 import { nestOne } from "@/lib/supabase/nested";
 import { isClientCategoryValue } from "@/lib/client-categories";
 import { SEND_VIA_OPTIONS } from "@/lib/send-via-options";
+import { fetchLeadListRows } from "@/lib/leads/list-query";
 import { createServerSupabaseClient, crmTables } from "@/lib/supabase/server";
 import Link from "next/link";
 import { NewLeadForm } from "./new-lead-form";
@@ -35,19 +36,7 @@ export default async function LeadsPage({
   const supabase = await createServerSupabaseClient();
   const crm = crmTables(supabase);
 
-  let query = crm
-    .from("leads")
-    .select(
-      "id, phone_e164, status, source, created_at, owner_id, client_category, network_type, distributor_id, company_id, contacts(id,full_name), companies(id,name,city,document), distributors(id,name)",
-    )
-    .order("updated_at", { ascending: false });
-
-  if (clientCategory && clientCategory !== "distribuidor") {
-    query = query.eq("client_category", clientCategory);
-  }
-
-  const { data: leads } = await query;
-  const leadRows = leads ?? [];
+  const { rows: leadRows, error: leadsError } = await fetchLeadListRows(crm, clientCategory);
   const distributorSourceRows =
     clientCategory === "distribuidor"
       ? leadRows.filter((lead) => {
@@ -112,6 +101,15 @@ export default async function LeadsPage({
         ) : null}
       </div>
       <NewLeadForm categoryMode={clientCategory} />
+      {leadsError ? (
+        <div
+          className="rounded-lg border border-[color:var(--border-strong)] bg-[var(--vp-surface)] px-3 py-2 text-sm text-[var(--vp-wine-classic)]"
+          role="alert"
+        >
+          <p className="font-medium">Não foi possível carregar a lista de leads.</p>
+          <p className="mt-1 font-mono text-xs opacity-90">{leadsError}</p>
+        </div>
+      ) : null}
       <div className="overflow-x-auto rounded-lg border border-[var(--border)] bg-[var(--card)]">
         <table className="w-full min-w-[640px] text-left text-sm">
           <thead className="border-b border-[var(--border)] text-[var(--muted)]">
