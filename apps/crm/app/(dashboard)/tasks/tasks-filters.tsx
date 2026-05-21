@@ -1,35 +1,32 @@
 "use client";
 
-import { isClientCategoryValue, type ClientCategoryValue } from "@/lib/client-categories";
-
-const CLIENT_CATEGORY_LABELS: Record<ClientCategoryValue, string> = {
-  hamburgueria: "Hamburguerias",
-  distribuidor: "Distribuidores",
-  parceiros: "Parceiros",
-  outros: "Outros",
-};
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState, useTransition } from "react";
 
 const SEARCH_DEBOUNCE_MS = 300;
 
-export function LeadsFilters({
+export function TasksFilters({
   totalCount,
   visibleCount,
+  openVisible,
+  openTotal,
+  doneVisible,
+  doneTotal,
 }: {
   totalCount: number;
   visibleCount: number;
+  openVisible: number;
+  openTotal: number;
+  doneVisible: number;
+  doneTotal: number;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [pending, startTransition] = useTransition();
 
   const q = searchParams.get("q") ?? "";
-  const rawCat = searchParams.get("client_category")?.trim() ?? "";
-  const clientCategory = isClientCategoryValue(rawCat) ? rawCat : null;
-  const filtering = q.trim().length > 0;
-
   const [draftQ, setDraftQ] = useState(q);
+  const filtering = q.trim().length > 0;
 
   useEffect(() => {
     setDraftQ(q);
@@ -44,7 +41,7 @@ export function LeadsFilters({
       }
       const qs = next.toString();
       startTransition(() => {
-        router.push(qs ? `/leads?${qs}` : "/leads");
+        router.push(qs ? `/tasks?${qs}` : "/tasks");
       });
     },
     [router, searchParams],
@@ -66,8 +63,6 @@ export function LeadsFilters({
     return () => window.clearTimeout(id);
   }, [draftQ, q, commitSearch]);
 
-  const clearHref = clientCategory ? `/leads?client_category=${clientCategory}` : "/leads";
-
   return (
     <div className="flex flex-col gap-2 border-b border-[var(--border)] bg-[var(--vp-paper)] px-3 py-2.5 sm:flex-row sm:items-center">
       <label className="flex min-w-0 flex-1 items-center gap-2">
@@ -75,8 +70,8 @@ export function LeadsFilters({
         <input
           type="search"
           value={draftQ}
-          placeholder="Nome, telefone, empresa, CNPJ…"
-          title="Busca por contato, telefone, empresa, cidade, CNPJ e distribuidor"
+          placeholder="Nome, telefone ou título da tarefa…"
+          title="Filtra em aberto e concluídas por contato, empresa ou telefone do lead"
           className="min-w-0 flex-1 rounded-md border border-[var(--border)] bg-[var(--vp-paper-pure)] px-2.5 py-1.5 text-sm"
           onChange={(e) => setDraftQ(e.target.value)}
           onKeyDown={(e) => {
@@ -88,11 +83,14 @@ export function LeadsFilters({
       </label>
 
       <div className="flex flex-wrap items-center gap-2 text-xs">
-        {clientCategory ? (
-          <span className="rounded-full bg-[rgba(35,0,4,0.06)] px-2 py-0.5 text-[var(--foreground)]">
-            {CLIENT_CATEGORY_LABELS[clientCategory] ?? clientCategory}
-          </span>
-        ) : null}
+        <span className="rounded-full bg-[rgba(35,0,4,0.06)] px-2 py-0.5 tabular-nums text-[var(--foreground)]">
+          Abertas {openVisible}
+          {filtering && openVisible !== openTotal ? `/${openTotal}` : ""}
+        </span>
+        <span className="rounded-full bg-[rgba(35,0,4,0.04)] px-2 py-0.5 tabular-nums text-[var(--muted)]">
+          Concluídas {doneVisible}
+          {filtering && doneVisible !== doneTotal ? `/${doneTotal}` : ""}
+        </span>
         {filtering ? (
           <>
             <span className="tabular-nums text-[var(--muted)]">
@@ -102,26 +100,17 @@ export function LeadsFilters({
             <button
               type="button"
               className="font-medium text-[var(--vp-wine)] hover:underline"
-              onClick={() => router.push(clearHref)}
+              onClick={() => router.push("/tasks")}
             >
               Limpar
             </button>
           </>
         ) : (
           <span className="tabular-nums text-[var(--muted)]">
-            {totalCount} lead{totalCount === 1 ? "" : "s"}
+            {totalCount} tarefa{totalCount === 1 ? "" : "s"}
             {pending ? " · …" : ""}
           </span>
         )}
-        {clientCategory && !filtering ? (
-          <button
-            type="button"
-            className="text-[var(--vp-wine)] hover:underline"
-            onClick={() => router.push("/leads")}
-          >
-            Ver todos
-          </button>
-        ) : null}
       </div>
     </div>
   );

@@ -1,20 +1,53 @@
 import { LeadIdentity } from "@/components/lead-identity";
 import { displayCompanyName, displayPersonName } from "@/lib/lead-identity";
 import { nestOne } from "@/lib/supabase/nested";
-import { isClientCategoryValue } from "@/lib/client-categories";
+import { isClientCategoryValue, type ClientCategoryValue } from "@/lib/client-categories";
 import { SEND_VIA_OPTIONS } from "@/lib/send-via-options";
 import { leadListRowMatchesQuery } from "@/lib/crm-text-search";
 import { fetchLeadListRows, type LeadListRow } from "@/lib/leads/list-query";
 import { createServerSupabaseClient, crmTables } from "@/lib/supabase/server";
 import Link from "next/link";
 import { Suspense } from "react";
-import { NewLeadForm } from "./new-lead-form";
 import { LeadCategoryRowEdit } from "./lead-category-row-edit";
 import { LeadsFilters } from "./leads-filters";
 
 /** Evita cache da lista após salvar (router.refresh + dados atualizados do Supabase). */
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+
+const CATEGORY_PAGE_TITLES: Record<ClientCategoryValue, string> = {
+  hamburgueria: "Hamburguerias",
+  distribuidor: "Carteira de Distribuidores",
+  parceiros: "Parceiros",
+  outros: "Outros",
+};
+
+function formatPhoneForDisplay(input: string): string {
+  const digits = input.replace(/\D/g, "");
+  const normalized =
+    digits.length >= 12 && digits.startsWith("55") ? digits.slice(2) : digits;
+
+  if (normalized.length <= 2) return normalized;
+  if (normalized.length <= 6) return `(${normalized.slice(0, 2)}) ${normalized.slice(2)}`;
+  if (normalized.length <= 10) {
+    return `(${normalized.slice(0, 2)}) ${normalized.slice(2, 6)}-${normalized.slice(6, 10)}`;
+  }
+  return `(${normalized.slice(0, 2)}) ${normalized.slice(2, 7)}-${normalized.slice(7, 11)}`;
+}
+
+function formatLeadSource(source: string): string {
+  const s = source.trim().toLowerCase();
+  if (s === "whatsapp") return "WhatsApp";
+  if (s === "manual") return "Manual";
+  return source;
+}
+
+function formatLeadStatus(status: string): string {
+  const s = status.trim().toLowerCase();
+  if (s === "open") return "Aberto";
+  if (s === "closed") return "Fechado";
+  return status;
+}
 
 function leadContactName(l: {
   contacts:
@@ -74,10 +107,7 @@ export default async function LeadsPage({
   const distributorRows =
     clientCategory === "distribuidor"
       ? (() => {
-          const byDistributor = new Map<
-            string,
-            (typeof distributorSourceRows)[number]
-          >();
+          const byDistributor = new Map<string, (typeof distributorSourceRows)[number]>();
           const pending: (typeof distributorSourceRows)[number][] = [];
 
           for (const lead of filteredDistributorSourceRows) {
@@ -123,28 +153,43 @@ export default async function LeadsPage({
         })()
       : [];
 
-  const visibleCount = clientCategory === "distribuidor" ? distributorRows.length : filteredLeadRows.length;
-  const totalCount = clientCategory === "distribuidor" ? distributorSourceRows.length : leadRows.length;
+  const visibleCount =
+    clientCategory === "distribuidor" ? distributorRows.length : filteredLeadRows.length;
+  const totalCount =
+    clientCategory === "distribuidor" ? distributorSourceRows.length : leadRows.length;
+
+  const pageTitle = clientCategory ? CATEGORY_PAGE_TITLES[clientCategory] : "Leads";
+  const listPanelTitle = clientCategory ? `Lista — ${CATEGORY_PAGE_TITLES[clientCategory]}` : "Lista de leads";
+
+  const emptyMessage =
+    query.trim().length > 0
+      ? `Nenhum lead encontrado para «${query.trim()}».`
+      : clientCategory
+        ? "Nenhum lead nesta categoria."
+        : "Nenhum lead na lista.";
+
+  const showEmpty =
+    clientCategory === "distribuidor"
+      ? distributorRows.length === 0
+      : clientCategory
+        ? filteredLeadRows.length === 0
+        : filteredLeadRows.length === 0;
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h1 className="text-lg font-semibold">
-          {clientCategory === "distribuidor" ? "Carteira de Distribuidores" : "Leads"}
-        </h1>
-        {clientCategory ? (
-          <p className="text-sm text-[var(--muted)]">
-            Filtro: <span className="font-medium text-[var(--foreground)]">{clientCategory}</span> ·{" "}
-            <Link className="text-[var(--accent)] hover:underline" href="/leads">
-              limpar
-            </Link>
-          </p>
-        ) : null}
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-lg font-semibold">{pageTitle}</h1>
+        <p className="mt-1 text-sm text-[var(--muted)]">
+          {clientCategory
+            ? "Edite rede, classificação e contato na tabela. Novos contatos entram pelo "
+            : "Consulta e busca de todos os leads. Novos contatos entram pelo "}
+          <Link href="/inbox" className="font-medium text-[var(--accent)] hover:underline">
+            Chat (Inbox)
+          </Link>
+          .
+        </p>
       </div>
-      <Suspense fallback={<p className="text-sm text-[var(--muted)]">Carregando busca…</p>}>
-        <LeadsFilters totalCount={totalCount} visibleCount={visibleCount} />
-      </Suspense>
-      <NewLeadForm categoryMode={clientCategory} />
+
       {leadsError ? (
         <div
           className="rounded-lg border border-[color:var(--border-strong)] bg-[var(--vp-surface)] px-3 py-2 text-sm text-[var(--vp-wine-classic)]"
@@ -154,125 +199,130 @@ export default async function LeadsPage({
           <p className="mt-1 font-mono text-xs opacity-90">{leadsError}</p>
         </div>
       ) : null}
-      <div className="overflow-x-auto rounded-lg border border-[var(--border)] bg-[var(--card)]">
-        <table className="w-full min-w-[640px] text-left text-sm">
-          <thead className="border-b border-[var(--border)] text-[var(--muted)]">
-            {clientCategory ? (
-              <tr>
-                <th className="px-2 py-2">Rede</th>
-                <th className="px-2 py-2">Classificação</th>
-                <th className="px-2 py-2">CNPJ</th>
-                <th className="px-2 py-2">Nome</th>
-                <th className="px-2 py-2">Telefone</th>
-                <th className="px-2 py-2">Cidade</th>
-                <th className="px-2 py-2">Opções</th>
-              </tr>
-            ) : (
-              <tr>
-                <th className="px-3 py-2">Nome</th>
-                <th className="px-3 py-2">Status</th>
-                <th className="px-3 py-2">Origem</th>
-                <th className="px-3 py-2">Criado</th>
-              </tr>
-            )}
-          </thead>
-          <tbody>
-            {clientCategory === "distribuidor"
-              ? distributorRows.map((row) => (
-                  <tr
-                    key={`${row.distributorName || "pendente"}-${row.lead?.id ?? "empty"}`}
-                    className="border-b border-[var(--border)] last:border-0 transition-colors hover:bg-[var(--vp-surface-low)]"
-                  >
-                    <LeadCategoryRowEdit
-                      leadId={row.lead?.id ?? null}
-                      clientCategory="distribuidor"
-                      distributorName={row.distributorName}
-                      distributorLocked={row.distributorLocked}
-                      leadStatus={(row.lead?.status ?? "").trim().toLowerCase()}
-                      networkType={(row.lead?.network_type ?? "").trim().toLowerCase()}
-                      contactName={row.lead ? leadContactName(row.lead) : ""}
-                      leadPhone={row.lead?.phone_e164 ?? ""}
-                      city={row.lead ? (nestOne(row.lead.companies)?.city ?? "").trim() : ""}
-                      companyDocument={row.lead ? (nestOne(row.lead.companies)?.document ?? "").trim() : ""}
-                    />
-                  </tr>
-                ))
-              : clientCategory
-                ? filteredLeadRows.map((l) => (
+
+      <section className="overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--card)] shadow-[var(--sh-sm)]">
+        <div className="border-b border-[var(--border)] px-3 py-2">
+          <h2 className="text-sm font-semibold text-[var(--vp-wine)]">{listPanelTitle}</h2>
+        </div>
+
+        <Suspense fallback={<p className="px-3 py-2 text-sm text-[var(--muted)]">Carregando…</p>}>
+          <LeadsFilters totalCount={totalCount} visibleCount={visibleCount} />
+        </Suspense>
+
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[720px] text-left text-sm">
+            <thead className="border-b border-[var(--border)] bg-[rgba(35,0,4,0.04)] text-xs font-semibold uppercase tracking-[0.06em] text-[var(--vp-wine)]">
+              {clientCategory ? (
+                <tr>
+                  <th className="px-3 py-2.5">Rede</th>
+                  <th className="px-3 py-2.5">Classificação</th>
+                  <th className="px-3 py-2.5">CNPJ</th>
+                  <th className="px-3 py-2.5">Nome</th>
+                  <th className="px-3 py-2.5">Telefone</th>
+                  <th className="px-3 py-2.5">Cidade</th>
+                  <th className="px-3 py-2.5">Opções</th>
+                </tr>
+              ) : (
+                <tr>
+                  <th className="px-3 py-2.5">Contato</th>
+                  <th className="px-3 py-2.5">Telefone</th>
+                  <th className="px-3 py-2.5">Status</th>
+                  <th className="px-3 py-2.5">Origem</th>
+                  <th className="px-3 py-2.5">Entrada</th>
+                </tr>
+              )}
+            </thead>
+            <tbody>
+              {clientCategory === "distribuidor"
+                ? distributorRows.map((row) => (
                     <tr
-                      key={l.id}
+                      key={`${row.distributorName || "pendente"}-${row.lead?.id ?? "empty"}`}
                       className="border-b border-[var(--border)] last:border-0 transition-colors hover:bg-[var(--vp-surface-low)]"
                     >
                       <LeadCategoryRowEdit
-                        leadId={l.id}
-                        clientCategory={clientCategory}
-                        distributorName={(nestOne(l.distributors)?.name ?? "").trim().toUpperCase()}
-                        distributorLocked={false}
-                        leadStatus={(l.status ?? "").trim().toLowerCase()}
-                        networkType={(l.network_type ?? "").trim().toLowerCase()}
-                        contactName={leadContactName(l)}
-                        leadPhone={l.phone_e164 ?? ""}
-                        city={(nestOne(l.companies)?.city ?? "").trim()}
-                        companyDocument={(nestOne(l.companies)?.document ?? "").trim()}
+                        leadId={row.lead?.id ?? null}
+                        clientCategory="distribuidor"
+                        distributorName={row.distributorName}
+                        distributorLocked={row.distributorLocked}
+                        leadStatus={(row.lead?.status ?? "").trim().toLowerCase()}
+                        networkType={(row.lead?.network_type ?? "").trim().toLowerCase()}
+                        contactName={row.lead ? leadContactName(row.lead) : ""}
+                        leadPhone={row.lead?.phone_e164 ?? ""}
+                        city={row.lead ? (nestOne(row.lead.companies)?.city ?? "").trim() : ""}
+                        companyDocument={
+                          row.lead ? (nestOne(row.lead.companies)?.document ?? "").trim() : ""
+                        }
                       />
                     </tr>
                   ))
-              : filteredLeadRows.map((l) => (
-                  <tr
-                    key={l.id}
-                    className="border-b border-[var(--border)] last:border-0 transition-colors hover:bg-[var(--vp-surface-low)]"
-                  >
-                    <td className="px-3 py-2">
-                      <Link
-                        className="block min-w-0 text-[var(--accent)] hover:underline"
-                        href={`/leads/${l.id}`}
+                : clientCategory
+                  ? filteredLeadRows.map((l) => (
+                      <tr
+                        key={l.id}
+                        className="border-b border-[var(--border)] last:border-0 transition-colors hover:bg-[var(--vp-surface-low)]"
                       >
-                        <LeadIdentity
-                          name={displayPersonName(nestOne(l.contacts)?.full_name)}
-                          companyName={displayCompanyName({
-                            companyName: nestOne(l.companies)?.name,
-                            distributorName: nestOne(l.distributors)?.name,
-                            clientCategory: l.client_category,
-                          })}
-                          category={l.client_category}
-                          phoneTitle={l.phone_e164}
-                          size="sm"
-                          layout="stacked"
+                        <LeadCategoryRowEdit
+                          leadId={l.id}
+                          clientCategory={clientCategory}
+                          distributorName={(nestOne(l.distributors)?.name ?? "").trim().toUpperCase()}
+                          distributorLocked={false}
+                          leadStatus={(l.status ?? "").trim().toLowerCase()}
+                          networkType={(l.network_type ?? "").trim().toLowerCase()}
+                          contactName={leadContactName(l)}
+                          leadPhone={l.phone_e164 ?? ""}
+                          city={(nestOne(l.companies)?.city ?? "").trim()}
+                          companyDocument={(nestOne(l.companies)?.document ?? "").trim()}
                         />
-                      </Link>
-                    </td>
-                    <td className="px-3 py-2">{l.status}</td>
-                    <td className="px-3 py-2">{l.source}</td>
-                    <td className="px-3 py-2 text-[var(--muted)]">
-                      {new Date(l.created_at).toLocaleString("pt-BR")}
-                    </td>
-                  </tr>
-                ))}
-          </tbody>
-        </table>
-        {clientCategory === "distribuidor" &&
-          distributorRows.length === 0 && (
-            <p className="p-6 text-center text-sm text-[var(--muted)]">
-              {query.trim().length > 0
-                ? `Nenhum lead encontrado para «${query.trim()}».`
-                : "Nenhum lead nesta categoria."}
-            </p>
-          )}
-        {clientCategory && clientCategory !== "distribuidor" && filteredLeadRows.length === 0 && (
-          <p className="p-6 text-center text-sm text-[var(--muted)]">
-            {query.trim().length > 0
-              ? `Nenhum lead encontrado para «${query.trim()}».`
-              : "Nenhum lead nesta categoria."}
-          </p>
-        )}
-        {!clientCategory && filteredLeadRows.length === 0 && (
-          <p className="p-6 text-center text-sm text-[var(--muted)]">
-            {query.trim().length > 0
-              ? `Nenhum lead encontrado para «${query.trim()}».`
-              : "Nenhum lead."}
-          </p>
-        )}
-      </div>
+                      </tr>
+                    ))
+                  : filteredLeadRows.map((l) => (
+                      <tr
+                        key={l.id}
+                        className="border-b border-[var(--border)] last:border-0 transition-colors hover:bg-[var(--vp-surface-low)]"
+                      >
+                        <td className="px-3 py-2.5">
+                          <Link
+                            className="block min-w-0 text-[var(--accent)] hover:underline"
+                            href={`/leads/${l.id}`}
+                          >
+                            <LeadIdentity
+                              name={displayPersonName(nestOne(l.contacts)?.full_name)}
+                              companyName={displayCompanyName({
+                                companyName: nestOne(l.companies)?.name,
+                                distributorName: nestOne(l.distributors)?.name,
+                                clientCategory: l.client_category,
+                              })}
+                              category={l.client_category}
+                              phoneTitle={l.phone_e164}
+                              size="sm"
+                              layout="stacked"
+                            />
+                          </Link>
+                        </td>
+                        <td className="px-3 py-2.5 tabular-nums text-[var(--foreground)]">
+                          {l.phone_e164 ? formatPhoneForDisplay(l.phone_e164) : "—"}
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <span className="inline-flex rounded-full bg-[rgba(35,0,4,0.06)] px-2 py-0.5 text-xs font-medium text-[var(--foreground)]">
+                            {formatLeadStatus(l.status)}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2.5 text-[var(--muted)]">
+                          {formatLeadSource(l.source)}
+                        </td>
+                        <td className="px-3 py-2.5 tabular-nums text-[var(--muted)]">
+                          {new Date(l.created_at).toLocaleString("pt-BR")}
+                        </td>
+                      </tr>
+                    ))}
+            </tbody>
+          </table>
+        </div>
+
+        {showEmpty ? (
+          <p className="px-3 py-8 text-center text-sm text-[var(--muted)]">{emptyMessage}</p>
+        ) : null}
+      </section>
     </div>
   );
 }

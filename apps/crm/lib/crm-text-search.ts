@@ -73,6 +73,24 @@ export function pipelineCardMatchesQuery(
   );
 }
 
+export function taskRowMatchesQuery(
+  input: {
+    title: string;
+    personName: string;
+    companyLine: string | null;
+    phoneE164: string | null;
+  },
+  rawQuery: string,
+): boolean {
+  return crmRecordMatchesQuery(
+    {
+      texts: [input.title, input.personName, input.companyLine ?? ""],
+      phones: [input.phoneE164],
+    },
+    rawQuery,
+  );
+}
+
 export function leadListRowMatchesQuery(
   row: {
     phone_e164: string;

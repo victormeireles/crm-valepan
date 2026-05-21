@@ -4,7 +4,15 @@ import { toggleTaskDone } from "@/app/actions/tasks";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-export function ToggleTaskButton({ taskId, done }: { taskId: string; done: boolean }) {
+export function ToggleTaskButton({
+  taskId,
+  done,
+  className,
+}: {
+  taskId: string;
+  done: boolean;
+  className?: string;
+}) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
 
@@ -20,9 +28,12 @@ export function ToggleTaskButton({ taskId, done }: { taskId: string; done: boole
       type="button"
       onClick={() => void onClick()}
       disabled={loading}
-      className="rounded border border-[var(--border)] px-2 py-1 text-xs hover:bg-[var(--background)] disabled:opacity-50"
+      className={
+        className ??
+        "rounded-md border border-[var(--border)] bg-[var(--vp-paper-pure)] px-2 py-1 text-xs font-medium hover:bg-[var(--background)] disabled:opacity-50"
+      }
     >
-      {done ? "Reabrir" : "Concluir"}
+      {loading ? "…" : done ? "Reabrir" : "Concluir"}
     </button>
   );
 }
