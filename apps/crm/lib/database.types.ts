@@ -54,6 +54,9 @@ export interface Database {
           bread_type: string | null;
           bread_weight_grams: number | null;
           status: string;
+          excluded_from_pipeline_at: string | null;
+          excluded_reason: string | null;
+          excluded_by: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -72,6 +75,9 @@ export interface Database {
           bread_type?: string | null;
           bread_weight_grams?: number | null;
           status?: string;
+          excluded_from_pipeline_at?: string | null;
+          excluded_reason?: string | null;
+          excluded_by?: string | null;
         };
         Update: Partial<Database["crm"]["Tables"]["leads"]["Insert"]>;
       };

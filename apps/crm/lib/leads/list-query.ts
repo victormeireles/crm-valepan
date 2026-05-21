@@ -61,6 +61,7 @@ export async function fetchLeadListRows(
     crm
       .from("leads")
       .select(LEAD_LIST_SELECT_WITH_NETWORK)
+      .is("excluded_from_pipeline_at", null)
       .order("updated_at", { ascending: false }),
   );
 
@@ -71,6 +72,7 @@ export async function fetchLeadListRows(
       crm
         .from("leads")
         .select(LEAD_LIST_SELECT_BASE)
+        .is("excluded_from_pipeline_at", null)
         .order("updated_at", { ascending: false }),
     );
     ({ data, error } = await query);

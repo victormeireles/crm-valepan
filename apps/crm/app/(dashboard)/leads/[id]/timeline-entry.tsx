@@ -1,3 +1,4 @@
+import { leadExclusionReasonLabel } from "@/lib/lead-pipeline-exclusion";
 import { timelineActivityLabel } from "@/lib/timeline-labels";
 import type { Json } from "@/lib/database.types";
 import Link from "next/link";
@@ -137,6 +138,10 @@ export function TimelineEntry({ row }: { row: TimelineRow }) {
         ? (payload.task_titles as unknown[]).filter((t): t is string => typeof t === "string")
         : [];
       if (titles.length > 0) detail = titles.join(" · ");
+    }
+    if (action === "excluded_from_pipeline") {
+      const reason = typeof payload.reason === "string" ? payload.reason : null;
+      detail = leadExclusionReasonLabel(reason);
     }
 
     return (

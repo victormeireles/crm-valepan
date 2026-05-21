@@ -1,4 +1,5 @@
 import { displayCompanyName, displayPersonName } from "@/lib/lead-identity";
+import { isLeadExcludedFromPipeline } from "@/lib/lead-pipeline-exclusion";
 import {
   cardMatchesPipelineFilters,
   computePipelineSignals,
@@ -16,6 +17,7 @@ export const dynamic = "force-dynamic";
 type LeadN = {
   phone_e164: string;
   owner_id?: string | null;
+  excluded_from_pipeline_at?: string | null;
   client_category?: string | null;
   contacts?: { full_name: string | null } | { full_name: string | null }[] | null;
   companies?: { name: string | null } | { name: string | null }[] | null;
@@ -130,7 +132,7 @@ export default async function PipelinePage({
     crm
       .from("opportunities")
       .select(
-        "id, title, lead_id, stage_id, lost_reason, owner_id, updated_at, next_action_at, pipeline_stages(name, sort_order, is_final), leads(phone_e164, owner_id, client_category, contacts(full_name), companies(name), distributors(name))",
+        "id, title, lead_id, stage_id, lost_reason, owner_id, updated_at, next_action_at, pipeline_stages(name, sort_order, is_final), leads(phone_e164, owner_id, client_category, excluded_from_pipeline_at, contacts(full_name), companies(name), distributors(name))",
       )
       .order("updated_at", { ascending: false }),
     crm.from("profiles").select("id, full_name, role").order("full_name", { ascending: true }),
@@ -158,12 +160,17 @@ export default async function PipelinePage({
     is_final: s.is_final,
   }));
 
-  const allCards: PipelineCardDTO[] = (rows ?? []).map((o) =>
-    mapRowToCard(
-      o as unknown as Parameters<typeof mapRowToCard>[0],
-      lastDirectionByLead,
-    ),
-  );
+  const allCards: PipelineCardDTO[] = (rows ?? [])
+    .filter((o) => {
+      const lead = nestOne((o as { leads: LeadN | LeadN[] | null }).leads);
+      return !isLeadExcludedFromPipeline(lead);
+    })
+    .map((o) =>
+      mapRowToCard(
+        o as unknown as Parameters<typeof mapRowToCard>[0],
+        lastDirectionByLead,
+      ),
+    );
 
   const filteredCards = allCards.filter((card) =>
     cardMatchesPipelineFilters(card, {
@@ -217,6 +224,12 @@ export default async function PipelinePage({
 
       {stages.length === 0 ? (
         <p className="text-sm text-[var(--muted)]">Nenhuma etapa do funil configurada.</p>
+      ) : filteredCards.length === 0 ? (
+        <p className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-4 py-8 text-center text-sm text-[var(--muted)]">
+          {query.trim().length > 0
+            ? `Nenhuma oportunidade encontrada para «${query.trim()}». Tente outro nome, telefone ou limpe os filtros.`
+            : "Nenhuma oportunidade corresponde aos filtros selecionados."}
+        </p>
       ) : (
         <PipelineBoard stages={stages} initialCards={filteredCards} />
       )}

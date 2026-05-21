@@ -1174,24 +1174,27 @@ export async function ingestZapiMessage(parsed: ZapiInbound) {
 
     const { data: existingLead } = await crm
       .from("leads")
-      .select("id")
+      .select("id, excluded_from_pipeline_at")
       .eq("phone_e164", phoneE164ForCrm)
       .maybeSingle();
 
     if (existingLead?.id) {
       leadId = existingLead.id;
-      const { data: existingOpp } = await crm
-        .from("opportunities")
-        .select("id")
-        .eq("lead_id", leadId)
-        .limit(1)
-        .maybeSingle();
-      if (!existingOpp) {
-        await crm.from("opportunities").insert({
-          lead_id: leadId,
-          stage_id: firstStageId,
-          title: `WhatsApp ${phoneE164ForCrm}`,
-        });
+      const pipelineExcluded = !!existingLead.excluded_from_pipeline_at;
+      if (!pipelineExcluded) {
+        const { data: existingOpp } = await crm
+          .from("opportunities")
+          .select("id")
+          .eq("lead_id", leadId)
+          .limit(1)
+          .maybeSingle();
+        if (!existingOpp) {
+          await crm.from("opportunities").insert({
+            lead_id: leadId,
+            stage_id: firstStageId,
+            title: `WhatsApp ${phoneE164ForCrm}`,
+          });
+        }
       }
     } else {
       const { data: insertedLead, error: leadErr } = await crm
@@ -1207,23 +1210,25 @@ export async function ingestZapiMessage(parsed: ZapiInbound) {
         if (leadErr.code === "23505") {
           const { data: again } = await crm
             .from("leads")
-            .select("id")
+            .select("id, excluded_from_pipeline_at")
             .eq("phone_e164", phoneE164ForCrm)
             .single();
           if (!again?.id) throw leadErr;
           leadId = again.id;
-          const { data: oppRace } = await crm
-            .from("opportunities")
-            .select("id")
-            .eq("lead_id", leadId)
-            .limit(1)
-            .maybeSingle();
-          if (!oppRace) {
-            await crm.from("opportunities").insert({
-              lead_id: leadId,
-              stage_id: firstStageId,
-              title: `WhatsApp ${phoneE164ForCrm}`,
-            });
+          if (!again.excluded_from_pipeline_at) {
+            const { data: oppRace } = await crm
+              .from("opportunities")
+              .select("id")
+              .eq("lead_id", leadId)
+              .limit(1)
+              .maybeSingle();
+            if (!oppRace) {
+              await crm.from("opportunities").insert({
+                lead_id: leadId,
+                stage_id: firstStageId,
+                title: `WhatsApp ${phoneE164ForCrm}`,
+              });
+            }
           }
         } else {
           throw leadErr;

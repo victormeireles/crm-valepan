@@ -7,7 +7,9 @@ import {
   PIPELINE_STALE_DAYS,
 } from "@/lib/pipeline-signals";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useTransition } from "react";
+import { useCallback, useEffect, useState, useTransition } from "react";
+
+const SEARCH_DEBOUNCE_MS = 300;
 
 export function PipelineFilters({
   totalCount,
@@ -28,6 +30,12 @@ export function PipelineFilters({
   const signal = isPipelineSignal(signalRaw) ? signalRaw : null;
   const q = searchParams.get("q") ?? "";
 
+  const [draftQ, setDraftQ] = useState(q);
+
+  useEffect(() => {
+    setDraftQ(q);
+  }, [q]);
+
   const pushParams = useCallback(
     (patch: Record<string, string | null>) => {
       const next = new URLSearchParams(searchParams.toString());
@@ -44,6 +52,22 @@ export function PipelineFilters({
     },
     [router, searchParams],
   );
+
+  const commitSearch = useCallback(
+    (value: string) => {
+      const trimmed = value.trim();
+      if (trimmed === q.trim()) return;
+      pushParams({ q: trimmed || null });
+    },
+    [pushParams, q],
+  );
+
+  useEffect(() => {
+    const trimmed = draftQ.trim();
+    if (trimmed === q.trim()) return;
+    const id = window.setTimeout(() => commitSearch(draftQ), SEARCH_DEBOUNCE_MS);
+    return () => window.clearTimeout(id);
+  }, [draftQ, q, commitSearch]);
 
   return (
     <div className="space-y-3 rounded-lg border border-[var(--border)] bg-[var(--card)] p-3">
@@ -62,23 +86,23 @@ export function PipelineFilters({
       </div>
 
       <div className="flex flex-wrap gap-2">
-        <label className="flex min-w-[10rem] flex-1 flex-col gap-1 text-xs">
-          <span className="text-[var(--muted)]">Buscar</span>
+        <label className="flex min-w-[12rem] flex-1 flex-col gap-1 text-xs">
+          <span className="text-[var(--muted)]">Buscar por nome ou telefone</span>
           <input
             type="search"
-            defaultValue={q}
-            placeholder="Nome, empresa, telefone…"
+            value={draftQ}
+            placeholder="Ex.: Maria, Valepan, 11999998888…"
             className="rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1.5 text-sm"
+            onChange={(e) => setDraftQ(e.target.value)}
             onKeyDown={(e) => {
               if (e.key !== "Enter") return;
-              pushParams({ q: e.currentTarget.value.trim() || null });
-            }}
-            onBlur={(e) => {
-              const v = e.target.value.trim();
-              if (v === q.trim()) return;
-              pushParams({ q: v || null });
+              e.preventDefault();
+              commitSearch(e.currentTarget.value);
             }}
           />
+          <span className="text-[10px] text-[var(--muted)]">
+            Também busca empresa e título da oportunidade. Atualiza ao digitar.
+          </span>
         </label>
 
         <label className="flex min-w-[10rem] flex-col gap-1 text-xs">

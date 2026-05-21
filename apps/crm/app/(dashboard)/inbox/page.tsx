@@ -13,6 +13,11 @@ import { LeadQualificationModal } from "./lead-qualification-modal";
 import { MarkConversationRead } from "./mark-conversation-read";
 import { InboxTasksPanel, type InboxTaskRow } from "./inbox-tasks-panel";
 import { SendMessageForm } from "./send-message-form";
+import { ExcludeLeadButton, RestoreLeadButton } from "./exclude-lead-actions";
+import {
+  isLeadExcludedFromPipeline,
+  leadExclusionReasonLabel,
+} from "@/lib/lead-pipeline-exclusion";
 
 const TEAM_ROLE_LABEL: Record<string, string> = {
   admin: "Admin",
@@ -32,7 +37,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 const PREVIEW_MAX = 80;
-type InboxTab = "leads" | "groups";
+type InboxTab = "leads" | "groups" | "archived";
 
 function previewLine(body: string | null | undefined): string {
   const t = (body ?? "").trim().replace(/\s+/g, " ");
@@ -74,7 +79,8 @@ export default async function InboxPage({
   searchParams: Promise<{ cid?: string; tab?: string }>;
 }) {
   const { cid, tab } = await searchParams;
-  const activeTab: InboxTab = tab === "groups" ? "groups" : "leads";
+  const activeTab: InboxTab =
+    tab === "groups" ? "groups" : tab === "archived" ? "archived" : "leads";
   const conversationKind = activeTab === "groups" ? "group" : "lead";
   const supabase = await createServerSupabaseClient();
   const crm = crmTables(supabase);
@@ -84,7 +90,7 @@ export default async function InboxPage({
       crm
         .from("conversations")
         .select(
-          "id, phone_e164, conversation_kind, group_display_name, classification, created_at, updated_at, last_read_at, leads(id, phone_e164, status, owner_id, client_category, zip_code, weekly_bread_consumption, bread_type, bread_weight_grams, contacts(full_name, avatar_url), companies(id, name, document, city, state), distributors(name), opportunities(id, stage_id, updated_at))",
+          "id, phone_e164, conversation_kind, group_display_name, classification, created_at, updated_at, last_read_at, leads(id, phone_e164, status, owner_id, client_category, zip_code, weekly_bread_consumption, bread_type, bread_weight_grams, excluded_from_pipeline_at, excluded_reason, contacts(full_name, avatar_url), companies(id, name, document, city, state), distributors(name), opportunities(id, stage_id, updated_at))",
         )
         .eq("conversation_kind", conversationKind)
         .order("updated_at", { ascending: false }),
@@ -95,11 +101,20 @@ export default async function InboxPage({
 
   const tailById = new Map((tails ?? []).map((t) => [t.conversation_id, t]));
 
-  const conversationsSorted = [...(conversations ?? [])].sort((a, b) => {
-    const ta = tailById.get(a.id)?.last_sent_at ?? a.updated_at;
-    const tb = tailById.get(b.id)?.last_sent_at ?? b.updated_at;
-    return tb.localeCompare(ta);
-  });
+  const conversationsSorted = [...(conversations ?? [])]
+    .filter((c) => {
+      if (activeTab === "groups") return true;
+      const lead = nestOne(
+        c.leads as { excluded_from_pipeline_at?: string | null } | { excluded_from_pipeline_at?: string | null }[] | null,
+      );
+      const archived = isLeadExcludedFromPipeline(lead);
+      return activeTab === "archived" ? archived : !archived;
+    })
+    .sort((a, b) => {
+      const ta = tailById.get(a.id)?.last_sent_at ?? a.updated_at;
+      const tb = tailById.get(b.id)?.last_sent_at ?? b.updated_at;
+      return tb.localeCompare(ta);
+    });
 
   const validCid =
     cid && conversationsSorted.some((c) => c.id === cid) ? cid : null;
@@ -151,6 +166,8 @@ export default async function InboxPage({
           | {
               id: string;
               status: string;
+              excluded_from_pipeline_at?: string | null;
+              excluded_reason?: string | null;
               client_category?: string | null;
               zip_code?: string | null;
               weekly_bread_consumption?: number | null;
@@ -188,6 +205,8 @@ export default async function InboxPage({
           | {
               id: string;
               status: string;
+              excluded_from_pipeline_at?: string | null;
+              excluded_reason?: string | null;
               client_category?: string | null;
               zip_code?: string | null;
               weekly_bread_consumption?: number | null;
@@ -225,6 +244,8 @@ export default async function InboxPage({
           | null,
       )
     : null;
+
+  const selectedLeadExcluded = isLeadExcludedFromPipeline(selectedLead);
 
   const selectedCompany = nestOne(
     (selectedLead?.companies ?? null) as
@@ -295,6 +316,8 @@ export default async function InboxPage({
         | {
             id: string;
             status: string;
+            excluded_from_pipeline_at?: string | null;
+            excluded_reason?: string | null;
             client_category?: string | null;
             contacts?:
               | { full_name: string | null; avatar_url?: string | null }
@@ -312,6 +335,8 @@ export default async function InboxPage({
         | {
             id: string;
             status: string;
+            excluded_from_pipeline_at?: string | null;
+            excluded_reason?: string | null;
             client_category?: string | null;
             contacts?:
               | { full_name: string | null; avatar_url?: string | null }
@@ -379,7 +404,9 @@ export default async function InboxPage({
         c.conversation_kind === "group"
           ? "Conversa em grupo"
           : lead
-            ? `Status: ${lead.status}`
+            ? isLeadExcludedFromPipeline(lead)
+              ? `Arquivado · ${leadExclusionReasonLabel(lead.excluded_reason)}`
+              : `Status: ${lead.status}`
             : "Sem lead",
       awaiting: tail?.last_direction === "in",
       identityName,
@@ -495,39 +522,56 @@ export default async function InboxPage({
                       Aguarda a sua resposta (última mensagem foi do cliente).
                     </p>
                   ) : null}
+                  {selectedLeadExcluded ? (
+                    <p className="mt-2 rounded-md border border-[var(--border)] bg-[rgba(35,0,4,0.04)] px-2 py-1.5 text-xs text-[var(--muted)]">
+                      Arquivado — fora do funil e da lista de prospects. O chat continua ativo.
+                    </p>
+                  ) : null}
                   </div>
                   {selected.conversation_kind === "lead" && selectedLead?.id ? (
                     <div className="flex shrink-0 flex-wrap items-center gap-2">
-                      <InboxTasksPanel
-                        leadId={selectedLead.id}
-                        leadLabel={displayPersonName(
-                          nestOne(
-                            (selectedLead.contacts ?? null) as
-                              | { full_name: string | null }
-                              | { full_name: string | null }[]
-                              | null,
-                          )?.full_name,
-                        )}
-                        opportunityId={inboxOpportunityId}
-                        tasks={inboxLeadTasks}
-                        teamOptions={inboxTeamOptions}
-                        assigneeLabels={inboxAssigneeLabels}
-                        defaultAssigneeId={inboxLeadOwnerId}
-                      />
-                      <LeadQualificationModal
-                        conversationId={selected.id}
-                        initialCategory={selectedLead?.client_category ?? null}
-                        initialStageId={selectedOpportunity?.stage_id ?? null}
-                        initialState={selectedCompany?.state ?? null}
-                        initialCity={selectedCompany?.city ?? null}
-                        initialZipCode={selectedLead?.zip_code ?? null}
-                        initialWeeklyBreadConsumption={selectedLead?.weekly_bread_consumption ?? null}
-                        initialCompanyName={selectedCompany?.name ?? null}
-                        initialCnpj={selectedCompany?.document ?? null}
-                        initialBreadType={selectedLead?.bread_type ?? null}
-                        initialBreadWeightGrams={selectedLead?.bread_weight_grams ?? null}
-                        stages={(stages ?? []).map((stage) => ({ id: stage.id, name: stage.name }))}
-                      />
+                      {selectedLeadExcluded ? (
+                        <RestoreLeadButton leadId={selectedLead.id} />
+                      ) : (
+                        <>
+                          <InboxTasksPanel
+                            leadId={selectedLead.id}
+                            leadLabel={displayPersonName(
+                              nestOne(
+                                (selectedLead.contacts ?? null) as
+                                  | { full_name: string | null }
+                                  | { full_name: string | null }[]
+                                  | null,
+                              )?.full_name,
+                            )}
+                            opportunityId={inboxOpportunityId}
+                            tasks={inboxLeadTasks}
+                            teamOptions={inboxTeamOptions}
+                            assigneeLabels={inboxAssigneeLabels}
+                            defaultAssigneeId={inboxLeadOwnerId}
+                          />
+                          <LeadQualificationModal
+                            conversationId={selected.id}
+                            initialCategory={selectedLead?.client_category ?? null}
+                            initialStageId={selectedOpportunity?.stage_id ?? null}
+                            initialState={selectedCompany?.state ?? null}
+                            initialCity={selectedCompany?.city ?? null}
+                            initialZipCode={selectedLead?.zip_code ?? null}
+                            initialWeeklyBreadConsumption={
+                              selectedLead?.weekly_bread_consumption ?? null
+                            }
+                            initialCompanyName={selectedCompany?.name ?? null}
+                            initialCnpj={selectedCompany?.document ?? null}
+                            initialBreadType={selectedLead?.bread_type ?? null}
+                            initialBreadWeightGrams={selectedLead?.bread_weight_grams ?? null}
+                            stages={(stages ?? []).map((stage) => ({
+                              id: stage.id,
+                              name: stage.name,
+                            }))}
+                          />
+                          <ExcludeLeadButton leadId={selectedLead.id} />
+                        </>
+                      )}
                     </div>
                   ) : null}
                 </div>

@@ -1,6 +1,7 @@
 import { LeadIdentity } from "@/components/lead-identity";
 import { formatRelativeShort } from "@/lib/format-relative";
 import { displayCompanyName, displayPersonName } from "@/lib/lead-identity";
+import { isLeadExcludedFromPipeline } from "@/lib/lead-pipeline-exclusion";
 import { nestOne } from "@/lib/supabase/nested";
 import { createServerSupabaseClient, crmTables } from "@/lib/supabase/server";
 import Link from "next/link";
@@ -62,14 +63,19 @@ export default async function DashboardPage() {
     { data: kpiRows, error: kpiError },
     { data: recentLeads },
   ] = await Promise.all([
-    crm.from("leads").select("*", { count: "exact", head: true }),
+    crm
+      .from("leads")
+      .select("*", { count: "exact", head: true })
+      .is("excluded_from_pipeline_at", null),
     crm.from("tasks").select("*", { count: "exact", head: true }).eq("done", false),
     crm.from("sample_shipments").select("*", { count: "exact", head: true }).neq("status", "ENVIADO"),
     crm
       .from("pipeline_stages")
       .select("id, name, sort_order, is_final")
       .order("sort_order", { ascending: true }),
-    crm.from("opportunities").select("stage_id"),
+    crm
+      .from("opportunities")
+      .select("stage_id, leads(excluded_from_pipeline_at)"),
     crm
       .from("tasks")
       .select("*", { count: "exact", head: true })
@@ -82,19 +88,28 @@ export default async function DashboardPage() {
       .select(
         "id, phone_e164, created_at, client_category, contacts(full_name), companies(name), distributors(name)",
       )
+      .is("excluded_from_pipeline_at", null)
       .order("created_at", { ascending: false })
       .limit(5),
   ]);
 
   const stageRows = stages ?? [];
   const finalStageIds = new Set(stageRows.filter((s) => s.is_final).map((s) => s.id));
-  const openPipelineCount = (opps ?? []).filter(
+  const activeOpps = (opps ?? []).filter((o) => {
+    const lead = nestOne(
+      (o as { leads?: { excluded_from_pipeline_at?: string | null } | { excluded_from_pipeline_at?: string | null }[] | null })
+        .leads ?? null,
+    );
+    return !isLeadExcludedFromPipeline(lead);
+  });
+
+  const openPipelineCount = activeOpps.filter(
     (o) => o.stage_id && !finalStageIds.has(o.stage_id),
   ).length;
 
-  const totalOpps = (opps ?? []).length;
+  const totalOpps = activeOpps.length;
   const countByStage = new Map<string, number>();
-  for (const o of opps ?? []) {
+  for (const o of activeOpps) {
     if (!o.stage_id) continue;
     countByStage.set(o.stage_id, (countByStage.get(o.stage_id) ?? 0) + 1);
   }

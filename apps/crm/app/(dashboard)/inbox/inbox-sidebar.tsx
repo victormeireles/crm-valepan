@@ -56,7 +56,7 @@ export function InboxSidebar({
 }: {
   conversations: InboxSidebarRow[];
   selectedId: string | null;
-  activeTab: "leads" | "groups";
+  activeTab: "leads" | "groups" | "archived";
 }) {
   const router = useRouter();
   const [q, setQ] = useState("");
@@ -85,7 +85,7 @@ export function InboxSidebar({
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-xl border-y border-r border-[var(--border)] border-l-[3px] border-l-[var(--vp-gold-classic)] bg-[var(--vp-paper-pure)] shadow-[var(--sh-sm)]">
       <div className="shrink-0 border-b border-[var(--border)] bg-[var(--vp-paper)] p-2">
-        <div className="mb-2 grid grid-cols-2 gap-1 rounded-md bg-[rgba(35,0,4,0.06)] p-1">
+        <div className="mb-2 grid grid-cols-3 gap-1 rounded-md bg-[rgba(35,0,4,0.06)] p-1">
           <Link
             href="/inbox?tab=leads"
             className={`rounded px-2 py-1 text-center text-xs font-medium ${
@@ -95,6 +95,16 @@ export function InboxSidebar({
             }`}
           >
             Leads
+          </Link>
+          <Link
+            href="/inbox?tab=archived"
+            className={`rounded px-2 py-1 text-center text-xs font-medium ${
+              activeTab === "archived"
+                ? "bg-[var(--vp-paper-pure)] text-[var(--foreground)] shadow-[var(--sh-sm)]"
+                : "text-[var(--muted)] hover:text-[var(--foreground)]"
+            }`}
+          >
+            Arquivados
           </Link>
           <Link
             href="/inbox?tab=groups"
