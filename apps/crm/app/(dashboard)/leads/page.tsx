@@ -3,11 +3,14 @@ import { displayCompanyName, displayPersonName } from "@/lib/lead-identity";
 import { nestOne } from "@/lib/supabase/nested";
 import { isClientCategoryValue } from "@/lib/client-categories";
 import { SEND_VIA_OPTIONS } from "@/lib/send-via-options";
-import { fetchLeadListRows } from "@/lib/leads/list-query";
+import { leadListRowMatchesQuery } from "@/lib/crm-text-search";
+import { fetchLeadListRows, type LeadListRow } from "@/lib/leads/list-query";
 import { createServerSupabaseClient, crmTables } from "@/lib/supabase/server";
 import Link from "next/link";
+import { Suspense } from "react";
 import { NewLeadForm } from "./new-lead-form";
 import { LeadCategoryRowEdit } from "./lead-category-row-edit";
+import { LeadsFilters } from "./leads-filters";
 
 /** Evita cache da lista após salvar (router.refresh + dados atualizados do Supabase). */
 export const dynamic = "force-dynamic";
@@ -23,6 +26,19 @@ function leadContactName(l: {
   return (nestOne(l.contacts)?.full_name ?? "").trim();
 }
 
+function leadRowSearchFields(l: LeadListRow) {
+  return {
+    phone_e164: l.phone_e164,
+    contactName: leadContactName(l),
+    companyName: (nestOne(l.companies)?.name ?? "").trim() || null,
+    distributorName: (nestOne(l.distributors)?.name ?? "").trim() || null,
+    city: (nestOne(l.companies)?.city ?? "").trim() || null,
+    document: (nestOne(l.companies)?.document ?? "").trim() || null,
+    status: l.status,
+    source: l.source,
+  };
+}
+
 export default async function LeadsPage({
   searchParams,
 }: {
@@ -32,11 +48,18 @@ export default async function LeadsPage({
   const rawCat = sp.client_category;
   const clientCategory =
     typeof rawCat === "string" && isClientCategoryValue(rawCat) ? rawCat : null;
+  const query = typeof sp.q === "string" ? sp.q : "";
 
   const supabase = await createServerSupabaseClient();
   const crm = crmTables(supabase);
 
   const { rows: leadRows, error: leadsError } = await fetchLeadListRows(crm, clientCategory);
+
+  const matchesQuery = (l: LeadListRow) =>
+    query.trim().length === 0 || leadListRowMatchesQuery(leadRowSearchFields(l), query);
+
+  const filteredLeadRows = leadRows.filter(matchesQuery);
+
   const distributorSourceRows =
     clientCategory === "distribuidor"
       ? leadRows.filter((lead) => {
@@ -44,7 +67,9 @@ export default async function LeadsPage({
           const networkType = (lead.network_type ?? "").trim().toLowerCase();
           return category === "distribuidor" || !!lead.distributor_id || networkType === "distribuidor";
         })
-      : leadRows;
+      : filteredLeadRows;
+
+  const filteredDistributorSourceRows = distributorSourceRows.filter(matchesQuery);
 
   const distributorRows =
     clientCategory === "distribuidor"
@@ -55,7 +80,7 @@ export default async function LeadsPage({
           >();
           const pending: (typeof distributorSourceRows)[number][] = [];
 
-          for (const lead of distributorSourceRows) {
+          for (const lead of filteredDistributorSourceRows) {
             const distName = (nestOne(lead.distributors)?.name ?? "").trim().toUpperCase();
             if (distName && SEND_VIA_OPTIONS.includes(distName as (typeof SEND_VIA_OPTIONS)[number])) {
               if (!byDistributor.has(distName)) {
@@ -81,9 +106,25 @@ export default async function LeadsPage({
             };
           });
 
-          return [...pendingRows, ...fixedRows];
+          const all = [...pendingRows, ...fixedRows];
+          if (query.trim().length === 0) return all;
+          return all.filter((row) => {
+            if (row.lead && matchesQuery(row.lead)) return true;
+            return leadListRowMatchesQuery(
+              {
+                phone_e164: "",
+                contactName: "",
+                companyName: null,
+                distributorName: row.distributorName,
+              },
+              query,
+            );
+          });
         })()
       : [];
+
+  const visibleCount = clientCategory === "distribuidor" ? distributorRows.length : filteredLeadRows.length;
+  const totalCount = clientCategory === "distribuidor" ? distributorSourceRows.length : leadRows.length;
 
   return (
     <div className="space-y-4">
@@ -100,6 +141,9 @@ export default async function LeadsPage({
           </p>
         ) : null}
       </div>
+      <Suspense fallback={<p className="text-sm text-[var(--muted)]">Carregando busca…</p>}>
+        <LeadsFilters totalCount={totalCount} visibleCount={visibleCount} />
+      </Suspense>
       <NewLeadForm categoryMode={clientCategory} />
       {leadsError ? (
         <div
@@ -154,7 +198,7 @@ export default async function LeadsPage({
                   </tr>
                 ))
               : clientCategory
-                ? leadRows.map((l) => (
+                ? filteredLeadRows.map((l) => (
                     <tr
                       key={l.id}
                       className="border-b border-[var(--border)] last:border-0 transition-colors hover:bg-[var(--vp-surface-low)]"
@@ -173,7 +217,7 @@ export default async function LeadsPage({
                       />
                     </tr>
                   ))
-              : leadRows.map((l) => (
+              : filteredLeadRows.map((l) => (
                   <tr
                     key={l.id}
                     className="border-b border-[var(--border)] last:border-0 transition-colors hover:bg-[var(--vp-surface-low)]"
@@ -207,18 +251,26 @@ export default async function LeadsPage({
           </tbody>
         </table>
         {clientCategory === "distribuidor" &&
-          distributorSourceRows.length === 0 && (
+          distributorRows.length === 0 && (
             <p className="p-6 text-center text-sm text-[var(--muted)]">
-              Nenhum lead nesta categoria.
+              {query.trim().length > 0
+                ? `Nenhum lead encontrado para «${query.trim()}».`
+                : "Nenhum lead nesta categoria."}
             </p>
           )}
-        {clientCategory && clientCategory !== "distribuidor" && leadRows.length === 0 && (
+        {clientCategory && clientCategory !== "distribuidor" && filteredLeadRows.length === 0 && (
           <p className="p-6 text-center text-sm text-[var(--muted)]">
-            Nenhum lead nesta categoria.
+            {query.trim().length > 0
+              ? `Nenhum lead encontrado para «${query.trim()}».`
+              : "Nenhum lead nesta categoria."}
           </p>
         )}
-        {!clientCategory && leadRows.length === 0 && (
-          <p className="p-6 text-center text-sm text-[var(--muted)]">Nenhum lead.</p>
+        {!clientCategory && filteredLeadRows.length === 0 && (
+          <p className="p-6 text-center text-sm text-[var(--muted)]">
+            {query.trim().length > 0
+              ? `Nenhum lead encontrado para «${query.trim()}».`
+              : "Nenhum lead."}
+          </p>
         )}
       </div>
     </div>

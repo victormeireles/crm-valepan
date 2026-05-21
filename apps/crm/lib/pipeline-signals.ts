@@ -1,6 +1,8 @@
 /** Regras pontuais de sinalização no funil (calculadas na leitura, sem gravar em BD). */
 
-import { normalizeBrazilPhoneToE164 } from "@crm/shared/phone";
+import { pipelineCardMatchesQuery } from "@/lib/crm-text-search";
+
+export { pipelineCardMatchesQuery } from "@/lib/crm-text-search";
 
 export const PIPELINE_STALE_DAYS = 7;
 
@@ -53,62 +55,6 @@ export function computePipelineSignals(input: {
   }
 
   return signals;
-}
-
-function normSearchText(value: string): string {
-  return value
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
-}
-
-function phoneDigits(value: string): string {
-  return value.replace(/\D/g, "");
-}
-
-/** Busca por nome, empresa, título da oportunidade ou telefone (com/sem máscara e DDI). */
-export function pipelineCardMatchesQuery(
-  card: {
-    personName: string;
-    companyLine: string | null;
-    phone_e164: string | null;
-    title: string | null;
-  },
-  rawQuery: string,
-): boolean {
-  const q = rawQuery.trim();
-  if (!q) return true;
-
-  const qNorm = normSearchText(q);
-  const qDigits = phoneDigits(q);
-
-  const textHay = normSearchText(
-    [card.personName, card.companyLine ?? "", card.title ?? ""].join(" "),
-  );
-  if (textHay.includes(qNorm)) return true;
-
-  if (qDigits.length < 4) return false;
-
-  const phoneHay = [
-    card.phone_e164 ?? "",
-    card.title ?? "",
-  ]
-    .map(phoneDigits)
-    .filter(Boolean)
-    .join(" ");
-
-  if (phoneHay.includes(qDigits)) return true;
-
-  const normalizedQuery = normalizeBrazilPhoneToE164(q);
-  if (normalizedQuery) {
-    const stored = phoneDigits(card.phone_e164 ?? "");
-    const fromQuery = phoneDigits(normalizedQuery);
-    if (stored.length > 0 && (stored === fromQuery || stored.endsWith(fromQuery) || fromQuery.endsWith(stored))) {
-      return true;
-    }
-  }
-
-  return false;
 }
 
 export function cardMatchesPipelineFilters(
