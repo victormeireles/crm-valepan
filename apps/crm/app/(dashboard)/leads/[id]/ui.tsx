@@ -59,9 +59,12 @@ export function LeadActions({
   const [err, setErr] = useState<string | null>(null);
   const [distributorMsg, setDistributorMsg] = useState<string | null>(null);
 
-  const lostStage = stages.find((s) => {
+  const closingStage = stages.find((s) => {
     const n = s.name.toLowerCase();
-    return n.includes("perdido") || n.includes("sem interesse");
+    return (
+      s.id === stageId &&
+      (n.includes("perdido") || n.includes("desqualificado") || n.includes("sem interesse"))
+    );
   });
 
   useEffect(() => {
@@ -124,7 +127,7 @@ export function LeadActions({
     const res = await updateOpportunityStage({
       opportunityId: opportunity.id,
       stageId,
-      lostReason: lostStage && stageId === lostStage.id ? lost : null,
+      lostReason: closingStage ? lost : null,
     });
     setLoading(false);
     if (!res.ok) {
@@ -293,9 +296,9 @@ export function LeadActions({
           ))}
         </select>
       </label>
-      {lostStage && stageId === lostStage.id ? (
+      {closingStage ? (
         <label className="flex flex-col gap-1">
-          Motivo (sem interesse / perdido)
+          Motivo do encerramento
           <input
             className="rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1"
             value={lost}

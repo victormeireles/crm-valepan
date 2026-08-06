@@ -2,11 +2,10 @@
 
 import { usernameToLoginEmail } from "@/lib/auth/login-email";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 
 export function LoginForm() {
-  const router = useRouter();
   const search = useSearchParams();
   const next = search.get("next") ?? "/dashboard";
   const [username, setUsername] = useState("");
@@ -62,8 +61,11 @@ export function LoginForm() {
         setError(getAuthErrorMessage(err));
         return;
       }
-      router.push(next);
-      router.refresh();
+      // Força uma nova requisição para que o middleware e os Server Components
+      // recebam os cookies de sessão gravados pelo Supabase antes de protegerem
+      // a rota de destino. A navegação pelo router pode disputar com essa gravação
+      // e redirecionar o usuário de volta ao login sem exibir erro.
+      window.location.assign(next);
     } catch (err) {
       setError(getAuthErrorMessage(err));
     } finally {

@@ -2,7 +2,12 @@
 
 import { loadEarlierInboxMessages } from "@/app/actions/inbox";
 import type { InboxMessageRow } from "@/lib/inbox/load-messages";
+import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { AudioMessagePlayer } from "./audio-message-player";
+import { DocumentInsightPanel } from "./document-insight-panel";
+import { DocumentSearch } from "./document-search";
+import { MediaPreviewDialog } from "./media-preview-dialog";
 
 export type ChatMessageRow = InboxMessageRow;
 
@@ -43,14 +48,21 @@ function initials(name: string) {
   return parts.map((p) => p[0]?.toUpperCase() ?? "").join("") || "?";
 }
 
-function isHttpUrl(value: string | null | undefined): value is string {
+function isPlayableMediaSrc(value: string | null | undefined): value is string {
   if (!value) return false;
-  return /^https?:\/\//i.test(value.trim());
+  const src = value.trim();
+  return /^https?:\/\//i.test(src) || /^data:[a-z0-9.+-]+\/[a-z0-9.+-]+(?:;[^,]*)?,/i.test(src);
 }
 
 function renderMedia(message: InboxMessageRow) {
   if (!message.media_kind) return null;
-  const mediaUrl = isHttpUrl(message.media_url) ? message.media_url : null;
+  const privateMediaUrl =
+    message.media_storage_path
+      ? `/api/media/messages/${encodeURIComponent(message.id)}`
+      : null;
+  const mediaUrl =
+    privateMediaUrl ??
+    (isPlayableMediaSrc(message.media_url) ? message.media_url : null);
   const fileName = message.media_file_name?.trim() || "arquivo";
   const mime = message.media_mime_type?.trim() || undefined;
 
@@ -65,14 +77,8 @@ function renderMedia(message: InboxMessageRow) {
           className="max-h-[320px] w-full rounded-lg border border-[var(--border)] object-contain bg-black/5"
           loading="lazy"
         />
-        <a
-          href={mediaUrl}
-          target="_blank"
-          rel="noreferrer"
-          className="inline-flex text-xs font-semibold underline underline-offset-2"
-        >
-          Abrir imagem
-        </a>
+        <MediaPreviewDialog src={mediaUrl} fileName={fileName} kind="image" />
+        <DocumentInsightPanel messageId={message.id} />
       </div>
     );
   }
@@ -98,9 +104,11 @@ function renderMedia(message: InboxMessageRow) {
   if (message.media_kind === "audio" && mediaUrl) {
     return (
       <div className="space-y-2">
-        <audio controls className="w-full">
-          <source src={mediaUrl} type={mime} />
-        </audio>
+        <AudioMessagePlayer
+          messageId={message.id}
+          src={mediaUrl}
+          mime={mime}
+        />
         <a
           href={mediaUrl}
           target="_blank"
@@ -113,16 +121,41 @@ function renderMedia(message: InboxMessageRow) {
     );
   }
 
+  const isPdf =
+    message.media_kind === "document" &&
+    (mime?.split(";")[0]?.trim().toLowerCase() === "application/pdf" ||
+      fileName.toLowerCase().endsWith(".pdf"));
+
+  if (isPdf && mediaUrl) {
+    return (
+      <div className="flex items-center gap-3 rounded-lg border border-current/15 bg-black/5 p-3">
+        <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-red-700 text-[10px] font-bold text-white">
+          PDF
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-xs font-semibold">{fileName}</p>
+          <MediaPreviewDialog src={mediaUrl} fileName={fileName} kind="pdf" />
+          <DocumentInsightPanel messageId={message.id} />
+        </div>
+      </div>
+    );
+  }
+
   if (mediaUrl) {
     return (
-      <a
-        href={mediaUrl}
-        target="_blank"
-        rel="noreferrer"
-        className="inline-flex text-xs font-semibold underline underline-offset-2"
-      >
-        Baixar {fileName}
-      </a>
+      <div>
+        <a
+          href={mediaUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex text-xs font-semibold underline underline-offset-2"
+        >
+          Baixar {fileName}
+        </a>
+        {message.media_kind === "document" ? (
+          <DocumentInsightPanel messageId={message.id} />
+        ) : null}
+      </div>
     );
   }
 
@@ -153,16 +186,83 @@ export function ChatThread({
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const skipScrollToBottomRef = useRef(false);
+  const supabase = useMemo(() => createBrowserSupabaseClient(), []);
 
   const [olderMessages, setOlderMessages] = useState<InboxMessageRow[]>([]);
+  const [liveMessages, setLiveMessages] = useState<InboxMessageRow[]>([]);
   const [hasMoreOlder, setHasMoreOlder] = useState(hasMoreOlderInitial);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const messages = useMemo(
-    () => mergeById(olderMessages, initialMessages),
-    [olderMessages, initialMessages],
+    () => mergeById(mergeById(olderMessages, initialMessages), liveMessages),
+    [olderMessages, initialMessages, liveMessages],
   );
+
+  useEffect(() => {
+    setOlderMessages([]);
+    setLiveMessages([]);
+    setHasMoreOlder(hasMoreOlderInitial);
+    setLoadError(null);
+  }, [conversationId, hasMoreOlderInitial]);
+
+  useEffect(() => {
+    const normalizeRealtimeRow = (value: unknown): InboxMessageRow | null => {
+      const row = value as Partial<InboxMessageRow> | null;
+      if (!row?.id || !row.sent_at || (row.direction !== "in" && row.direction !== "out")) {
+        return null;
+      }
+      return {
+        id: row.id,
+        direction: row.direction,
+        body: row.body ?? null,
+        media_kind: row.media_kind ?? null,
+        media_url: row.media_url ?? null,
+        media_mime_type: row.media_mime_type ?? null,
+        media_file_name: row.media_file_name ?? null,
+        media_storage_path: row.media_storage_path ?? null,
+        media_size_bytes: row.media_size_bytes ?? null,
+        media_storage_status: row.media_storage_status ?? null,
+        message_status: row.message_status ?? null,
+        read_at: row.read_at ?? null,
+        sent_at: row.sent_at,
+      };
+    };
+
+    const channel = supabase
+      .channel(`crm-chat-${conversationId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "crm",
+          table: "messages",
+          filter: `conversation_id=eq.${conversationId}`,
+        },
+        (payload) => {
+          const row = normalizeRealtimeRow(payload.new);
+          if (row) setLiveMessages((previous) => mergeById(previous, [row]));
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "crm",
+          table: "messages",
+          filter: `conversation_id=eq.${conversationId}`,
+        },
+        (payload) => {
+          const row = normalizeRealtimeRow(payload.new);
+          if (row) setLiveMessages((previous) => mergeById(previous, [row]));
+        },
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [conversationId, supabase]);
 
   const firstNewSinceReadIdx = useMemo(() => {
     const lr = (lastReadAtIso ?? "").trim();
@@ -231,6 +331,7 @@ export function ChatThread({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <DocumentSearch conversationId={conversationId} />
       <div
         ref={scrollRef}
         className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-1 py-2"
@@ -262,7 +363,7 @@ export function ChatThread({
             idx >= firstNewSinceReadIdx &&
             (lastReadAtIso ?? "").trim().length > 0;
           return (
-            <div key={m.id} className="w-full space-y-3">
+            <div key={m.id} id={`message-${m.id}`} className="w-full space-y-3">
               {idx === firstNewSinceReadIdx && firstNewSinceReadIdx >= 0 ? (
                 <div
                   className="flex items-center gap-2 py-1"

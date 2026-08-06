@@ -5,7 +5,7 @@ import { updateConversationContactName } from "@/app/actions/inbox";
 import { formatRelativeShort } from "@/lib/format-relative";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 
 export type InboxSidebarRow = {
   id: string;
@@ -56,10 +56,13 @@ export function InboxSidebar({
 }: {
   conversations: InboxSidebarRow[];
   selectedId: string | null;
-  activeTab: "leads" | "groups" | "archived";
+  activeTab: "qualify" | "pipeline" | "groups" | "archived";
 }) {
   const router = useRouter();
+  const [navigationPending, startNavigation] = useTransition();
   const [q, setQ] = useState("");
+  const [optimisticSelectedId, setOptimisticSelectedId] = useState(selectedId);
+  const [readIds, setReadIds] = useState<Set<string>>(() => new Set());
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [errorById, setErrorById] = useState<Record<string, string | null>>({});
@@ -82,19 +85,47 @@ export function InboxSidebar({
     });
   }, [conversations, q]);
 
+  useEffect(() => {
+    setOptimisticSelectedId(selectedId);
+  }, [selectedId]);
+
+  useEffect(() => {
+    const onRead = (event: Event) => {
+      const conversationId = (event as CustomEvent<{ conversationId?: string }>).detail
+        ?.conversationId;
+      if (!conversationId) return;
+      setReadIds((previous) => new Set(previous).add(conversationId));
+    };
+    window.addEventListener("crm:conversation-read", onRead);
+    return () => window.removeEventListener("crm:conversation-read", onRead);
+  }, []);
+
   return (
-    <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-xl border-y border-r border-[var(--border)] border-l-[3px] border-l-[var(--vp-gold-classic)] bg-[var(--vp-paper-pure)] shadow-[var(--sh-sm)]">
+    <div
+      aria-busy={navigationPending}
+      className="relative flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-xl border-y border-r border-[var(--border)] border-l-[3px] border-l-[var(--vp-gold-classic)] bg-[var(--vp-paper-pure)] shadow-[var(--sh-sm)]"
+    >
       <div className="shrink-0 border-b border-[var(--border)] bg-[var(--vp-paper)] p-2">
-        <div className="mb-2 grid grid-cols-3 gap-1 rounded-md bg-[rgba(35,0,4,0.06)] p-1">
+        <div className="mb-2 grid grid-cols-2 gap-1 rounded-md bg-[rgba(35,0,4,0.06)] p-1">
           <Link
-            href="/inbox?tab=leads"
+            href="/inbox?tab=qualify"
             className={`rounded px-2 py-1 text-center text-xs font-medium ${
-              activeTab === "leads"
+              activeTab === "qualify"
                 ? "bg-[var(--vp-paper-pure)] text-[var(--foreground)] shadow-[var(--sh-sm)]"
                 : "text-[var(--muted)] hover:text-[var(--foreground)]"
             }`}
           >
-            Leads
+            Para qualificar
+          </Link>
+          <Link
+            href="/inbox?tab=pipeline"
+            className={`rounded px-2 py-1 text-center text-xs font-medium ${
+              activeTab === "pipeline"
+                ? "bg-[var(--vp-paper-pure)] text-[var(--foreground)] shadow-[var(--sh-sm)]"
+                : "text-[var(--muted)] hover:text-[var(--foreground)]"
+            }`}
+          >
+            No funil
           </Link>
           <Link
             href="/inbox?tab=archived"
@@ -135,13 +166,26 @@ export function InboxSidebar({
         {filtered.map((c) => (
           <li
             key={c.id}
-            className={`relative transition-colors hover:bg-[rgba(35,0,4,0.05)] ${
-                c.id === selectedId
+            className={`relative [contain-intrinsic-size:auto_88px] [content-visibility:auto] transition-colors hover:bg-[rgba(35,0,4,0.05)] ${
+                c.id === optimisticSelectedId
                   ? "border-l-[3px] border-l-[var(--vp-wine)] bg-[rgba(35,0,4,0.09)]"
                   : "border-l-[3px] border-l-transparent"
               }`}
           >
-            <Link href={`/inbox?tab=${activeTab}&cid=${c.id}`} className="block px-4 py-3 pr-10">
+            <Link
+              href={`/inbox?tab=${activeTab}&cid=${c.id}`}
+              prefetch
+              scroll={false}
+              onMouseEnter={() => router.prefetch(`/inbox?tab=${activeTab}&cid=${c.id}`)}
+              onFocus={() => router.prefetch(`/inbox?tab=${activeTab}&cid=${c.id}`)}
+              onClick={(event) => {
+                event.preventDefault();
+                const href = `/inbox?tab=${activeTab}&cid=${c.id}`;
+                setOptimisticSelectedId(c.id);
+                startNavigation(() => router.push(href, { scroll: false }));
+              }}
+              className="block px-4 py-3 pr-10"
+            >
               <div className="flex items-start justify-between gap-2">
                 <div className="flex min-w-0 items-start gap-2">
                   {validAvatarUrl(c.avatarUrl) ? (
@@ -172,7 +216,7 @@ export function InboxSidebar({
                   </div>
                 </div>
                 <span className="flex shrink-0 items-center gap-1">
-                  {c.unread ? (
+                  {c.unread && !readIds.has(c.id) ? (
                     <span
                       className="size-2 shrink-0 rounded-full bg-[var(--vp-wine)]"
                       title="Mensagens não lidas"
@@ -272,6 +316,11 @@ export function InboxSidebar({
           <li className="px-4 py-8 text-center text-sm text-[var(--muted)]">Nenhum resultado.</li>
         )}
       </ul>
+      {navigationPending ? (
+        <div className="pointer-events-none absolute bottom-2 left-1/2 z-20 -translate-x-1/2 rounded-full bg-[var(--vp-wine)] px-3 py-1 text-[10px] font-medium text-[var(--vp-gold)] shadow-[var(--sh-md)]">
+          Abrindo conversa…
+        </div>
+      ) : null}
     </div>
   );
 }

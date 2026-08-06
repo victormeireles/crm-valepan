@@ -49,41 +49,55 @@ type CrmClient = ReturnType<typeof crmTables>;
 export async function fetchLeadListRows(
   crm: CrmClient,
   clientCategory: string | null,
-): Promise<{ rows: LeadListRow[]; error: string | null }> {
-  const applyCategoryFilter = <T extends { eq: (col: string, val: string) => T }>(q: T) => {
-    if (clientCategory && clientCategory !== "distribuidor") {
-      return q.eq("client_category", clientCategory);
-    }
-    return q;
-  };
+  page: number,
+  pageSize: number,
+): Promise<{ rows: LeadListRow[]; error: string | null; totalCount: number }> {
+  let query = crm.from("leads").select(LEAD_LIST_SELECT_WITH_NETWORK, { count: "exact" });
+  if (clientCategory === "distribuidor") {
+    query = query
+      .or("client_category.eq.distribuidor,distributor_id.not.is.null,network_type.eq.distribuidor")
+      .or("excluded_from_pipeline_at.is.null,excluded_reason.eq.cliente");
+  } else {
+    query = query.is("excluded_from_pipeline_at", null);
+    if (clientCategory) query = query.eq("client_category", clientCategory);
+  }
+  query = query
+    .order("updated_at", { ascending: false })
+    .range((page - 1) * pageSize, page * pageSize - 1);
 
-  let query = applyCategoryFilter(
-    crm
-      .from("leads")
-      .select(LEAD_LIST_SELECT_WITH_NETWORK)
-      .is("excluded_from_pipeline_at", null)
-      .order("updated_at", { ascending: false }),
-  );
-
-  let { data, error } = await query;
+  const { data, error, count } = await query;
 
   if (error && isMissingNetworkTypeColumnError(error)) {
-    query = applyCategoryFilter(
-      crm
-        .from("leads")
-        .select(LEAD_LIST_SELECT_BASE)
-        .is("excluded_from_pipeline_at", null)
-        .order("updated_at", { ascending: false }),
-    );
-    ({ data, error } = await query);
-    if (!error && data) {
-      data = data.map((row) => ({ ...row, network_type: null }));
+    let fallbackQuery = crm
+      .from("leads")
+      .select(LEAD_LIST_SELECT_BASE, { count: "exact" });
+    if (clientCategory === "distribuidor") {
+      fallbackQuery = fallbackQuery
+        .or("client_category.eq.distribuidor,distributor_id.not.is.null")
+        .or("excluded_from_pipeline_at.is.null,excluded_reason.eq.cliente");
+    } else {
+      fallbackQuery = fallbackQuery.is("excluded_from_pipeline_at", null);
+      if (clientCategory) {
+        fallbackQuery = fallbackQuery.eq("client_category", clientCategory);
+      }
     }
+    fallbackQuery = fallbackQuery
+      .order("updated_at", { ascending: false })
+      .range((page - 1) * pageSize, page * pageSize - 1);
+    const fallback = await fallbackQuery;
+    if (fallback.error) {
+      return { rows: [], error: fallback.error.message, totalCount: 0 };
+    }
+    return {
+      rows: (fallback.data ?? []).map((row) => ({ ...row, network_type: null })) as LeadListRow[],
+      error: null,
+      totalCount: fallback.count ?? 0,
+    };
   }
 
   if (error) {
-    return { rows: [], error: error.message };
+    return { rows: [], error: error.message, totalCount: 0 };
   }
 
-  return { rows: (data ?? []) as LeadListRow[], error: null };
+  return { rows: (data ?? []) as LeadListRow[], error: null, totalCount: count ?? 0 };
 }

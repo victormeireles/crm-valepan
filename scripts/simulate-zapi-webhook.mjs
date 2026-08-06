@@ -57,3 +57,41 @@ await post("ReceivedCallback (cliente)", {
   momment: Date.now(),
   text: { message: "Resposta do cliente (teste)" },
 });
+
+await post("ReceivedCallback (áudio do cliente)", {
+  type: "ReceivedCallback",
+  phone,
+  fromMe: false,
+  messageId: `${mid}-audio`,
+  momment: Date.now(),
+  audio: {
+    audioUrl: "https://example.com/audio-test.ogg",
+    mimeType: "audio/ogg; codecs=opus",
+    viewOnce: false,
+  },
+});
+
+await post("ReceivedCallback (contato compartilhado)", {
+  type: "ReceivedCallback",
+  phone,
+  fromMe: true,
+  messageId: `${mid}-contact`,
+  momment: Date.now(),
+  contact: {
+    displayName: "Dani Top Alto",
+    vCard: "BEGIN:VCARD\nVERSION:3.0\nFN:Dani Top Alto\nTEL;type=CELL;waid=5522999999999:+55 22 99999-9999\nEND:VCARD",
+    phones: ["5522999999999"],
+  },
+});
+
+await post("ReceivedCallback (figurinha)", {
+  type: "ReceivedCallback",
+  phone,
+  fromMe: false,
+  messageId: `${mid}-sticker`,
+  momment: Date.now(),
+  sticker: {
+    stickerUrl: "https://www.gstatic.com/webp/gallery/1.webp",
+    mimeType: "image/webp",
+  },
+});

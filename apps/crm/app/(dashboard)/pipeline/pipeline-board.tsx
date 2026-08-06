@@ -41,11 +41,6 @@ export type PipelineCardDTO = {
   signals: PipelineSignal[];
 };
 
-function stageNeedsLostReason(stageName: string) {
-  const n = stageName.toLowerCase();
-  return n.includes("perdido") || n.includes("sem interesse");
-}
-
 function groupByStage(
   stages: PipelineStageDTO[],
   cards: PipelineCardDTO[],
@@ -81,7 +76,9 @@ function moveCard(
   if (!card) return null;
   const updated = { ...card, stage_id: toStageId };
   const toList = next.get(toStageId);
-  if (!toList) return null;
+  // Etapas finais ficam fora das colunas ativas; remover da origem já é o
+  // estado otimista correto até a atualização dos dados do servidor.
+  if (!toList) return next;
   toList.unshift(updated);
   return next;
 }
@@ -124,9 +121,11 @@ function DroppableColumn({
 function DraggableCard({
   card,
   stageId,
+  onClose,
 }: {
   card: PipelineCardDTO;
   stageId: string;
+  onClose: (card: PipelineCardDTO, stageId: string) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `opp:${card.id}`,
@@ -180,6 +179,13 @@ function DraggableCard({
           <div className="block">{body}</div>
         )}
         <PipelineSignalBadges signals={card.signals} />
+        <button
+          type="button"
+          className="mt-2 rounded border border-[var(--border)] px-2 py-1 text-[11px] text-[var(--muted)] hover:border-[var(--accent)] hover:text-[var(--foreground)]"
+          onClick={() => onClose(card, stageId)}
+        >
+          Encerrar
+        </button>
         {card.lost_reason ? (
           <p className="mt-1 text-xs text-[var(--muted)]">Motivo: {card.lost_reason}</p>
         ) : null}
@@ -214,25 +220,31 @@ export function PipelineBoard({
   initialCards: PipelineCardDTO[];
 }) {
   const router = useRouter();
+  const activeStages = useMemo(() => stages.filter((stage) => !stage.is_final), [stages]);
+  const finalStages = useMemo(() => stages.filter((stage) => stage.is_final), [stages]);
+  const closedCards = useMemo(
+    () => initialCards.filter((card) => finalStages.some((stage) => stage.id === card.stage_id)),
+    [finalStages, initialCards],
+  );
 
   const fingerprint = useMemo(
     () => initialCards.map((c) => `${c.id}:${c.stage_id}`).join("|"),
     [initialCards],
   );
 
-  const [columns, setColumns] = useState(() => groupByStage(stages, initialCards));
+  const [columns, setColumns] = useState(() => groupByStage(activeStages, initialCards));
   const [activeCard, setActiveCard] = useState<PipelineCardDTO | null>(null);
   const [bannerError, setBannerError] = useState<string | null>(null);
   const [bannerSuccess, setBannerSuccess] = useState<string | null>(null);
   const [savingId, setSavingId] = useState<string | null>(null);
-  const [pendingLost, setPendingLost] = useState<{
+  const [pendingClose, setPendingClose] = useState<{
     opportunityId: string;
     fromStageId: string;
-    targetStageId: string;
-    targetStageName: string;
+    personName: string;
   } | null>(null);
-  const [lostDraft, setLostDraft] = useState("");
-  const [lostBusy, setLostBusy] = useState(false);
+  const [closingStageId, setClosingStageId] = useState("");
+  const [closingReason, setClosingReason] = useState("");
+  const [closingBusy, setClosingBusy] = useState(false);
   const dialogRef = useRef<HTMLDialogElement>(null);
   const columnsRef = useRef(columns);
   columnsRef.current = columns;
@@ -240,21 +252,22 @@ export function PipelineBoard({
   stagesRef.current = stages;
 
   useEffect(() => {
-    const next = groupByStage(stages, initialCards);
+    const next = groupByStage(activeStages, initialCards);
     setColumns(next);
     columnsRef.current = next;
-  }, [fingerprint, stages, initialCards]);
+  }, [fingerprint, activeStages, initialCards]);
 
   useEffect(() => {
     const d = dialogRef.current;
     if (!d) return;
-    if (pendingLost) {
-      setLostDraft("");
+    if (pendingClose) {
+      setClosingStageId(finalStages[0]?.id ?? "");
+      setClosingReason("");
       if (!d.open) d.showModal();
     } else if (d.open) {
       d.close();
     }
-  }, [pendingLost]);
+  }, [finalStages, pendingClose]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -341,43 +354,36 @@ export function PipelineBoard({
       const targetStage = stagesRef.current.find((s) => s.id === targetStageId);
       if (!targetStage) return;
 
-      if (stageNeedsLostReason(targetStage.name)) {
-        setPendingLost({
-          opportunityId: activeData.opportunityId,
-          fromStageId,
-          targetStageId,
-          targetStageName: targetStage.name,
-        });
-        return;
-      }
-
       void commitMove(activeData.opportunityId, fromStageId, targetStageId, null);
     },
     [commitMove],
   );
 
-  async function confirmLost() {
-    if (!pendingLost) return;
-    const trimmed = lostDraft.trim();
-    if (!trimmed) {
-      setBannerError("Informe o motivo.");
+  async function confirmClose() {
+    if (!pendingClose || !closingStageId) return;
+    const targetStage = finalStages.find((stage) => stage.id === closingStageId);
+    if (!targetStage) return;
+    const isConverted = targetStage.name.toLowerCase().includes("convertido");
+    const trimmed = closingReason.trim();
+    if (!isConverted && !trimmed) {
+      setBannerError("Informe o motivo do encerramento.");
       return;
     }
-    setLostBusy(true);
+    setClosingBusy(true);
     setBannerError(null);
     const ok = await commitMove(
-      pendingLost.opportunityId,
-      pendingLost.fromStageId,
-      pendingLost.targetStageId,
-      trimmed,
+      pendingClose.opportunityId,
+      pendingClose.fromStageId,
+      closingStageId,
+      isConverted ? null : trimmed,
     );
-    setLostBusy(false);
-    if (ok) setPendingLost(null);
+    setClosingBusy(false);
+    if (ok) setPendingClose(null);
   }
 
-  function cancelLost() {
-    setPendingLost(null);
-    setLostDraft("");
+  function cancelClose() {
+    setPendingClose(null);
+    setClosingReason("");
     setBannerError(null);
   }
 
@@ -403,20 +409,31 @@ export function PipelineBoard({
         <div
           className="grid w-full min-w-0 gap-1.5 sm:gap-2"
           style={
-            stages.length > 0
+            activeStages.length > 0
               ? {
-                  gridTemplateColumns: `repeat(${stages.length}, minmax(52px, 1fr))`,
-                  width: `max(100%, ${stages.length * 52}px)`,
+                  gridTemplateColumns: `repeat(${activeStages.length}, minmax(13rem, 1fr))`,
+                  width: `max(100%, ${activeStages.length * 208}px)`,
                 }
               : undefined
           }
         >
-          {stages.map((stage) => {
+          {activeStages.map((stage) => {
             const items = columns.get(stage.id) ?? [];
             return (
               <DroppableColumn key={stage.id} stageId={stage.id} stageName={stage.name} count={items.length}>
                 {items.map((card) => (
-                  <DraggableCard key={card.id} card={card} stageId={stage.id} />
+                  <DraggableCard
+                    key={card.id}
+                    card={card}
+                    stageId={stage.id}
+                    onClose={(selectedCard, fromStageId) =>
+                      setPendingClose({
+                        opportunityId: selectedCard.id,
+                        fromStageId,
+                        personName: selectedCard.personName,
+                      })
+                    }
+                  />
                 ))}
               </DroppableColumn>
             );
@@ -431,44 +448,81 @@ export function PipelineBoard({
         className="w-[min(100%,24rem)] rounded-lg border border-[var(--border)] bg-[var(--card)] p-4 text-[var(--foreground)] shadow-xl backdrop:bg-black/40"
         onCancel={(e) => {
           e.preventDefault();
-          cancelLost();
+          cancelClose();
         }}
       >
-        {pendingLost ? (
+        {pendingClose ? (
           <form
             className="space-y-3"
             onSubmit={(e) => {
               e.preventDefault();
-              void confirmLost();
+              void confirmClose();
             }}
           >
-            <h3 className="text-sm font-semibold">Motivo — {pendingLost.targetStageName}</h3>
+            <h3 className="text-sm font-semibold">Encerrar oportunidade</h3>
             <p className="text-xs text-[var(--muted)]">
-              Esta etapa exige um motivo antes de mover a oportunidade.
+              Defina o resultado de {pendingClose.personName}. O cartão sairá do funil ativo, mas
+              continuará disponível no histórico.
             </p>
-            <textarea
-              className="min-h-[5rem] w-full rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1.5 text-sm"
-              value={lostDraft}
-              onChange={(e) => setLostDraft(e.target.value)}
-              placeholder="Descreva o motivo…"
-              disabled={lostBusy}
-              autoFocus
-            />
+            <label className="block space-y-1 text-xs font-medium">
+              <span>Resultado</span>
+              <select
+                className="w-full rounded border border-[var(--border)] bg-[var(--background)] px-2 py-2 text-sm"
+                value={closingStageId}
+                onChange={(e) => {
+                  setClosingStageId(e.target.value);
+                  setClosingReason("");
+                }}
+                disabled={closingBusy}
+                autoFocus
+              >
+                {finalStages.map((stage) => (
+                  <option key={stage.id} value={stage.id}>
+                    {stage.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {!finalStages
+              .find((stage) => stage.id === closingStageId)
+              ?.name.toLowerCase()
+              .includes("convertido") ? (
+              <label className="block space-y-1 text-xs font-medium">
+                <span>Motivo</span>
+                <select
+                  className="w-full rounded border border-[var(--border)] bg-[var(--background)] px-2 py-2 text-sm"
+                  value={closingReason}
+                  onChange={(e) => setClosingReason(e.target.value)}
+                  disabled={closingBusy}
+                >
+                  <option value="">Selecione um motivo</option>
+                  <option value="Sem interesse">Sem interesse</option>
+                  <option value="Não responde">Não responde</option>
+                  <option value="Região não atendida">Região não atendida</option>
+                  <option value="Produto não disponível">Produto não disponível</option>
+                  <option value="Já era cliente">Já era cliente</option>
+                  <option value="Volume insuficiente">Volume insuficiente</option>
+                  <option value="Preço">Preço</option>
+                  <option value="Prazo">Prazo</option>
+                  <option value="Outro">Outro</option>
+                </select>
+              </label>
+            ) : null}
             <div className="flex justify-end gap-2">
               <button
                 type="button"
                 className="rounded border border-[var(--border)] px-3 py-1.5 text-sm"
-                onClick={() => cancelLost()}
-                disabled={lostBusy}
+                onClick={() => cancelClose()}
+                disabled={closingBusy}
               >
                 Cancelar
               </button>
               <button
                 type="submit"
                 className="rounded bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-[var(--vp-gold)] disabled:opacity-50"
-                disabled={lostBusy}
+                disabled={closingBusy}
               >
-                {lostBusy ? "Salvando…" : "Confirmar"}
+                {closingBusy ? "Salvando…" : "Confirmar"}
               </button>
             </div>
           </form>
@@ -479,6 +533,40 @@ export function PipelineBoard({
         <p className="text-xs text-[var(--muted)]" aria-live="polite">
           Atualizando…
         </p>
+      ) : null}
+
+      {closedCards.length > 0 ? (
+        <details className="rounded-lg border border-[var(--border)] bg-[var(--card)]">
+          <summary className="cursor-pointer px-3 py-2 text-sm font-medium">
+            Encerrados nesta página ({closedCards.length})
+          </summary>
+          <ul className="grid gap-2 border-t border-[var(--border)] p-3 sm:grid-cols-2 lg:grid-cols-3">
+            {closedCards.map((card) => {
+              const stage = finalStages.find((item) => item.id === card.stage_id);
+              return (
+                <li
+                  key={card.id}
+                  className="rounded border border-[var(--border)] bg-[var(--background)] p-2"
+                >
+                  {card.lead_id ? (
+                    <Link
+                      href={`/leads/${card.lead_id}`}
+                      className="text-sm font-medium hover:underline"
+                    >
+                      {card.personName}
+                    </Link>
+                  ) : (
+                    <span className="text-sm font-medium">{card.personName}</span>
+                  )}
+                  <p className="mt-1 text-xs text-[var(--muted)]">
+                    {stage?.name ?? "Encerrado"}
+                    {card.lost_reason ? ` · ${card.lost_reason}` : ""}
+                  </p>
+                </li>
+              );
+            })}
+          </ul>
+        </details>
       ) : null}
     </DndContext>
   );

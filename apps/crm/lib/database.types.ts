@@ -205,6 +205,9 @@ export interface Database {
           media_url: string | null;
           media_mime_type: string | null;
           media_file_name: string | null;
+          media_storage_path: string | null;
+          media_size_bytes: number | null;
+          media_storage_status: "stored" | "remote" | "failed" | "missing" | null;
           provider_message_id: string | null;
           message_status: "sent" | "read" | null;
           read_at: string | null;
@@ -220,11 +223,46 @@ export interface Database {
           media_url?: string | null;
           media_mime_type?: string | null;
           media_file_name?: string | null;
+          media_storage_path?: string | null;
+          media_size_bytes?: number | null;
+          media_storage_status?: "stored" | "remote" | "failed" | "missing" | null;
           provider_message_id?: string | null;
           message_status?: "sent" | "read" | null;
           read_at?: string | null;
           sent_at?: string;
         };
+      };
+      document_insights: {
+        Row: {
+          id: string;
+          message_id: string;
+          status: "pending" | "processing" | "completed" | "failed" | "not_configured";
+          extracted_text: string | null;
+          summary: string | null;
+          document_type: string | null;
+          language: string | null;
+          keywords: string[];
+          model: string | null;
+          error_message: string | null;
+          processed_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          message_id: string;
+          status?: "pending" | "processing" | "completed" | "failed" | "not_configured";
+          extracted_text?: string | null;
+          summary?: string | null;
+          document_type?: string | null;
+          language?: string | null;
+          keywords?: string[];
+          model?: string | null;
+          error_message?: string | null;
+          processed_at?: string | null;
+          updated_at?: string;
+        };
+        Update: Partial<Database["crm"]["Tables"]["document_insights"]["Insert"]>;
       };
       tasks: {
         Row: {
@@ -428,6 +466,7 @@ export interface Database {
           last_direction: string;
           last_sent_at: string;
           last_body_preview: string | null;
+          last_inbound_sent_at: string | null;
         };
       };
       v_lead_last_message: {
@@ -447,6 +486,20 @@ export interface Database {
           new_leads_7d: number;
           new_leads_prev_7d: number;
           active_conversations_7d: number;
+        }[];
+      };
+      search_document_insights: {
+        Args: {
+          p_query: string;
+          p_conversation_id?: string | null;
+        };
+        Returns: {
+          message_id: string;
+          file_name: string | null;
+          summary: string | null;
+          document_type: string | null;
+          processed_at: string | null;
+          rank: number;
         }[];
       };
     };

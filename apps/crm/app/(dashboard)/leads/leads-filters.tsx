@@ -42,6 +42,7 @@ export function LeadsFilters({
         if (value === null || value === "") next.delete(key);
         else next.set(key, value);
       }
+      next.delete("page");
       const qs = next.toString();
       startTransition(() => {
         router.push(qs ? `/leads?${qs}` : "/leads");

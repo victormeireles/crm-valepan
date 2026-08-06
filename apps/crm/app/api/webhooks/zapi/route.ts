@@ -16,7 +16,22 @@ function shouldLogFullZapiPayload(body: unknown): boolean {
   if (process.env.ZAPI_WEBHOOK_LOG_PAYLOAD === "0") return false;
   if (!body || typeof body !== "object") return false;
   const b = body as Record<string, unknown>;
-  return b.fromMe === true || b.fromMe === "true";
+  const nested =
+    b.data && typeof b.data === "object"
+      ? (b.data as Record<string, unknown>)
+      : b.payload && typeof b.payload === "object"
+        ? (b.payload as Record<string, unknown>)
+        : null;
+  return (
+    b.fromMe === true ||
+    b.fromMe === "true" ||
+    b.contact != null ||
+    b.contacts != null ||
+    b.sticker != null ||
+    nested?.contact != null ||
+    nested?.contacts != null ||
+    nested?.sticker != null
+  );
 }
 
 function logZapiPayloadJson(body: unknown, reason: string) {
@@ -180,6 +195,10 @@ export async function POST(req: Request) {
       eventType: parsed.eventType,
       hasProviderId: !!parsed.messageId,
       hasBodyText: !!(parsed.body && String(parsed.body).trim()),
+      bodyKind: parsed.body?.startsWith("[") ? parsed.body.slice(0, 80) : "text",
+      mediaKind: parsed.media?.kind ?? null,
+      hasMediaUrl: !!parsed.media?.url,
+      mediaMimeType: parsed.media?.mimeType ?? null,
     },
   });
   // #endregion

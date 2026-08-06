@@ -1,5 +1,6 @@
 import { agentDebugLog } from "@/lib/agent-debug-log";
 import { crmTables } from "@/lib/supabase/server";
+import { isLegacyZapiReactionBody } from "@/lib/zapi/webhook-event";
 
 
 
@@ -18,6 +19,9 @@ export type InboxMessageRow = {
   media_mime_type: string | null;
 
   media_file_name: string | null;
+  media_storage_path: string | null;
+  media_size_bytes: number | null;
+  media_storage_status: "stored" | "remote" | "failed" | "missing" | null;
   message_status: "sent" | "read" | null;
   read_at: string | null;
 
@@ -26,8 +30,15 @@ export type InboxMessageRow = {
 };
 
 const MESSAGES_SELECT_WITH_MEDIA =
+  "id, direction, body, media_kind, media_url, media_mime_type, media_file_name, media_storage_path, media_size_bytes, media_storage_status, message_status, read_at, sent_at";
+const MESSAGES_SELECT_WITH_LEGACY_MEDIA =
   "id, direction, body, media_kind, media_url, media_mime_type, media_file_name, message_status, read_at, sent_at";
 const MESSAGES_SELECT_LEGACY = "id, direction, body, sent_at";
+
+type LegacyMediaRow = Omit<
+  InboxMessageRow,
+  "media_storage_path" | "media_size_bytes" | "media_storage_status"
+>;
 
 function isMissingMediaColumnError(error?: { message?: string; code?: string } | null) {
   if (!error?.message) return false;
@@ -36,7 +47,10 @@ function isMissingMediaColumnError(error?: { message?: string; code?: string } |
     msg.includes("media_kind") ||
     msg.includes("media_url") ||
     msg.includes("media_mime_type") ||
-    msg.includes("media_file_name")
+    msg.includes("media_file_name") ||
+    msg.includes("media_storage_path") ||
+    msg.includes("media_size_bytes") ||
+    msg.includes("media_storage_status")
   );
 }
 
@@ -49,8 +63,20 @@ function normalizeLegacyRows(
     media_url: null,
     media_mime_type: null,
     media_file_name: null,
+    media_storage_path: null,
+    media_size_bytes: null,
+    media_storage_status: null,
     message_status: null,
     read_at: null,
+  }));
+}
+
+function normalizeLegacyMediaRows(rows: LegacyMediaRow[]): InboxMessageRow[] {
+  return rows.map((row) => ({
+    ...row,
+    media_storage_path: null,
+    media_size_bytes: null,
+    media_storage_status: row.media_url ? "remote" : null,
   }));
 }
 
@@ -99,23 +125,33 @@ export async function loadRecentConversationMessages(
     .limit(take);
 
   if (res.error && isMissingMediaColumnError(res.error)) {
-    const fallback = await crm
+    let fallback = await crm
       .from("messages")
-      .select(MESSAGES_SELECT_LEGACY)
+      .select(MESSAGES_SELECT_WITH_LEGACY_MEDIA)
       .eq("conversation_id", conversationId)
       .order("sent_at", { ascending: false })
       .limit(take);
+    if (fallback.error && isMissingMediaColumnError(fallback.error)) {
+      fallback = await crm
+        .from("messages")
+        .select(MESSAGES_SELECT_LEGACY)
+        .eq("conversation_id", conversationId)
+        .order("sent_at", { ascending: false })
+        .limit(take) as unknown as typeof fallback;
+    }
     if (fallback.error) {
       res = fallback as unknown as typeof res;
     } else {
-      const data = normalizeLegacyRows(
-        (fallback.data ?? []) as Array<{
-          id: string;
-          direction: "in" | "out";
-          body: string | null;
-          sent_at: string;
-        }>,
-      );
+      const rows = fallback.data ?? [];
+      const data =
+        rows.length > 0 && "media_kind" in rows[0]
+          ? normalizeLegacyMediaRows(rows as unknown as LegacyMediaRow[])
+          : normalizeLegacyRows(rows as unknown as Array<{
+              id: string;
+              direction: "in" | "out";
+              body: string | null;
+              sent_at: string;
+            }>);
       res = { ...fallback, data } as unknown as typeof res;
     }
   }
@@ -147,7 +183,9 @@ export async function loadRecentConversationMessages(
 
   const hasMoreOlder = rows.length > INBOX_MESSAGE_PAGE_SIZE;
 
-  const windowRows = hasMoreOlder ? rows.slice(0, INBOX_MESSAGE_PAGE_SIZE) : rows;
+  const windowRows = (hasMoreOlder ? rows.slice(0, INBOX_MESSAGE_PAGE_SIZE) : rows).filter(
+    (row) => !isLegacyZapiReactionBody(row.body),
+  );
 
   windowRows.reverse();
 
@@ -188,24 +226,35 @@ export async function loadOlderMessagesPage(
     .limit(INBOX_MESSAGE_PAGE_SIZE);
 
   if (res.error && isMissingMediaColumnError(res.error)) {
-    const fallback = await crm
+    let fallback = await crm
       .from("messages")
-      .select(MESSAGES_SELECT_LEGACY)
+      .select(MESSAGES_SELECT_WITH_LEGACY_MEDIA)
       .eq("conversation_id", conversationId)
       .lt("sent_at", beforeSentAt)
       .order("sent_at", { ascending: false })
       .limit(INBOX_MESSAGE_PAGE_SIZE);
+    if (fallback.error && isMissingMediaColumnError(fallback.error)) {
+      fallback = await crm
+        .from("messages")
+        .select(MESSAGES_SELECT_LEGACY)
+        .eq("conversation_id", conversationId)
+        .lt("sent_at", beforeSentAt)
+        .order("sent_at", { ascending: false })
+        .limit(INBOX_MESSAGE_PAGE_SIZE) as unknown as typeof fallback;
+    }
     if (fallback.error) {
       res = fallback as unknown as typeof res;
     } else {
-      const data = normalizeLegacyRows(
-        (fallback.data ?? []) as Array<{
-          id: string;
-          direction: "in" | "out";
-          body: string | null;
-          sent_at: string;
-        }>,
-      );
+      const rows = fallback.data ?? [];
+      const data =
+        rows.length > 0 && "media_kind" in rows[0]
+          ? normalizeLegacyMediaRows(rows as unknown as LegacyMediaRow[])
+          : normalizeLegacyRows(rows as unknown as Array<{
+              id: string;
+              direction: "in" | "out";
+              body: string | null;
+              sent_at: string;
+            }>);
       res = { ...fallback, data } as unknown as typeof res;
     }
   }
@@ -220,7 +269,9 @@ export async function loadOlderMessagesPage(
 
 
 
-  const rows = ((res.data ?? []) as InboxMessageRow[]).reverse();
+  const rows = ((res.data ?? []) as InboxMessageRow[])
+    .filter((row) => !isLegacyZapiReactionBody(row.body))
+    .reverse();
 
   return { messages: rows };
 

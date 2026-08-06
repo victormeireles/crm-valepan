@@ -43,6 +43,7 @@ export function PipelineFilters({
         if (value === null || value === "") next.delete(key);
         else next.set(key, value);
       }
+      next.delete("page");
       if (patch.owner !== undefined && patch.owner) next.delete("mine");
       if (patch.mine !== undefined && patch.mine === "1") next.delete("owner");
       const qs = next.toString();

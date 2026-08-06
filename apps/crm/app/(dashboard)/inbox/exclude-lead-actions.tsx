@@ -97,7 +97,9 @@ export function ExcludeLeadButton({ leadId }: { leadId: string }) {
     >
       <p className="text-xs font-medium text-[var(--foreground)]">Arquivar conversa</p>
       <p className="mt-1 text-xs text-[var(--muted)]">
-        A conversa continua no WhatsApp, mas some da lista de prospects e do funil.
+        {reason === "cliente"
+          ? "Sai do funil e entra na Carteira de Distribuidores com os dados já cadastrados."
+          : "A conversa continua no WhatsApp, mas some da lista de prospects e do funil."}
       </p>
       <label className="mt-2 block text-[11px] font-medium uppercase tracking-[0.06em] text-[var(--muted)]">
         Motivo
@@ -114,6 +116,12 @@ export function ExcludeLeadButton({ leadId }: { leadId: string }) {
           </option>
         ))}
       </select>
+      {reason === "cliente" ? (
+        <p className="mt-2 text-[11px] text-[var(--muted)]">
+          Serão aproveitados rede, classificação, CNPJ, nome, telefone, cidade e status. Campos sem
+          informação ficam disponíveis para completar na carteira.
+        </p>
+      ) : null}
     </ActionPanel>
   );
 }
@@ -156,7 +164,7 @@ export function RestoreLeadButton({ leadId }: { leadId: string }) {
         }
         setOpen(false);
         router.refresh();
-        router.push("/inbox?tab=leads");
+        router.push("/inbox?tab=qualify");
       }}
     >
       <p className="text-xs font-medium text-[var(--foreground)]">Restaurar no funil</p>

@@ -5,9 +5,72 @@ import {
   type LeadExclusionReason,
 } from "@/lib/lead-pipeline-exclusion";
 import { createServerSupabaseClient, crmTables } from "@/lib/supabase/server";
+import { nestOne } from "@/lib/supabase/nested";
 import { revalidatePath } from "next/cache";
 
 const LOST_REASON_EXCLUDED = "Não prospecto (arquivado no inbox)";
+const DISTRIBUTOR_NAME_MAX_LEN = 80;
+const PENDING_DISTRIBUTOR_PREFIX = "PENDENTE CARTEIRA · ";
+
+function portfolioDistributorName(input: {
+  companyName?: string | null;
+  contactName?: string | null;
+  phone?: string | null;
+}) {
+  const companyName = (input.companyName ?? "").trim().toUpperCase();
+  if (companyName) return companyName.slice(0, DISTRIBUTOR_NAME_MAX_LEN);
+
+  const contactName = (input.contactName ?? "").trim().toUpperCase();
+  const fallback = contactName || (input.phone ?? "").trim() || "SEM IDENTIFICAÇÃO";
+  return `${PENDING_DISTRIBUTOR_PREFIX}${fallback}`.slice(0, DISTRIBUTOR_NAME_MAX_LEN);
+}
+
+async function ensureClientInDistributorPortfolio(
+  crm: ReturnType<typeof crmTables>,
+  lead: {
+    id: string;
+    phone_e164: string | null;
+    distributor_id: string | null;
+    contacts?: { full_name: string | null } | { full_name: string | null }[] | null;
+    companies?: { name: string | null } | { name: string | null }[] | null;
+  },
+): Promise<{ ok: true; distributorId: string } | { ok: false; error: string }> {
+  if (lead.distributor_id) return { ok: true, distributorId: lead.distributor_id };
+
+  const name = portfolioDistributorName({
+    companyName: nestOne(lead.companies)?.name,
+    contactName: nestOne(lead.contacts)?.full_name,
+    phone: lead.phone_e164,
+  });
+
+  const { data: existing, error: existingErr } = await crm
+    .from("distributors")
+    .select("id")
+    .ilike("name", name)
+    .limit(1)
+    .maybeSingle();
+  if (existingErr) return { ok: false, error: existingErr.message };
+
+  if (existing?.id) return { ok: true, distributorId: existing.id };
+
+  const { data: inserted, error: insertErr } = await crm
+    .from("distributors")
+    .insert({
+      name,
+      active: true,
+      notes:
+        "Cadastro enviado automaticamente pelo Chat ao arquivar como Cliente. Revise a rede e complete os dados pendentes na Carteira de Distribuidores.",
+    })
+    .select("id")
+    .single();
+  if (insertErr || !inserted) {
+    return {
+      ok: false,
+      error: insertErr?.message ?? "Não foi possível criar o cadastro na carteira.",
+    };
+  }
+  return { ok: true, distributorId: inserted.id };
+}
 
 /** Colunas que referenciam `crm.profiles` (não `auth.users`). */
 async function resolveProfileActorId(
@@ -66,7 +129,9 @@ export async function excludeLeadFromPipeline(input: {
 
   const { data: lead, error: leadErr } = await crm
     .from("leads")
-    .select("id, excluded_from_pipeline_at")
+    .select(
+      "id, phone_e164, distributor_id, excluded_from_pipeline_at, contacts(full_name), companies(name)",
+    )
     .eq("id", leadId)
     .maybeSingle();
 
@@ -77,6 +142,13 @@ export async function excludeLeadFromPipeline(input: {
   }
 
   const actorProfileId = await resolveProfileActorId(crm, user.id);
+  let distributorId = lead.distributor_id;
+
+  if (input.reason === "cliente") {
+    const portfolio = await ensureClientInDistributorPortfolio(crm, lead);
+    if (!portfolio.ok) return { ok: false as const, error: portfolio.error };
+    distributorId = portfolio.distributorId;
+  }
 
   const { error: updateLeadErr } = await crm
     .from("leads")
@@ -84,6 +156,13 @@ export async function excludeLeadFromPipeline(input: {
       excluded_from_pipeline_at: nowIso,
       excluded_reason: input.reason,
       excluded_by: actorProfileId,
+      ...(input.reason === "cliente"
+        ? {
+            status: "cliente",
+            client_category: "distribuidor",
+            distributor_id: distributorId,
+          }
+        : {}),
       updated_at: nowIso,
     })
     .eq("id", leadId);
@@ -130,8 +209,12 @@ export async function excludeLeadFromPipeline(input: {
   revalidatePath("/pipeline");
   revalidatePath("/leads");
   revalidatePath("/dashboard");
+  revalidatePath("/distributors");
   revalidatePath(`/leads/${leadId}`);
-  return { ok: true as const };
+  return {
+    ok: true as const,
+    movedToDistributorPortfolio: input.reason === "cliente",
+  };
 }
 
 export async function restoreLeadToPipeline(input: { leadId: string }) {

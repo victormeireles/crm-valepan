@@ -6,6 +6,7 @@ import {
   loadOlderMessagesPage,
 } from "@/lib/inbox/load-messages";
 import { isInboxClassification } from "@/lib/inbox-classifications";
+import { storePrivateMedia } from "@/lib/media-storage";
 
 import { createServerSupabaseClient, crmTables } from "@/lib/supabase/server";
 import { registerZapiLidMapForPhoneDigits } from "@/lib/zapi/phone-exists";
@@ -406,7 +407,29 @@ export async function sendConversationAttachment(formData: FormData) {
     .maybeSingle();
 
   const body = `[${kindLabel.toUpperCase()} enviado] ${file.name || "arquivo"}`;
+  const messageId = crypto.randomUUID();
+  const shouldStorePrivately = mime.startsWith("audio/") || mode === "document";
+  let storedMedia:
+    | { path: string; sizeBytes: number }
+    | null = null;
+  if (shouldStorePrivately) {
+    try {
+      storedMedia = await storePrivateMedia({
+        messageId,
+        kind: mode === "document" ? "document" : "audio",
+        bytes: await file.arrayBuffer(),
+        mimeType: file.type,
+        fileName: file.name,
+      });
+    } catch (storageError) {
+      console.error(
+        "[inbox] private attachment storage:",
+        storageError instanceof Error ? storageError.message : String(storageError),
+      );
+    }
+  }
   const { error } = await crm.from("messages").insert({
+    id: messageId,
     conversation_id: conversationId,
     direction: "out",
     body,
@@ -419,8 +442,18 @@ export async function sendConversationAttachment(formData: FormData) {
           : kindLabel === "áudio"
             ? "audio"
             : "document",
+    media_url: storedMedia ? null : dataUrl,
     media_mime_type: file.type || null,
     media_file_name: file.name || null,
+    ...(shouldStorePrivately
+      ? storedMedia
+        ? {
+            media_storage_path: storedMedia.path,
+            media_size_bytes: storedMedia.sizeBytes,
+            media_storage_status: "stored" as const,
+          }
+        : { media_storage_status: "failed" as const }
+      : {}),
     ...(providerMessageId ? { provider_message_id: providerMessageId } : {}),
   });
   if (error) return { ok: false as const, error: error.message };

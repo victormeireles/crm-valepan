@@ -10,6 +10,7 @@ import { ChatThread } from "./chat-thread";
 import { InboxLiveRefresh } from "./inbox-live-refresh";
 import { InboxSidebar, type InboxSidebarRow } from "./inbox-sidebar";
 import { LeadQualificationModal } from "./lead-qualification-modal";
+import { PaginationNav } from "@/components/pagination-nav";
 import { MarkConversationRead } from "./mark-conversation-read";
 import { InboxTasksPanel, type InboxTaskRow } from "./inbox-tasks-panel";
 import { SendMessageForm } from "./send-message-form";
@@ -37,7 +38,19 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 const PREVIEW_MAX = 80;
-type InboxTab = "leads" | "groups" | "archived";
+const PAGE_SIZE = 40;
+type InboxTab = "qualify" | "pipeline" | "groups" | "archived";
+type ConversationRow = {
+  id: string;
+  phone_e164: string;
+  conversation_kind: string;
+  group_display_name: string | null;
+  classification: string | null;
+  created_at: string;
+  updated_at: string;
+  last_read_at: string | null;
+  leads: unknown;
+};
 
 function previewLine(body: string | null | undefined): string {
   const t = (body ?? "").trim().replace(/\s+/g, " ");
@@ -76,28 +89,79 @@ function validAvatarUrl(v: string | null | undefined): string | null {
 export default async function InboxPage({
   searchParams,
 }: {
-  searchParams: Promise<{ cid?: string; tab?: string }>;
+  searchParams: Promise<{ cid?: string; tab?: string; page?: string }>;
 }) {
-  const { cid, tab } = await searchParams;
+  const params = await searchParams;
+  const { cid, tab } = params;
+  const requestedPage = params.page ? Number.parseInt(params.page, 10) : 1;
+  const page = Number.isFinite(requestedPage) && requestedPage > 0 ? requestedPage : 1;
   const activeTab: InboxTab =
-    tab === "groups" ? "groups" : tab === "archived" ? "archived" : "leads";
+    tab === "groups"
+      ? "groups"
+      : tab === "archived"
+        ? "archived"
+        : tab === "pipeline"
+          ? "pipeline"
+          : "qualify";
   const conversationKind = activeTab === "groups" ? "group" : "lead";
   const supabase = await createServerSupabaseClient();
   const crm = crmTables(supabase);
+  const stagesPromise = crm
+    .from("pipeline_stages")
+    .select("id, name, sort_order")
+    .order("sort_order", { ascending: true });
+  const { data: stages } = await stagesPromise;
+  const entryStageId = stages?.[0]?.id ?? null;
+  const opportunityRelation: string =
+    activeTab === "pipeline" || activeTab === "qualify"
+      ? "opportunities!inner(id, stage_id, updated_at)"
+      : "opportunities(id, stage_id, updated_at)";
+  const leadRelation: string =
+    activeTab === "groups"
+      ? "leads(id, phone_e164, status, owner_id, client_category, zip_code, weekly_bread_consumption, bread_type, bread_weight_grams, excluded_from_pipeline_at, excluded_reason, contacts(full_name, avatar_url), companies(id, name, document, city, state), distributors(name), opportunities(id, stage_id, updated_at))"
+      : `leads!inner(id, phone_e164, status, owner_id, client_category, zip_code, weekly_bread_consumption, bread_type, bread_weight_grams, excluded_from_pipeline_at, excluded_reason, contacts(full_name, avatar_url), companies(id, name, document, city, state), distributors(name), ${opportunityRelation})`;
+  const conversationSelect: string =
+    `id, phone_e164, conversation_kind, group_display_name, classification, created_at, updated_at, last_read_at, ${leadRelation}`;
+  let conversationsQuery = crm
+    .from("conversations")
+    .select(conversationSelect, { count: "exact" })
+    .eq("conversation_kind", conversationKind);
+  if (activeTab === "qualify") {
+    conversationsQuery = conversationsQuery.is("leads.excluded_from_pipeline_at", null);
+    if (entryStageId) {
+      conversationsQuery = conversationsQuery.eq("leads.opportunities.stage_id", entryStageId);
+    }
+  } else if (activeTab === "pipeline") {
+    conversationsQuery = conversationsQuery.is("leads.excluded_from_pipeline_at", null);
+    if (entryStageId) {
+      conversationsQuery = conversationsQuery.neq("leads.opportunities.stage_id", entryStageId);
+    }
+  } else if (activeTab === "archived") {
+    conversationsQuery = conversationsQuery.not("leads.excluded_from_pipeline_at", "is", null);
+  }
 
-  const [{ data: conversations, error: conversationsError }, { data: tails, error: tailsError }] =
-    await Promise.all([
-      crm
-        .from("conversations")
-        .select(
-          "id, phone_e164, conversation_kind, group_display_name, classification, created_at, updated_at, last_read_at, leads(id, phone_e164, status, owner_id, client_category, zip_code, weekly_bread_consumption, bread_type, bread_weight_grams, excluded_from_pipeline_at, excluded_reason, contacts(full_name, avatar_url), companies(id, name, document, city, state), distributors(name), opportunities(id, stage_id, updated_at))",
-        )
-        .eq("conversation_kind", conversationKind)
-        .order("updated_at", { ascending: false }),
-      crm
-        .from("v_conversation_last_message")
-        .select("conversation_id, lead_id, last_direction, last_sent_at, last_body_preview"),
-    ]);
+  const conversationsResult = await conversationsQuery
+    .order("updated_at", { ascending: false })
+    .range((page - 1) * PAGE_SIZE, page * PAGE_SIZE - 1);
+  const conversations = (conversationsResult.data ?? []) as unknown as ConversationRow[];
+  const conversationsError = conversationsResult.error;
+  const conversationsCount = conversationsResult.count;
+
+  const pageConversationIds = (conversations ?? []).map((conversation) => conversation.id);
+  const requestedSelectedId =
+    cid && pageConversationIds.includes(cid) ? cid : null;
+  const requestedMessagesPromise = requestedSelectedId
+    ? loadRecentConversationMessages(crm, requestedSelectedId)
+    : null;
+  const { data: tails, error: tailsError } =
+    pageConversationIds.length > 0
+      ? await crm
+          .from("v_conversation_last_message")
+          .select(
+            "conversation_id, lead_id, last_direction, last_sent_at, last_body_preview, last_inbound_sent_at",
+          )
+          .in("conversation_id", pageConversationIds)
+      : { data: [], error: null };
 
   const tailById = new Map((tails ?? []).map((t) => [t.conversation_id, t]));
 
@@ -108,7 +172,8 @@ export default async function InboxPage({
         c.leads as { excluded_from_pipeline_at?: string | null } | { excluded_from_pipeline_at?: string | null }[] | null,
       );
       const archived = isLeadExcludedFromPipeline(lead);
-      return activeTab === "archived" ? archived : !archived;
+      if (activeTab === "archived") return archived;
+      return !archived;
     })
     .sort((a, b) => {
       const ta = tailById.get(a.id)?.last_sent_at ?? a.updated_at;
@@ -121,28 +186,15 @@ export default async function InboxPage({
   const selectedId = validCid ?? conversationsSorted[0]?.id ?? null;
   const selected = conversationsSorted.find((c) => c.id === selectedId) ?? null;
 
-  const convIds = conversationsSorted.map((c) => c.id);
-  const maxInboundByConv = new Map<string, string>();
-  if (convIds.length > 0) {
-    const { data: inboundMsgs } = await crm
-      .from("messages")
-      .select("conversation_id, sent_at")
-      .eq("direction", "in")
-      .in("conversation_id", convIds);
-    for (const row of inboundMsgs ?? []) {
-      const convMsgId = row.conversation_id;
-      const t = row.sent_at;
-      const prev = maxInboundByConv.get(convMsgId);
-      if (!prev || t > prev) maxInboundByConv.set(convMsgId, t);
-    }
-  }
-
   let messages: InboxMessageRow[] = [];
   let hasMoreOlder = false;
   let messagesError: { message: string; code?: string } | undefined;
 
   if (selectedId) {
-    const res = await loadRecentConversationMessages(crm, selectedId);
+    const res =
+      selectedId === requestedSelectedId && requestedMessagesPromise
+        ? await requestedMessagesPromise
+        : await loadRecentConversationMessages(crm, selectedId);
     messages = res.messages;
     hasMoreOlder = res.hasMoreOlder;
     messagesError = res.error;
@@ -274,11 +326,6 @@ export default async function InboxPage({
       | null,
   );
 
-  const { data: stages } = await crm
-    .from("pipeline_stages")
-    .select("id, name, sort_order")
-    .order("sort_order", { ascending: true });
-
   let inboxLeadTasks: InboxTaskRow[] = [];
   let inboxTeamOptions: { id: string; label: string }[] = [];
   let inboxOpportunityId = selectedOpportunity?.id ?? null;
@@ -406,7 +453,9 @@ export default async function InboxPage({
           : lead
             ? isLeadExcludedFromPipeline(lead)
               ? `Arquivado · ${leadExclusionReasonLabel(lead.excluded_reason)}`
-              : `Status: ${lead.status}`
+              : activeTab === "pipeline"
+                ? "No funil"
+                : "Para qualificar"
             : "Sem lead",
       awaiting: tail?.last_direction === "in",
       identityName,
@@ -414,14 +463,14 @@ export default async function InboxPage({
       clientCategory: lead?.client_category ?? null,
       unread: isConversationUnread(
         (c as { last_read_at?: string | null }).last_read_at,
-        maxInboundByConv.get(c.id),
+        tail?.last_inbound_sent_at ?? undefined,
       ),
     };
   });
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden">
-      <InboxLiveRefresh />
+      <InboxLiveRefresh selectedConversationId={selectedId} />
       {dbError ? (
         <div
           className="shrink-0 rounded-lg border border-[color:var(--border-strong)] bg-[var(--vp-surface)] px-3 py-2 text-sm text-[var(--vp-wine-classic)]"
@@ -433,11 +482,20 @@ export default async function InboxPage({
         </div>
       ) : null}
       <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,40vh)_minmax(0,1fr)] gap-2 overflow-hidden lg:grid-cols-[minmax(260px,320px)_minmax(0,1fr)] lg:grid-rows-1">
-        <div className="h-full min-h-0 overflow-hidden">
-          <InboxSidebar
-            conversations={sidebarRows}
-            selectedId={selectedId}
-            activeTab={activeTab}
+        <div className="flex h-full min-h-0 flex-col overflow-hidden">
+          <div className="min-h-0 flex-1">
+            <InboxSidebar
+              conversations={sidebarRows}
+              selectedId={selectedId}
+              activeTab={activeTab}
+            />
+          </div>
+          <PaginationNav
+            pathname="/inbox"
+            page={page}
+            pageSize={PAGE_SIZE}
+            totalCount={conversationsCount ?? 0}
+            searchParams={{ ...params, cid: undefined }}
           />
         </div>
 

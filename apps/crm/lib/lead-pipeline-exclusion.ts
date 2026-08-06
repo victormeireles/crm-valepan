@@ -1,10 +1,11 @@
-export const LEAD_EXCLUSION_REASONS = ["interno", "fornecedor", "outro"] as const;
+export const LEAD_EXCLUSION_REASONS = ["interno", "fornecedor", "cliente", "outro"] as const;
 
 export type LeadExclusionReason = (typeof LEAD_EXCLUSION_REASONS)[number];
 
 export const LEAD_EXCLUSION_REASON_LABELS: Record<LeadExclusionReason, string> = {
   interno: "Contato interno",
   fornecedor: "Fornecedor / parceiro",
+  cliente: "Cliente",
   outro: "Outro",
 };
 

@@ -1,37 +1,18 @@
-import { loadEnvConfig } from "@next/env";
 import type { NextConfig } from "next";
-import path from "node:path";
 
-/**
- * `process.cwd()` é `apps/crm` ao rodar via `scripts/run-in-app.cjs`.
- * Carrega `.env*` da raiz do monorepo e de `apps/crm` (segundo sobrescreve).
- * O 2º argumento `dev` habilita `.env.local` em desenvolvimento.
- */
-const appDir = process.cwd();
-const monorepoRoot = path.resolve(appDir, "..", "..");
-const isDev = process.env.NODE_ENV !== "production";
-loadEnvConfig(monorepoRoot, isDev);
-loadEnvConfig(appDir, isDev);
-
-/** Em dev, porta fixa 3000 (alinha com `scripts/run-in-app.cjs` e evita `PORT` em `.env.local` mudar a URL). */
-if (isDev) {
-  process.env.PORT = "3000";
-}
-
-/** Alias para o formato esperado pelo Next (middleware / browser / RSC). Chave anon é pública por desenho no Supabase. */
-const resolvedPublicUrl =
+const publicSupabaseUrl =
   process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL ?? "";
-const resolvedPublicAnon =
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ??
-  process.env.SUPABASE_ANON_KEY ??
-  "";
+const publicSupabaseAnonKey =
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? process.env.SUPABASE_ANON_KEY ?? "";
 
 const nextConfig: NextConfig = {
   transpilePackages: ["@crm/shared"],
   env: {
-    ...(resolvedPublicUrl ? { NEXT_PUBLIC_SUPABASE_URL: resolvedPublicUrl } : {}),
-    ...(resolvedPublicAnon
-      ? { NEXT_PUBLIC_SUPABASE_ANON_KEY: resolvedPublicAnon }
+    ...(publicSupabaseUrl
+      ? { NEXT_PUBLIC_SUPABASE_URL: publicSupabaseUrl }
+      : {}),
+    ...(publicSupabaseAnonKey
+      ? { NEXT_PUBLIC_SUPABASE_ANON_KEY: publicSupabaseAnonKey }
       : {}),
   },
 };

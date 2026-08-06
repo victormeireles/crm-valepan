@@ -1,4 +1,5 @@
 import { LeadIdentity } from "@/components/lead-identity";
+import { PaginationNav } from "@/components/pagination-nav";
 import { displayCompanyName, displayPersonName } from "@/lib/lead-identity";
 import { nestOne } from "@/lib/supabase/nested";
 import { isClientCategoryValue, type ClientCategoryValue } from "@/lib/client-categories";
@@ -13,6 +14,7 @@ import { LeadsFilters } from "./leads-filters";
 
 /** Evita cache da lista após salvar (router.refresh + dados atualizados do Supabase). */
 export const dynamic = "force-dynamic";
+const PAGE_SIZE = 50;
 export const revalidate = 0;
 
 const CATEGORY_PAGE_TITLES: Record<ClientCategoryValue, string> = {
@@ -82,11 +84,17 @@ export default async function LeadsPage({
   const clientCategory =
     typeof rawCat === "string" && isClientCategoryValue(rawCat) ? rawCat : null;
   const query = typeof sp.q === "string" ? sp.q : "";
+  const requestedPage = typeof sp.page === "string" ? Number.parseInt(sp.page, 10) : 1;
+  const page = Number.isFinite(requestedPage) && requestedPage > 0 ? requestedPage : 1;
 
   const supabase = await createServerSupabaseClient();
   const crm = crmTables(supabase);
 
-  const { rows: leadRows, error: leadsError } = await fetchLeadListRows(crm, clientCategory);
+  const {
+    rows: leadRows,
+    error: leadsError,
+    totalCount: databaseTotalCount,
+  } = await fetchLeadListRows(crm, clientCategory, page, PAGE_SIZE);
 
   const matchesQuery = (l: LeadListRow) =>
     query.trim().length === 0 || leadListRowMatchesQuery(leadRowSearchFields(l), query);
@@ -155,8 +163,7 @@ export default async function LeadsPage({
 
   const visibleCount =
     clientCategory === "distribuidor" ? distributorRows.length : filteredLeadRows.length;
-  const totalCount =
-    clientCategory === "distribuidor" ? distributorSourceRows.length : leadRows.length;
+  const totalCount = databaseTotalCount;
 
   const pageTitle = clientCategory ? CATEGORY_PAGE_TITLES[clientCategory] : "Leads";
   const listPanelTitle = clientCategory ? `Lista — ${CATEGORY_PAGE_TITLES[clientCategory]}` : "Lista de leads";
@@ -322,6 +329,13 @@ export default async function LeadsPage({
         {showEmpty ? (
           <p className="px-3 py-8 text-center text-sm text-[var(--muted)]">{emptyMessage}</p>
         ) : null}
+        <PaginationNav
+          pathname="/leads"
+          page={page}
+          pageSize={PAGE_SIZE}
+          totalCount={databaseTotalCount}
+          searchParams={sp}
+        />
       </section>
     </div>
   );

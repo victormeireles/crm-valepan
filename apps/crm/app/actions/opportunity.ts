@@ -43,9 +43,11 @@ export async function updateOpportunityStage(input: {
 
   if (!stage) return { ok: false as const, error: "Etapa inválida" };
 
-  const isLost = stage.name.toLowerCase().includes("perdido");
-  if (isLost && (!input.lostReason || !input.lostReason.trim())) {
-    return { ok: false as const, error: "Informe o motivo de perda." };
+  const normalizedStageName = normalizeText(stage.name);
+  const isConverted = normalizedStageName.includes("convertido");
+  const needsClosingReason = stage.is_final && !isConverted;
+  if (needsClosingReason && (!input.lostReason || !input.lostReason.trim())) {
+    return { ok: false as const, error: "Informe o motivo do encerramento." };
   }
 
   const { data: oppRow } = await crm
@@ -141,7 +143,7 @@ export async function updateOpportunityStage(input: {
     .from("opportunities")
     .update({
       stage_id: input.stageId,
-      lost_reason: isLost ? input.lostReason : null,
+      lost_reason: stage.is_final ? input.lostReason : null,
       updated_at: new Date().toISOString(),
     })
     .eq("id", input.opportunityId)

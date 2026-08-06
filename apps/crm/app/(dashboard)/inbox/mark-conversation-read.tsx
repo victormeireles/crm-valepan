@@ -1,7 +1,6 @@
 "use client";
 
 import { markConversationRead } from "@/app/actions/inbox";
-import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 
 /**
@@ -15,18 +14,22 @@ export function MarkConversationRead({
   /** Ex.: último `last_sent_at` da conversa — quando muda, registra nova leitura. */
   fingerprint: string;
 }) {
-  const router = useRouter();
-
   useEffect(() => {
     if (!conversationId) return;
     let cancelled = false;
     void markConversationRead(conversationId).then((res) => {
-      if (!cancelled && res.ok) router.refresh();
+      if (!cancelled && res.ok) {
+        window.dispatchEvent(
+          new CustomEvent("crm:conversation-read", {
+            detail: { conversationId },
+          }),
+        );
+      }
     });
     return () => {
       cancelled = true;
     };
-  }, [conversationId, fingerprint, router]);
+  }, [conversationId, fingerprint]);
 
   return null;
 }

@@ -34,14 +34,20 @@ function waitForServer(maxMs = 120_000) {
         reject(new Error("Servidor não respondeu a tempo."));
         return;
       }
+      let retryScheduled = false;
+      const retry = () => {
+        if (retryScheduled) return;
+        retryScheduled = true;
+        setTimeout(tryOnce, 400);
+      };
       const req = http.get(`http://127.0.0.1:${PORT}/`, (res) => {
         res.resume();
         resolve();
       });
-      req.on("error", () => setTimeout(tryOnce, 400));
+      req.on("error", retry);
       req.setTimeout(2000, () => {
         req.destroy();
-        setTimeout(tryOnce, 400);
+        retry();
       });
     };
     tryOnce();

@@ -96,13 +96,22 @@ if (pref && dbPass) {
   if (linkCode !== 0) process.exit(linkCode);
 }
 
+const requestedFileIndex = process.argv.indexOf("--file");
+const requestedFile =
+  requestedFileIndex >= 0 ? process.argv[requestedFileIndex + 1]?.trim() : null;
+
 const files = fs
   .readdirSync(migrationsDir)
   .filter((f) => f.endsWith(".sql"))
+  .filter((f) => !requestedFile || f === requestedFile)
   .sort();
 
 if (files.length === 0) {
-  console.error("[apply-migrations-linked] Nenhum .sql em", migrationsDir);
+  console.error(
+    requestedFile
+      ? `[apply-migrations-linked] Migration não encontrada: ${requestedFile}`
+      : `[apply-migrations-linked] Nenhum .sql em ${migrationsDir}`,
+  );
   process.exit(1);
 }
 

@@ -8,8 +8,11 @@ import {
 } from "@/lib/pipeline-signals";
 import { nestOne } from "@/lib/supabase/nested";
 import { createServerSupabaseClient, crmTables } from "@/lib/supabase/server";
+import { PaginationNav } from "@/components/pagination-nav";
 import { Suspense } from "react";
 import { PipelineBoard, type PipelineCardDTO, type PipelineStageDTO } from "./pipeline-board";
+
+const PAGE_SIZE = 60;
 import { PipelineFilters } from "./pipeline-filters";
 
 export const dynamic = "force-dynamic";
@@ -115,6 +118,8 @@ export default async function PipelinePage({
   const signalRaw = typeof sp.signal === "string" ? sp.signal.trim() : "";
   const signalFilter: PipelineSignal | null = isPipelineSignal(signalRaw) ? signalRaw : null;
   const query = typeof sp.q === "string" ? sp.q : "";
+  const requestedPage = typeof sp.page === "string" ? Number.parseInt(sp.page, 10) : 1;
+  const page = Number.isFinite(requestedPage) && requestedPage > 0 ? requestedPage : 1;
 
   const supabase = await createServerSupabaseClient();
   const {
@@ -123,18 +128,28 @@ export default async function PipelinePage({
   const crm = crmTables(supabase);
 
   const ownerUserId = mineOnly && user?.id ? user.id : ownerParam.length > 0 ? ownerParam : null;
+  const opportunitiesBase = crm
+    .from("opportunities")
+    .select(
+      "id, title, lead_id, stage_id, lost_reason, owner_id, updated_at, next_action_at, pipeline_stages(name, sort_order, is_final), leads(phone_e164, owner_id, client_category, excluded_from_pipeline_at, contacts(full_name), companies(name), distributors(name))",
+      { count: "exact" },
+    )
+    .order("updated_at", { ascending: false });
+  const opportunitiesQuery = (ownerUserId
+    ? opportunitiesBase.eq("owner_id", ownerUserId)
+    : opportunitiesBase
+  ).range((page - 1) * PAGE_SIZE, page * PAGE_SIZE - 1);
 
-  const [{ data: stageRows }, { data: rows }, { data: teamProfiles }] = await Promise.all([
+  const [
+    { data: stageRows },
+    { data: rows, count: opportunitiesCount },
+    { data: teamProfiles },
+  ] = await Promise.all([
     crm
       .from("pipeline_stages")
       .select("id, name, sort_order, is_final")
       .order("sort_order", { ascending: true }),
-    crm
-      .from("opportunities")
-      .select(
-        "id, title, lead_id, stage_id, lost_reason, owner_id, updated_at, next_action_at, pipeline_stages(name, sort_order, is_final), leads(phone_e164, owner_id, client_category, excluded_from_pipeline_at, contacts(full_name), companies(name), distributors(name))",
-      )
-      .order("updated_at", { ascending: false }),
+    opportunitiesQuery,
     crm.from("profiles").select("id, full_name, role").order("full_name", { ascending: true }),
   ]);
 
@@ -159,6 +174,7 @@ export default async function PipelinePage({
     sort_order: s.sort_order,
     is_final: s.is_final,
   }));
+  const activeStages = stages.filter((stage) => !stage.is_final);
 
   const allCards: PipelineCardDTO[] = (rows ?? [])
     .filter((o) => {
@@ -190,22 +206,22 @@ export default async function PipelinePage({
 
       <Suspense fallback={<p className="text-sm text-[var(--muted)]">Carregando filtros…</p>}>
         <PipelineFilters
-          totalCount={allCards.length}
+          totalCount={opportunitiesCount ?? 0}
           visibleCount={filteredCards.length}
           teamOptions={teamOptions}
         />
       </Suspense>
 
-      {stages.length > 0 ? (
+      {activeStages.length > 0 ? (
         <div className="w-full min-w-0 overflow-x-auto pb-1 [scrollbar-gutter:stable]">
           <div
             className="grid gap-1 sm:gap-1.5"
             style={{
-              gridTemplateColumns: `repeat(${stages.length}, minmax(52px, 1fr))`,
-              width: `max(100%, ${stages.length * 52}px)`,
+              gridTemplateColumns: `repeat(${activeStages.length}, minmax(13rem, 1fr))`,
+              width: `max(100%, ${activeStages.length * 208}px)`,
             }}
           >
-            {stages.map((s) => {
+            {activeStages.map((s) => {
               const count = filteredCards.filter((c) => c.stage_id === s.id).length;
               return (
                 <span
@@ -233,6 +249,13 @@ export default async function PipelinePage({
       ) : (
         <PipelineBoard stages={stages} initialCards={filteredCards} />
       )}
+      <PaginationNav
+        pathname="/pipeline"
+        page={page}
+        pageSize={PAGE_SIZE}
+        totalCount={opportunitiesCount ?? 0}
+        searchParams={sp}
+      />
     </div>
   );
 }

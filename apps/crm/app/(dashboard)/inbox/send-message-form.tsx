@@ -6,8 +6,8 @@ import {
   sendConversationAttachment,
   sendConversationMessage,
 } from "@/app/actions/inbox";
-import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { EmojiPicker } from "./emoji-picker";
 
 function IconSend({ className }: { className?: string }) {
   return (
@@ -88,10 +88,10 @@ export function SendMessageForm({
   conversationId: string;
   phone: string;
 }) {
-  const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [attachOpen, setAttachOpen] = useState(false);
+  const [emojiOpen, setEmojiOpen] = useState(false);
   const [contactPickerOpen, setContactPickerOpen] = useState(false);
   const [contacts, setContacts] = useState<{ phone: string; name: string | null }[]>([]);
   const [contactsLoading, setContactsLoading] = useState(false);
@@ -99,6 +99,8 @@ export function SendMessageForm({
   const [sendingContactPhone, setSendingContactPhone] = useState<string | null>(null);
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
   const attachRef = useRef<HTMLDivElement>(null);
+  const emojiRef = useRef<HTMLDivElement>(null);
+  const messageRef = useRef<HTMLTextAreaElement>(null);
   const documentInputRef = useRef<HTMLInputElement>(null);
   const mediaInputRef = useRef<HTMLInputElement>(null);
 
@@ -109,10 +111,24 @@ export function SendMessageForm({
       if (target && !attachRef.current.contains(target)) {
         setAttachOpen(false);
       }
+      if (target && emojiRef.current && !emojiRef.current.contains(target)) {
+        setEmojiOpen(false);
+      }
     }
     document.addEventListener("mousedown", onPointerDown);
     return () => document.removeEventListener("mousedown", onPointerDown);
   }, []);
+
+  function insertEmoji(emoji: string) {
+    const field = messageRef.current;
+    if (!field) return;
+    const start = field.selectionStart ?? field.value.length;
+    const end = field.selectionEnd ?? start;
+    field.value = `${field.value.slice(0, start)}${emoji}${field.value.slice(end)}`;
+    const nextCursor = start + emoji.length;
+    field.focus();
+    requestAnimationFrame(() => field.setSelectionRange(nextCursor, nextCursor));
+  }
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -129,7 +145,6 @@ export function SendMessageForm({
       return;
     }
     form.reset();
-    router.refresh();
   }
 
   async function onPickAttachment(
@@ -152,7 +167,6 @@ export function SendMessageForm({
       setErr(res.error ?? "Erro ao enviar arquivo.");
       return;
     }
-    router.refresh();
   }
 
   const filteredContacts = contacts.filter((c) => {
@@ -238,19 +252,47 @@ export function SendMessageForm({
               </div>
             ) : null}
           </div>
-          <button
-            type="button"
-            className="flex size-10 shrink-0 items-center justify-center rounded-full text-[var(--vp-ink-muted)] transition-colors hover:bg-[rgba(35,0,4,0.06)] hover:text-[var(--vp-wine)]"
-            title="Emoji (em breve)"
-            aria-disabled="true"
-          >
-            <IconMood className="size-[22px]" />
-          </button>
+          <div ref={emojiRef} className="relative">
+            <button
+              type="button"
+              onClick={() => {
+                setEmojiOpen((open) => !open);
+                setAttachOpen(false);
+              }}
+              className="flex size-10 shrink-0 items-center justify-center rounded-full text-[var(--vp-ink-muted)] transition-colors hover:bg-[rgba(35,0,4,0.06)] hover:text-[var(--vp-wine)]"
+              title="Emojis"
+              aria-label="Abrir seletor de emojis"
+              aria-haspopup="dialog"
+              aria-expanded={emojiOpen}
+            >
+              <IconMood className="size-[22px]" />
+            </button>
+            {emojiOpen ? (
+              <div className="absolute bottom-12 left-[-2.75rem] z-30" role="dialog" aria-label="Selecionar emoji">
+                <EmojiPicker onSelect={insertEmoji} />
+              </div>
+            ) : null}
+          </div>
           <textarea
+            ref={messageRef}
             name="message"
             required
             rows={1}
             placeholder="Mensagem"
+            onKeyDown={(event) => {
+              if (
+                event.key !== "Enter" ||
+                event.shiftKey ||
+                event.nativeEvent.isComposing
+              ) {
+                return;
+              }
+              event.preventDefault();
+              if (loading || uploadingAttachment || !event.currentTarget.value.trim()) {
+                return;
+              }
+              event.currentTarget.form?.requestSubmit();
+            }}
             className="max-h-32 min-h-[42px] flex-1 resize-none border-0 bg-transparent py-2.5 pr-2 text-sm leading-snug text-[var(--foreground)] placeholder:text-[var(--muted)] focus:outline-none focus:ring-0"
           />
         </div>
@@ -313,7 +355,6 @@ export function SendMessageForm({
                       return;
                     }
                     setContactPickerOpen(false);
-                    router.refresh();
                   }}
                   className="flex w-full items-center justify-between gap-3 border-b border-[var(--border)] px-3 py-2 text-left text-sm last:border-b-0 hover:bg-[rgba(35,0,4,0.05)] disabled:opacity-50"
                 >

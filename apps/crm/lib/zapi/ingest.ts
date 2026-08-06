@@ -1,7 +1,13 @@
 import { normalizeBrazilPhoneToE164 } from "@crm/shared/phone";
 import { agentDebugLog } from "@/lib/agent-debug-log";
+import {
+  dataUrlToBytes,
+  MAX_WHATSAPP_MEDIA_BYTES,
+  storePrivateMedia,
+} from "@/lib/media-storage";
 import { crmTables, createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { fetchZapiProfilePictureLink } from "@/lib/zapi/profile-picture";
+import { hasZapiReactionPayload } from "./webhook-event";
 
 /** Fallback quando o JID não é BR mas tem dígitos E.164 válidos (ex.: +351, +1). */
 function normalizeDigitsToE164Loose(digits: string): string | null {
@@ -76,6 +82,8 @@ export type ZapiInbound = {
       }
     | null;
 };
+
+type ZapiMediaMeta = NonNullable<ZapiInbound["media"]>;
 
 function extractSentAtIso(source: Record<string, unknown> | null): string | null {
   if (!source) return null;
@@ -372,6 +380,10 @@ export function planZapiWebhookAction(
   const merged = mergePayloadLayers(body);
   if (!merged) return { action: "parse" };
 
+  if (hasZapiReactionPayload(merged) || hasZapiReactionPayload(root)) {
+    return { action: "skip", reason: "reaction_event" };
+  }
+
   const rawType = pickRawWebhookType(merged, root);
   const t = rawType.trim().toLowerCase();
 
@@ -408,30 +420,132 @@ function s(v: unknown): string | null {
   return typeof v === "string" && v.trim() ? v.trim() : null;
 }
 
-function normalizeMaybeUrl(v: unknown): string | null {
+function normalizeMaybeMediaSrc(v: unknown): string | null {
   if (typeof v !== "string") return null;
   const t = v.trim();
   if (!t) return null;
   if (/^https?:\/\//i.test(t)) return t;
+  if (/^data:[a-z0-9.+-]+\/[a-z0-9.+-]+(?:;[^,]*)?,/i.test(t)) return t;
   return null;
 }
 
-function pickFirstUrlFromObject(obj: Record<string, unknown>): string | null {
+function pickFirstMediaSrcFromObject(obj: Record<string, unknown>): string | null {
   for (const key of [
     "url",
     "link",
+    "href",
+    "src",
+    "audioUrl",
+    "audio_url",
+    "imageUrl",
+    "image_url",
+    "stickerUrl",
+    "sticker_url",
+    "videoUrl",
+    "video_url",
+    "documentUrl",
+    "document_url",
     "downloadUrl",
     "download_url",
     "fileUrl",
     "file_url",
     "mediaUrl",
     "media_url",
+    "base64",
+    "dataUrl",
+    "data_url",
     "directPath",
   ] as const) {
-    const hit = normalizeMaybeUrl(obj[key]);
+    const hit = normalizeMaybeMediaSrc(obj[key]);
     if (hit) return hit;
   }
   return null;
+}
+
+function looksLikeBase64(value: string): boolean {
+  const compact = value.replace(/\s+/g, "");
+  return compact.length >= 16 && /^[A-Za-z0-9+/]+={0,2}$/.test(compact);
+}
+
+function dataUrlFromRawBase64(value: unknown, mimeType: string | null): string | null {
+  if (typeof value !== "string" || !mimeType) return null;
+  const raw = value.trim();
+  if (!looksLikeBase64(raw)) return null;
+  return `data:${mimeType};base64,${raw.replace(/\s+/g, "")}`;
+}
+
+function inferMediaMimeType(
+  kind: "image" | "video" | "audio" | "document",
+  url: string | null,
+): string | null {
+  if (!url) return null;
+  const dataUrlMatch = /^data:([^;,]+)/i.exec(url);
+  if (dataUrlMatch?.[1]) return dataUrlMatch[1];
+  const clean = url.split("?")[0]?.toLowerCase() ?? "";
+  if (kind === "audio") {
+    if (clean.endsWith(".ogg") || clean.endsWith(".oga") || clean.endsWith(".opus")) return "audio/ogg";
+    if (clean.endsWith(".mp3") || clean.endsWith(".mpeg")) return "audio/mpeg";
+    if (clean.endsWith(".m4a") || clean.endsWith(".mp4")) return "audio/mp4";
+    if (clean.endsWith(".wav")) return "audio/wav";
+  }
+  if (kind === "video") {
+    if (clean.endsWith(".mp4") || clean.endsWith(".m4v")) return "video/mp4";
+    if (clean.endsWith(".webm")) return "video/webm";
+  }
+  if (kind === "image") {
+    if (clean.endsWith(".jpg") || clean.endsWith(".jpeg")) return "image/jpeg";
+    if (clean.endsWith(".png")) return "image/png";
+    if (clean.endsWith(".webp")) return "image/webp";
+    if (clean.endsWith(".gif")) return "image/gif";
+  }
+  return null;
+}
+
+async function fetchZapiMediaAsDataUrl(
+  media: ZapiMediaMeta,
+  options: { persistRemoteFile: boolean },
+): Promise<ZapiMediaMeta> {
+  if (!options.persistRemoteFile || !media.url || media.url.startsWith("data:")) return media;
+  const ctrl = new AbortController();
+  const timeout = setTimeout(() => ctrl.abort(), 18_000);
+  try {
+    const clientToken = process.env.ZAPI_CLIENT_TOKEN?.trim();
+    const res = await fetch(media.url, {
+      signal: ctrl.signal,
+      headers: clientToken ? { "Client-Token": clientToken } : undefined,
+    });
+    if (!res.ok) {
+      console.warn("[zapi ingest] media download failed:", res.status, res.statusText);
+      return media;
+    }
+    const len = Number(res.headers.get("content-length") ?? "0");
+    if (len > MAX_WHATSAPP_MEDIA_BYTES) {
+      console.warn("[zapi ingest] media download skipped: file too large", { bytes: len });
+      return media;
+    }
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length > MAX_WHATSAPP_MEDIA_BYTES) {
+      console.warn("[zapi ingest] media download skipped after read: file too large", { bytes: buf.length });
+      return media;
+    }
+    const contentType =
+      res.headers.get("content-type")?.split(";")[0]?.trim() ||
+      media.mimeType?.split(";")[0]?.trim() ||
+      (media.kind === "image" ? "image/webp" : "audio/ogg");
+    return {
+      ...media,
+      url: `data:${contentType};base64,${buf.toString("base64")}`,
+      mimeType: media.mimeType ?? contentType,
+      fileName:
+        media.fileName ??
+        (media.kind === "image" ? "figurinha.webp" : "audio.ogg"),
+    };
+  } catch (e) {
+    console.warn("[zapi ingest] media download error:", e instanceof Error ? e.message : String(e));
+    return media;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function extractMediaMeta(
@@ -446,25 +560,95 @@ function extractMediaMeta(
     }
   | null {
   if (depth > 4) return null;
+  let metadataOnlyFallback: ZapiMediaMeta | null = null;
   const blocks: Array<{ kind: "image" | "video" | "audio" | "document"; value: unknown }> = [
     { kind: "image", value: o.image },
+    { kind: "image", value: o.imageMessage },
+    // A Z-API entrega figurinha como WebP em `sticker.stickerUrl`.
+    // Ela pode usar o mesmo renderer de imagem sem exigir uma nova coluna no banco.
+    { kind: "image", value: o.sticker },
+    { kind: "image", value: o.stickerMessage },
     { kind: "video", value: o.video },
+    { kind: "video", value: o.videoMessage },
+    { kind: "video", value: o.ptv },
+    { kind: "video", value: o.ptvMessage },
+    { kind: "video", value: o.gif },
     { kind: "audio", value: o.audio },
+    { kind: "audio", value: o.audioMessage },
     { kind: "document", value: o.document },
+    { kind: "document", value: o.documentMessage },
   ];
   for (const block of blocks) {
-    if (!block.value || typeof block.value !== "object" || Array.isArray(block.value)) continue;
+    if (!block.value) continue;
+    if (typeof block.value === "string") {
+      const url = normalizeMaybeMediaSrc(block.value);
+      if (url) {
+        return {
+          kind: block.kind,
+          url,
+          mimeType: inferMediaMimeType(block.kind, url),
+          fileName: null,
+        };
+      }
+      continue;
+    }
+    if (typeof block.value !== "object" || Array.isArray(block.value)) continue;
     const data = block.value as Record<string, unknown>;
-    const mimeType =
-      s(data.mimetype) ?? s(data.mimeType) ?? s(data.mime_type) ?? null;
-    const fileName = s(data.fileName) ?? s(data.filename) ?? s(data.name) ?? null;
-    const url = pickFirstUrlFromObject(data);
-    return { kind: block.kind, url, mimeType, fileName };
+    const explicitMimeType =
+      s(data.mimetype) ??
+      s(data.mimeType) ??
+      s(data.mime_type) ??
+      s(o.mimetype) ??
+      s(o.mimeType) ??
+      s(o.mime_type);
+    const directUrl = pickFirstMediaSrcFromObject(data) ?? pickFirstMediaSrcFromObject(o);
+    const rawBase64Url =
+      dataUrlFromRawBase64(data.base64, explicitMimeType) ??
+      dataUrlFromRawBase64(data.mediaBase64, explicitMimeType) ??
+      dataUrlFromRawBase64(data.file, explicitMimeType) ??
+      dataUrlFromRawBase64(o.base64, explicitMimeType);
+    const url = directUrl ?? rawBase64Url;
+    const mimeType = explicitMimeType ?? inferMediaMimeType(block.kind, url);
+    const fileName =
+      s(data.fileName) ??
+      s(data.filename) ??
+      s(data.name) ??
+      s(o.fileName) ??
+      s(o.filename) ??
+      s(o.name) ??
+      null;
+    const candidate = { kind: block.kind, url, mimeType, fileName };
+    if (url) return candidate;
+    // Alguns callbacks repetem `image`/`document` sem URL na raiz e colocam o
+    // arquivo verdadeiro dentro de `message.*Message`. Não interromper a busca
+    // por causa desse primeiro bloco incompleto.
+    metadataOnlyFallback ??= candidate;
+  }
+  const flatKinds: Array<{ kind: "image" | "video" | "audio" | "document"; keys: readonly string[] }> = [
+    { kind: "audio", keys: ["audioUrl", "audio_url", "audio", "ptt"] },
+    { kind: "image", keys: ["imageUrl", "image_url", "image"] },
+    { kind: "video", keys: ["videoUrl", "video_url", "video"] },
+    { kind: "document", keys: ["documentUrl", "document_url", "fileUrl", "file_url", "document"] },
+  ];
+  for (const item of flatKinds) {
+    for (const key of item.keys) {
+      const url = normalizeMaybeMediaSrc(o[key]);
+      if (url) {
+        return {
+          kind: item.kind,
+          url,
+          mimeType:
+            s(o.mimetype) ?? s(o.mimeType) ?? s(o.mime_type) ?? inferMediaMimeType(item.kind, url),
+          fileName: s(o.fileName) ?? s(o.filename) ?? s(o.name) ?? null,
+        };
+      }
+    }
   }
   for (const wrap of [
     "message",
     "ephemeralMessage",
     "viewOnceMessage",
+    "viewOnceMessageV2",
     "documentWithCaptionMessage",
   ] as const) {
     const inner = o[wrap];
@@ -472,6 +656,48 @@ function extractMediaMeta(
       const hit = extractMediaMeta(inner as Record<string, unknown>, depth + 1);
       if (hit) return hit;
     }
+  }
+  return metadataOnlyFallback;
+}
+
+function cleanContactPhone(value: unknown): string | null {
+  if (typeof value !== "string" && typeof value !== "number") return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  const withoutJid = raw.replace(/@(s\.whatsapp\.net|c\.us|lid)$/i, "");
+  const digits = withoutJid.replace(/\D/g, "");
+  return digits.length >= 8 ? digits : null;
+}
+
+function contactPhoneFromVcard(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const waid = /(?:^|;)waid=(\d+)/im.exec(value)?.[1];
+  if (waid) return waid;
+  const tel = /^TEL[^:]*:(.+)$/im.exec(value)?.[1];
+  return cleanContactPhone(tel);
+}
+
+/** Converte o objeto de contato da Z-API no formato que o cartão do Inbox já entende. */
+function extractContactCardText(o: Record<string, unknown>): string | null {
+  const candidates = [
+    o.contact,
+    ...(Array.isArray(o.contacts) ? o.contacts : [o.contacts]),
+  ];
+  for (const value of candidates) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+    const contact = value as Record<string, unknown>;
+    const name =
+      s(contact.displayName) ??
+      s(contact.contactName) ??
+      s(contact.name) ??
+      s(contact.fullName);
+    const phones = Array.isArray(contact.phones) ? contact.phones : [];
+    const phone =
+      phones.map(cleanContactPhone).find((item): item is string => !!item) ??
+      cleanContactPhone(contact.contactPhone) ??
+      cleanContactPhone(contact.phone) ??
+      contactPhoneFromVcard(contact.vCard ?? contact.vcard);
+    if (name || phone) return `[Contato] ${name ?? "Contato"} · ${phone ?? "—"}`;
   }
   return null;
 }
@@ -690,7 +916,7 @@ function extractMessageText(o: Record<string, unknown>, depth = 0): string | nul
   if (o.sticker && typeof o.sticker === "object") return "[Figurinha]";
   if (o.document && typeof o.document === "object") return "[Documento]";
   if (o.location || o.liveLocation) return "[Localização]";
-  if (o.contact || o.contacts) return "[Contato]";
+  if (o.contact || o.contacts) return extractContactCardText(o) ?? "[Contato]";
 
   if (o.reaction && typeof o.reaction === "object") {
     const r = o.reaction as Record<string, unknown>;
@@ -1129,32 +1355,93 @@ export async function ingestZapiMessage(parsed: ZapiInbound) {
 
   const messageTimeFields =
     parsed.sentAtIso != null ? { sent_at: parsed.sentAtIso } : {};
-  const mediaFields = parsed.media
-    ? {
-        media_kind: parsed.media.kind,
-        media_url: parsed.media.url,
-        media_mime_type: parsed.media.mimeType,
-        media_file_name: parsed.media.fileName,
-      }
-    : {};
+  const resolvedMedia = parsed.media
+    ? await fetchZapiMediaAsDataUrl(parsed.media, {
+        // Links de mídia do provedor podem expirar. Guardamos uma cópia no
+        // registro para o histórico continuar abrindo imagem, vídeo, áudio,
+        // documento e figurinha. O downloader aplica limite de 16 MiB.
+        persistRemoteFile: true,
+      })
+    : null;
+  if (resolvedMedia?.kind === "audio" && !resolvedMedia.url) {
+    console.warn("[zapi ingest] audio recebido sem URL no webhook", {
+      provider_message_id: providerId ?? null,
+      mime_type: resolvedMedia.mimeType,
+      file_name: resolvedMedia.fileName,
+    });
+  }
+  async function mediaFieldsForMessage(messageId: string) {
+    if (!resolvedMedia) return {};
+
+    const base = {
+      media_kind: resolvedMedia.kind,
+      media_url: resolvedMedia.url,
+      media_mime_type: resolvedMedia.mimeType,
+      media_file_name: resolvedMedia.fileName,
+    };
+    if (resolvedMedia.kind !== "audio" && resolvedMedia.kind !== "document") return base;
+    if (!resolvedMedia.url) {
+      return { ...base, media_storage_status: "missing" as const };
+    }
+    if (!resolvedMedia.url.startsWith("data:")) {
+      return { ...base, media_storage_status: "remote" as const };
+    }
+
+    try {
+      const decoded = dataUrlToBytes(resolvedMedia.url);
+      const stored = await storePrivateMedia({
+        messageId,
+        kind: resolvedMedia.kind,
+        bytes: decoded.bytes,
+        mimeType: resolvedMedia.mimeType ?? decoded.mimeType,
+        fileName: resolvedMedia.fileName,
+      });
+      return {
+        ...base,
+        media_url: null,
+        media_storage_path: stored.path,
+        media_size_bytes: stored.sizeBytes,
+        media_storage_status: "stored" as const,
+      };
+    } catch (error) {
+      console.error(
+        "[zapi ingest] private attachment storage:",
+        error instanceof Error ? error.message : String(error),
+      );
+      return { ...base, media_storage_status: "failed" as const };
+    }
+  }
 
   if (providerId) {
     const { data: existing } = await crm
       .from("messages")
-      .select("id, body, conversation_id")
+      .select("id, body, conversation_id, media_url, media_mime_type, media_file_name, media_storage_path")
       .eq("provider_message_id", providerId)
       .maybeSingle();
     if (existing) {
       const newBody = typeof parsed.body === "string" ? parsed.body.trim() : "";
       const oldBody = existing.body?.trim() ?? "";
-      if (newBody.length > 0 && oldBody.length === 0) {
+      const shouldEnrichBody = newBody.length > 0 && oldBody.length === 0;
+      const shouldEnrichMedia =
+        resolvedMedia != null &&
+        (
+          (!existing.media_url && !!resolvedMedia.url) ||
+          (!existing.media_storage_path &&
+            (resolvedMedia.kind === "audio" || resolvedMedia.kind === "document")) ||
+          (!existing.media_mime_type && !!resolvedMedia.mimeType) ||
+          (!existing.media_file_name && !!resolvedMedia.fileName)
+        );
+      if (shouldEnrichBody || shouldEnrichMedia) {
+        const existingMediaFields = shouldEnrichMedia
+          ? await mediaFieldsForMessage(existing.id)
+          : {};
         await crm
           .from("messages")
           .update({
-            body: newBody,
+            ...(shouldEnrichBody ? { body: newBody } : {}),
             ...(direction === "out" ? { message_status: "sent" } : {}),
             ...messageTimeFields,
-            ...mediaFields,
+            ...existingMediaFields,
           })
           .eq("id", existing.id);
         const ts = parsed.sentAtIso ?? new Date().toISOString();
@@ -1412,7 +1699,10 @@ export async function ingestZapiMessage(parsed: ZapiInbound) {
     return { ok: true as const, skipped: "delivery_without_text" as const };
   }
 
+  const messageId = crypto.randomUUID();
+  const mediaFields = await mediaFieldsForMessage(messageId);
   const { error: mErr } = await crm.from("messages").insert({
+    id: messageId,
     conversation_id: conversationId,
     direction,
     body:
