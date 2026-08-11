@@ -163,6 +163,7 @@ export interface Database {
           group_display_name: string | null;
           classification: string | null;
           last_read_at: string | null;
+          last_message_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -176,6 +177,7 @@ export interface Database {
           group_display_name?: string | null;
           classification?: string | null;
           last_read_at?: string | null;
+          last_message_at?: string | null;
         };
         Update: Partial<Database["crm"]["Tables"]["conversations"]["Insert"]>;
       };

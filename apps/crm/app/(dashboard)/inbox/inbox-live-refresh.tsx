@@ -18,6 +18,15 @@ export function InboxLiveRefresh({
   const changedWhileHidden = useRef(false);
 
   useEffect(() => {
+    if (!selectedConversationId) return;
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("cid")) return;
+
+    url.searchParams.set("cid", selectedConversationId);
+    router.replace(`${url.pathname}?${url.searchParams.toString()}`, { scroll: false });
+  }, [router, selectedConversationId]);
+
+  useEffect(() => {
     let refreshTimer: ReturnType<typeof setTimeout> | null = null;
 
     const scheduleRefresh = () => {

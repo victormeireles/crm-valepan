@@ -133,7 +133,6 @@ export async function markConversationRead(conversationId: string) {
     .from("conversations")
     .update({
       last_read_at: nowIso,
-      updated_at: nowIso,
     })
     .eq("id", id);
 

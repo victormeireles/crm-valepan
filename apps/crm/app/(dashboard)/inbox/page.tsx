@@ -46,6 +46,7 @@ type ConversationRow = {
   conversation_kind: string;
   group_display_name: string | null;
   classification: string | null;
+  last_message_at: string | null;
   created_at: string;
   updated_at: string;
   last_read_at: string | null;
@@ -121,7 +122,7 @@ export default async function InboxPage({
       ? "leads(id, phone_e164, status, owner_id, client_category, zip_code, weekly_bread_consumption, bread_type, bread_weight_grams, excluded_from_pipeline_at, excluded_reason, contacts(full_name, avatar_url), companies(id, name, document, city, state), distributors(name), opportunities(id, stage_id, updated_at))"
       : `leads!inner(id, phone_e164, status, owner_id, client_category, zip_code, weekly_bread_consumption, bread_type, bread_weight_grams, excluded_from_pipeline_at, excluded_reason, contacts(full_name, avatar_url), companies(id, name, document, city, state), distributors(name), ${opportunityRelation})`;
   const conversationSelect: string =
-    `id, phone_e164, conversation_kind, group_display_name, classification, created_at, updated_at, last_read_at, ${leadRelation}`;
+    `id, phone_e164, conversation_kind, group_display_name, classification, last_message_at, created_at, updated_at, last_read_at, ${leadRelation}`;
   let conversationsQuery = crm
     .from("conversations")
     .select(conversationSelect, { count: "exact" })
@@ -141,26 +142,53 @@ export default async function InboxPage({
   }
 
   const conversationsResult = await conversationsQuery
-    .order("updated_at", { ascending: false })
+    .order("last_message_at", { ascending: false, nullsFirst: false })
+    .order("created_at", { ascending: false })
     .range((page - 1) * PAGE_SIZE, page * PAGE_SIZE - 1);
   const conversations = (conversationsResult.data ?? []) as unknown as ConversationRow[];
   const conversationsError = conversationsResult.error;
   const conversationsCount = conversationsResult.count;
 
   const pageConversationIds = (conversations ?? []).map((conversation) => conversation.id);
-  const requestedSelectedId =
-    cid && pageConversationIds.includes(cid) ? cid : null;
-  const requestedMessagesPromise = requestedSelectedId
-    ? loadRecentConversationMessages(crm, requestedSelectedId)
-    : null;
+  const requestedMessagesPromise = cid ? loadRecentConversationMessages(crm, cid) : null;
+
+  let selectedOutsidePage: ConversationRow | null = null;
+  let selectedConversationError: { message: string; code?: string } | null = null;
+  if (cid && !pageConversationIds.includes(cid)) {
+    let selectedQuery = crm
+      .from("conversations")
+      .select(conversationSelect)
+      .eq("id", cid)
+      .eq("conversation_kind", conversationKind);
+    if (activeTab === "qualify") {
+      selectedQuery = selectedQuery.is("leads.excluded_from_pipeline_at", null);
+      if (entryStageId) {
+        selectedQuery = selectedQuery.eq("leads.opportunities.stage_id", entryStageId);
+      }
+    } else if (activeTab === "pipeline") {
+      selectedQuery = selectedQuery.is("leads.excluded_from_pipeline_at", null);
+      if (entryStageId) {
+        selectedQuery = selectedQuery.neq("leads.opportunities.stage_id", entryStageId);
+      }
+    } else if (activeTab === "archived") {
+      selectedQuery = selectedQuery.not("leads.excluded_from_pipeline_at", "is", null);
+    }
+    const selectedResult = await selectedQuery.maybeSingle();
+    selectedOutsidePage = (selectedResult.data as unknown as ConversationRow | null) ?? null;
+    selectedConversationError = selectedResult.error;
+  }
+
+  const loadedConversationIds = selectedOutsidePage
+    ? [...pageConversationIds, selectedOutsidePage.id]
+    : pageConversationIds;
   const { data: tails, error: tailsError } =
-    pageConversationIds.length > 0
+    loadedConversationIds.length > 0
       ? await crm
           .from("v_conversation_last_message")
           .select(
             "conversation_id, lead_id, last_direction, last_sent_at, last_body_preview, last_inbound_sent_at",
           )
-          .in("conversation_id", pageConversationIds)
+          .in("conversation_id", loadedConversationIds)
       : { data: [], error: null };
 
   const tailById = new Map((tails ?? []).map((t) => [t.conversation_id, t]));
@@ -176,15 +204,15 @@ export default async function InboxPage({
       return !archived;
     })
     .sort((a, b) => {
-      const ta = tailById.get(a.id)?.last_sent_at ?? a.updated_at;
-      const tb = tailById.get(b.id)?.last_sent_at ?? b.updated_at;
+      const ta = tailById.get(a.id)?.last_sent_at ?? a.last_message_at ?? a.created_at;
+      const tb = tailById.get(b.id)?.last_sent_at ?? b.last_message_at ?? b.created_at;
       return tb.localeCompare(ta);
     });
 
-  const validCid =
-    cid && conversationsSorted.some((c) => c.id === cid) ? cid : null;
-  const selectedId = validCid ?? conversationsSorted[0]?.id ?? null;
-  const selected = conversationsSorted.find((c) => c.id === selectedId) ?? null;
+  const selected = cid
+    ? conversationsSorted.find((c) => c.id === cid) ?? selectedOutsidePage
+    : conversationsSorted[0] ?? null;
+  const selectedId = selected?.id ?? null;
 
   let messages: InboxMessageRow[] = [];
   let hasMoreOlder = false;
@@ -192,7 +220,7 @@ export default async function InboxPage({
 
   if (selectedId) {
     const res =
-      selectedId === requestedSelectedId && requestedMessagesPromise
+      selectedId === cid && requestedMessagesPromise
         ? await requestedMessagesPromise
         : await loadRecentConversationMessages(crm, selectedId);
     messages = res.messages;
@@ -204,11 +232,15 @@ export default async function InboxPage({
   const awaitingReply = selectedTail?.last_direction === "in";
 
   const dbError =
-    conversationsError?.message ?? messagesError?.message ?? tailsError?.message;
+    conversationsError?.message ??
+    selectedConversationError?.message ??
+    messagesError?.message ??
+    tailsError?.message;
   const schemaHint =
     conversationsError?.code === "PGRST106" ||
     messagesError?.code === "PGRST106" ||
-    tailsError?.code === "PGRST106"
+    tailsError?.code === "PGRST106" ||
+    selectedConversationError?.code === "PGRST106"
       ? "No Supabase: Settings → Data API → Exposed schemas → inclua o schema «crm» (o mesmo ajuste do webhook)."
       : null;
 
@@ -656,7 +688,11 @@ export default async function InboxPage({
             </>
           ) : (
             <div className="flex flex-1 items-center justify-center px-4 py-12">
-              <p className="text-center text-sm text-[var(--muted)]">Nenhuma conversa para mostrar.</p>
+              <p className="text-center text-sm text-[var(--muted)]">
+                {cid
+                  ? "Esta conversa não está mais nesta lista. Ela pode ter sido movida, arquivada ou excluída."
+                  : "Nenhuma conversa para mostrar."}
+              </p>
             </div>
           )}
         </section>
