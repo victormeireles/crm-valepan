@@ -1327,6 +1327,7 @@ export async function ingestZapiMessage(parsed: ZapiInbound) {
     const { data: stage, error: stageErr } = await crm
       .from("pipeline_stages")
       .select("id")
+      .ilike("name", "LEADS")
       .order("sort_order", { ascending: true })
       .limit(1)
       .maybeSingle();

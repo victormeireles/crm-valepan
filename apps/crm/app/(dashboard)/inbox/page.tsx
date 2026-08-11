@@ -76,7 +76,7 @@ function initials(name: string) {
     .filter(Boolean)
     .slice(0, 2);
   if (parts.length === 0) return "?";
-  return parts.map((p) => p[0]?.toUpperCase() ?? "").join("") || "?";
+  return parts.map((p) => Array.from(p)[0]?.toUpperCase() ?? "").join("") || "?";
 }
 
 function validAvatarUrl(v: string | null | undefined): string | null {
@@ -112,7 +112,8 @@ export default async function InboxPage({
     .select("id, name, sort_order")
     .order("sort_order", { ascending: true });
   const { data: stages } = await stagesPromise;
-  const entryStageId = stages?.[0]?.id ?? null;
+  const entryStageId =
+    stages?.find((stage) => stage.name.trim().toUpperCase() === "LEADS")?.id ?? null;
   const opportunityRelation: string =
     activeTab === "pipeline" || activeTab === "qualify"
       ? "opportunities!inner(id, stage_id, updated_at)"

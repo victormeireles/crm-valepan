@@ -104,7 +104,6 @@ export function ConversationClassificationSelect({
               return;
             }
             // Garante que o RSC reflita os dados persistidos antes da navegação (evita lista “fantasma”).
-            await router.refresh();
             if (next.length > 0) {
               router.push(`/leads?client_category=${encodeURIComponent(next)}`);
               return;

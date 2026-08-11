@@ -39,7 +39,7 @@ function initials(name: string) {
     .filter(Boolean)
     .slice(0, 2);
   if (parts.length === 0) return "?";
-  return parts.map((p) => p[0]?.toUpperCase() ?? "").join("") || "?";
+  return parts.map((p) => Array.from(p)[0]?.toUpperCase() ?? "").join("") || "?";
 }
 
 function validAvatarUrl(v: string | null | undefined): string | null {
@@ -303,8 +303,7 @@ export function InboxSidebar({
                           return;
                         }
                         setOpenMenuId(null);
-                        router.push(`/inbox?tab=${activeTab}&cid=${c.id}`);
-                        router.refresh();
+                        router.push(`/inbox?tab=${activeTab}&cid=${c.id}`, { scroll: false });
                       }}
                       className="w-full rounded px-2 py-1.5 text-left text-xs text-[var(--foreground)] hover:bg-[rgba(35,0,4,0.07)] disabled:opacity-50"
                     >

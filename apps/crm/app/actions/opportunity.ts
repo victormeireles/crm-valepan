@@ -207,6 +207,7 @@ export async function updateOpportunityStage(input: {
 
   revalidatePath("/pipeline");
   revalidatePath("/leads");
+  revalidatePath("/inbox");
   if (enteringSampleStage) {
     revalidatePath("/samples");
     revalidatePath("/dashboard");
@@ -226,6 +227,7 @@ export async function createOpportunityForLead(leadId: string) {
   const { data: stage } = await crm
     .from("pipeline_stages")
     .select("id")
+    .ilike("name", "LEADS")
     .order("sort_order", { ascending: true })
     .limit(1)
     .maybeSingle();
@@ -266,6 +268,7 @@ export async function createOpportunityForLead(leadId: string) {
   });
 
   revalidatePath(`/leads/${leadId}`);
+  revalidatePath("/inbox");
   revalidatePath("/pipeline");
   revalidatePath("/dashboard");
   return { ok: true as const, opportunityId: inserted.id };

@@ -91,7 +91,6 @@ export function ExcludeLeadButton({ leadId }: { leadId: string }) {
           return;
         }
         setOpen(false);
-        router.refresh();
         router.push("/inbox?tab=archived");
       }}
     >
@@ -163,7 +162,6 @@ export function RestoreLeadButton({ leadId }: { leadId: string }) {
           return;
         }
         setOpen(false);
-        router.refresh();
         router.push("/inbox?tab=qualify");
       }}
     >

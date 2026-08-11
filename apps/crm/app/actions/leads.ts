@@ -319,6 +319,7 @@ export async function createLead(formData: FormData) {
   const { data: firstStage } = await crm
     .from("pipeline_stages")
     .select("id")
+    .ilike("name", "LEADS")
     .order("sort_order", { ascending: true })
     .limit(1)
     .maybeSingle();

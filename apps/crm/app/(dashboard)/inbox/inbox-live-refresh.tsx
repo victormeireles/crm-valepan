@@ -76,7 +76,7 @@ export function InboxLiveRefresh({
 
     const onVis = () => {
       visible.current = document.visibilityState === "visible";
-      if (visible.current) {
+      if (visible.current && changedWhileHidden.current) {
         changedWhileHidden.current = false;
         scheduleRefresh();
       }

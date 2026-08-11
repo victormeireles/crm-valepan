@@ -148,7 +148,6 @@ export async function markConversationRead(conversationId: string) {
 
   if (error) return { ok: false as const, error: error.message };
 
-  revalidatePath("/inbox");
   return { ok: true as const };
 }
 
