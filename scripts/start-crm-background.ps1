@@ -9,7 +9,7 @@ if ($listening) {
 
 Start-Process `
   -FilePath "C:\Program Files\nodejs\npm.cmd" `
-  -ArgumentList @("run", "dev") `
+  -ArgumentList @("run", "dev:webpack") `
   -WorkingDirectory $projectRoot `
   -WindowStyle Hidden `
   -RedirectStandardOutput $stdoutLog `

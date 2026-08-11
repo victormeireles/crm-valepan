@@ -1,4 +1,8 @@
-import { categoryLabel, categoryLetter } from "@/lib/lead-identity";
+import {
+  categoryLabel,
+  categoryLetter,
+  formatBrazilPhoneForDisplay,
+} from "@/lib/lead-identity";
 import type { ReactNode } from "react";
 
 type LeadIdentitySize = "sm" | "md";
@@ -42,6 +46,7 @@ export function LeadIdentity({
   name,
   companyName,
   category,
+  phone,
   phoneTitle,
   size = "md",
   layout = "stacked",
@@ -51,7 +56,9 @@ export function LeadIdentity({
   name: string;
   companyName?: string | null;
   category?: string | null;
-  /** Telefone só para tooltip (identificação técnica), não como headline. */
+  /** Telefone visível, formatado para leitura quando for um número brasileiro. */
+  phone?: string | null;
+  /** Telefone disponível apenas na dica de contexto. */
   phoneTitle?: string | null;
   size?: LeadIdentitySize;
   layout?: LeadIdentityLayout;
@@ -59,8 +66,10 @@ export function LeadIdentity({
   trailing?: ReactNode;
 }) {
   const sub = (companyName ?? "").trim();
+  const formattedPhone = formatBrazilPhoneForDisplay(phone);
+  const contextualPhone = formattedPhone ?? formatBrazilPhoneForDisplay(phoneTitle);
   const title =
-    [name, sub.length > 0 ? sub : null, phoneTitle?.trim() || null].filter(Boolean).join(" · ") ||
+    [name, contextualPhone, sub.length > 0 ? sub : null].filter(Boolean).join(" · ") ||
     undefined;
 
   if (layout === "inline") {
@@ -75,6 +84,11 @@ export function LeadIdentity({
         {sub.length > 0 ? (
           <span className={`min-w-0 truncate ${sizeClasses[size].sub} text-[var(--muted)]`}>
             · {sub}
+          </span>
+        ) : null}
+        {formattedPhone ? (
+          <span className={`${sizeClasses[size].sub} whitespace-nowrap text-[var(--muted)]`}>
+            · {formattedPhone}
           </span>
         ) : null}
         <CategoryBadge category={category} size={size} />
@@ -94,6 +108,11 @@ export function LeadIdentity({
             <CategoryBadge category={category} size={size} />
             {trailing}
           </div>
+          {formattedPhone ? (
+            <p className={`${sizeClasses[size].sub} mt-0.5 truncate tabular-nums text-[var(--muted)]`}>
+              {formattedPhone}
+            </p>
+          ) : null}
           {sub.length > 0 ? (
             <p className={`mt-0.5 truncate ${sizeClasses[size].sub} text-[var(--muted)]`}>{sub}</p>
           ) : null}

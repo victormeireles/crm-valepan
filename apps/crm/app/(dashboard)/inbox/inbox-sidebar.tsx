@@ -209,7 +209,7 @@ export function InboxSidebar({
                       name={c.identityName}
                       companyName={c.companyName}
                       category={c.clientCategory}
-                      phoneTitle={c.phone_e164}
+                      phone={c.kind === "lead" ? c.phone_e164 : null}
                       size="sm"
                       layout="stacked"
                     />

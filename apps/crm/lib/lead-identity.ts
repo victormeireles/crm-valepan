@@ -3,6 +3,25 @@ import { isClientCategoryValue } from "@/lib/client-categories";
 
 export const LEAD_NO_NAME_LABEL = "Sem nome";
 
+/** Formata telefones brasileiros armazenados com ou sem o código do país. */
+export function formatBrazilPhoneForDisplay(input: string | null | undefined): string | null {
+  const raw = (input ?? "").trim();
+  if (!raw) return null;
+
+  const digits = raw.replace(/\D/g, "");
+  const normalized =
+    digits.length >= 12 && digits.startsWith("55") ? digits.slice(2) : digits;
+
+  if (normalized.length === 10) {
+    return `(${normalized.slice(0, 2)}) ${normalized.slice(2, 6)}-${normalized.slice(6)}`;
+  }
+  if (normalized.length === 11) {
+    return `(${normalized.slice(0, 2)}) ${normalized.slice(2, 7)}-${normalized.slice(7)}`;
+  }
+
+  return raw;
+}
+
 const CATEGORY_LETTER: Record<ClientCategoryValue, string> = {
   hamburgueria: "H",
   distribuidor: "D",

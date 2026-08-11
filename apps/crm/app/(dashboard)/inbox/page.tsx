@@ -563,7 +563,11 @@ export default async function InboxPage({
                                 ? selectedLead?.client_category
                                 : null
                             }
-                            phoneTitle={selected.phone_e164}
+                            phone={
+                              selected.conversation_kind === "lead"
+                                ? selected.phone_e164
+                                : null
+                            }
                             size="md"
                             layout="stacked"
                           />

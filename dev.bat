@@ -19,7 +19,7 @@ if not exist "node_modules\next\dist\bin\next" (
   pause
   exit /b 1
 )
-call npm run dev
+call npm run dev:webpack
 echo.
 echo Servidor encerrado.
 pause
