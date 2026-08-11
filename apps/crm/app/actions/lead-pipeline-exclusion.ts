@@ -108,6 +108,20 @@ async function resolveSemInteresseStageId(
   return row?.id ?? null;
 }
 
+async function resolveEntryPipelineStageId(
+  crm: ReturnType<typeof crmTables>,
+): Promise<{ id: string } | null> {
+  const { data } = await crm
+    .from("pipeline_stages")
+    .select("id")
+    .eq("is_final", false)
+    .order("sort_order", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  return data ?? null;
+}
+
 export async function excludeLeadFromPipeline(input: {
   leadId: string;
   reason: LeadExclusionReason;
@@ -243,7 +257,49 @@ export async function restoreLeadToPipeline(input: { leadId: string }) {
   }
 
   const actorProfileId = await resolveProfileActorId(crm, user.id);
+  const entryStage = await resolveEntryPipelineStageId(crm);
+  if (!entryStage) {
+    return {
+      ok: false as const,
+      error: "Não foi possível localizar a etapa de entrada para qualificação.",
+    };
+  }
 
+  // Reabre apenas a oportunidade encerrada por este arquivamento. Assim, uma
+  // oportunidade realmente perdida ou convertida não é reativada por engano.
+  const { data: archivedOpp, error: archivedOppErr } = await crm
+    .from("opportunities")
+    .select("id")
+    .eq("lead_id", leadId)
+    .eq("lost_reason", LOST_REASON_EXCLUDED)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (archivedOppErr) return { ok: false as const, error: archivedOppErr.message };
+
+  const opportunityResult = archivedOpp?.id
+    ? await crm
+        .from("opportunities")
+        .update({
+          stage_id: entryStage.id,
+          lost_reason: null,
+          updated_at: nowIso,
+        })
+        .eq("id", archivedOpp.id)
+    : await crm.from("opportunities").insert({
+        lead_id: leadId,
+        stage_id: entryStage.id,
+        title: lead.phone_e164 ? `WhatsApp ${lead.phone_e164}` : "Oportunidade",
+        owner_id: actorProfileId,
+      });
+
+  if (opportunityResult.error) {
+    return { ok: false as const, error: opportunityResult.error.message };
+  }
+
+  // O lead só volta à lista ativa depois que sua oportunidade está pronta na
+  // etapa de entrada, evitando que apareça indevidamente em "No funil".
   const { error: updateLeadErr } = await crm
     .from("leads")
     .update({
@@ -255,33 +311,6 @@ export async function restoreLeadToPipeline(input: { leadId: string }) {
     .eq("id", leadId);
 
   if (updateLeadErr) return { ok: false as const, error: publicDbError(updateLeadErr.message) };
-
-  const { data: existingOpp } = await crm
-    .from("opportunities")
-    .select("id")
-    .eq("lead_id", leadId)
-    .limit(1)
-    .maybeSingle();
-
-  if (!existingOpp?.id) {
-    const { data: firstStage } = await crm
-      .from("pipeline_stages")
-      .select("id, name, sort_order")
-      .order("sort_order", { ascending: true });
-
-    const qualificacao =
-      (firstStage ?? []).find((s) => s.name.trim().toUpperCase() === "QUALIFICAÇÃO") ??
-      (firstStage ?? [])[0];
-
-    if (qualificacao?.id) {
-      await crm.from("opportunities").insert({
-        lead_id: leadId,
-        stage_id: qualificacao.id,
-        title: lead.phone_e164 ? `WhatsApp ${lead.phone_e164}` : "Oportunidade",
-        owner_id: actorProfileId,
-      });
-    }
-  }
 
   await crm.from("activity_logs").insert({
     entity_type: "lead",

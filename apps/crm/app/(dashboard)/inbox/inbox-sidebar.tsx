@@ -22,6 +22,7 @@ export type InboxSidebarRow = {
   companyName: string | null;
   clientCategory: string | null;
   unread: boolean;
+  callStatus: "ringing" | "missed_voice" | "missed_video" | null;
 };
 
 function norm(s: string) {
@@ -223,6 +224,14 @@ export function InboxSidebar({
                       aria-label="Conversa com mensagens não lidas"
                     />
                   ) : null}
+                  {c.callStatus === "ringing" ? (
+                    <span
+                      className="animate-pulse rounded-full bg-[var(--vp-whatsapp)] px-2 py-0.5 text-[9px] font-bold uppercase text-white"
+                      title="Cliente ligando agora"
+                    >
+                      Ligando
+                    </span>
+                  ) : null}
                   <span
                     className="text-[10px] text-[var(--muted)]"
                     title={new Date(c.lastAt).toLocaleString("pt-BR")}
@@ -241,6 +250,11 @@ export function InboxSidebar({
                   >
                     <span className="size-1.5 rounded-full bg-[var(--vp-wine)]" aria-hidden />
                     Aguarda resposta
+                  </span>
+                ) : null}
+                {c.callStatus && c.callStatus !== "ringing" ? (
+                  <span className="font-semibold text-[var(--vp-wine)]">
+                    {c.callStatus === "missed_video" ? "🎥 Videochamada perdida" : "📞 Ligação perdida"}
                   </span>
                 ) : null}
               </div>

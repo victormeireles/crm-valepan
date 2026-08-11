@@ -1,7 +1,9 @@
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 
 export const WHATSAPP_MEDIA_BUCKET = "whatsapp-media";
-export const MAX_WHATSAPP_MEDIA_BYTES = 16 * 1024 * 1024;
+// Practical channel ceiling. Z-API documents do not advertise an unlimited
+// payload and its media endpoints support files up to 100 MB.
+export const MAX_WHATSAPP_MEDIA_BYTES = 100 * 1024 * 1024;
 
 export type PrivateMediaKind = "audio" | "document";
 
@@ -59,7 +61,7 @@ export async function storePrivateMedia(input: {
 }) {
   const byteLength = input.bytes.byteLength;
   if (byteLength > MAX_WHATSAPP_MEDIA_BYTES) {
-    throw new Error("Arquivo excede o limite de 16 MB.");
+    throw new Error("Arquivo excede o limite de 100 MB do canal do WhatsApp.");
   }
 
   const path = mediaStoragePath(input);

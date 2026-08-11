@@ -167,9 +167,10 @@ export function RestoreLeadButton({ leadId }: { leadId: string }) {
         router.push("/inbox?tab=qualify");
       }}
     >
-      <p className="text-xs font-medium text-[var(--foreground)]">Restaurar no funil</p>
+      <p className="text-xs font-medium text-[var(--foreground)]">Restaurar para qualificar</p>
       <p className="mt-1 text-xs text-[var(--muted)]">
-        Volta para a lista de leads e recria oportunidade no funil, se necessário.
+        Esta conversa voltará para “Para qualificar”, onde deverá passar novamente pela
+        qualificação.
       </p>
     </ActionPanel>
   );

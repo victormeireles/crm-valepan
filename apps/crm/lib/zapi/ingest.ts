@@ -69,6 +69,11 @@ export type ZapiInbound = {
   fromMe: boolean;
   /** Ex.: `ReceivedCallback`, `DeliveryCallback` (envio — vem sem `fromMe` na doc Z-API). */
   eventType: string | null;
+  /** Notificação de chamada recebida pelo webhook da Z-API. */
+  callEvent: {
+    status: "ringing" | "missed_voice" | "missed_video";
+    callId: string | null;
+  } | null;
   /** Quando o payload traz timestamp (ex.: momment/moment em ms). */
   sentAtIso: string | null;
   /** Separa conversa de lead individual de grupo do WhatsApp. */
@@ -1014,6 +1019,22 @@ export function parseZapiWebhookPayload(body: unknown): ZapiInbound | null {
 
   const rawType = pickRawWebhookType(o, root);
   const eventType = normalizeEventType(rawType.length ? rawType : null);
+  const notification =
+    (typeof o.notification === "string" && o.notification.trim()) ||
+    (typeof root?.notification === "string" && root.notification.trim()) ||
+    "";
+  const callStatus =
+    notification === "CALL_VOICE"
+      ? ("ringing" as const)
+      : notification === "CALL_MISSED_VOICE"
+        ? ("missed_voice" as const)
+        : notification === "CALL_MISSED_VIDEO"
+          ? ("missed_video" as const)
+          : null;
+  const callId =
+    (typeof o.callId === "string" && o.callId.trim()) ||
+    (typeof root?.callId === "string" && root.callId.trim()) ||
+    null;
 
   const isGroup = isGroupPayload(o, root);
   const participant =
@@ -1059,6 +1080,7 @@ export function parseZapiWebhookPayload(body: unknown): ZapiInbound | null {
         body: null,
         fromMe: true,
         eventType,
+        callEvent: null,
         sentAtIso,
         conversationKind: "lead",
         media: null,
@@ -1071,7 +1093,7 @@ export function parseZapiWebhookPayload(body: unknown): ZapiInbound | null {
   if (!normalized) return null;
 
   const text = extractMessageText(o);
-  if (text === null) {
+  if (text === null && !callStatus) {
     const keys = Object.keys(o).sort().join(", ");
     console.warn(
       "[zapi ingest] Nenhum texto extraído do payload — chaves presentes:",
@@ -1103,6 +1125,7 @@ export function parseZapiWebhookPayload(body: unknown): ZapiInbound | null {
     body: text,
     fromMe,
     eventType,
+    callEvent: callStatus ? { status: callStatus, callId } : null,
     sentAtIso,
     conversationKind,
     groupDisplayName,
@@ -1629,6 +1652,118 @@ export async function ingestZapiMessage(parsed: ZapiInbound) {
       .eq("id", conversationId);
   }
 
+  async function closePendingCallReturnTasks() {
+    if (!leadId || direction !== "out") return;
+    const nowIso = new Date().toISOString();
+    const { error } = await crm
+      .from("tasks")
+      .update({ done: true, updated_at: nowIso })
+      .eq("lead_id", leadId)
+      .eq("done", false)
+      .like("source_key", "whatsapp-call:%");
+    if (error) {
+      console.warn("[zapi ingest] close call return tasks:", error.message);
+    }
+  }
+
+  if (parsed.callEvent) {
+    const callId = parsed.callEvent.callId;
+    const sentAt = parsed.sentAtIso ?? new Date().toISOString();
+    const bodyByStatus = {
+      ringing: "Cliente está ligando pelo WhatsApp agora",
+      missed_voice: "Ligação de voz não atendida",
+      missed_video: "Videochamada não atendida",
+    } as const;
+    const eventBody = bodyByStatus[parsed.callEvent.status];
+
+    let existingCall: { id: string; sent_at: string } | null = null;
+    if (callId) {
+      const { data } = await crm
+        .from("messages")
+        .select("id, sent_at")
+        .eq("provider_call_id", callId)
+        .maybeSingle();
+      existingCall = data;
+    }
+
+    if (existingCall?.id) {
+      const { error } = await crm
+        .from("messages")
+        .update({
+          body: eventBody,
+          event_status: parsed.callEvent.status,
+          sent_at: sentAt,
+        })
+        .eq("id", existingCall.id);
+      if (error) throw error;
+    } else {
+      const { error } = await crm.from("messages").insert({
+        conversation_id: conversationId,
+        direction: "in",
+        body: eventBody,
+        provider_message_id: providerId ?? null,
+        event_kind: "whatsapp_call",
+        event_status: parsed.callEvent.status,
+        provider_call_id: callId,
+        sent_at: sentAt,
+      });
+      if (error && error.code !== "23505") throw error;
+    }
+
+    await touchConversationTimestamp();
+
+    if (leadId && parsed.callEvent.status !== "ringing") {
+      const { data: replyAfterCall } = await crm
+        .from("messages")
+        .select("id")
+        .eq("conversation_id", conversationId)
+        .eq("direction", "out")
+        .gte("sent_at", existingCall?.sent_at ?? sentAt)
+        .limit(1)
+        .maybeSingle();
+      if (replyAfterCall?.id) {
+        return {
+          ok: true as const,
+          leadId,
+          conversationId,
+          call_event: parsed.callEvent.status,
+          return_task_skipped: "already_replied" as const,
+        };
+      }
+
+      const { data: lead } = await crm
+        .from("leads")
+        .select("owner_id")
+        .eq("id", leadId)
+        .maybeSingle();
+      const sourceKey = `whatsapp-call:${callId ?? providerId ?? `${phoneE164ForCrm}:${sentAt}`}`;
+      const contactLabel = parsed.contactName?.trim() || phoneE164ForCrm;
+      const dueAt = new Date(new Date(sentAt).getTime() + 10 * 60 * 1000).toISOString();
+      const { error: taskError } = await crm.from("tasks").upsert(
+        {
+          lead_id: leadId,
+          title: `Retornar ligação para ${contactLabel}`,
+          due_at: dueAt,
+          assignee_id: lead?.owner_id ?? null,
+          done: false,
+          source_key: sourceKey,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "source_key", ignoreDuplicates: true },
+      );
+      if (taskError) {
+        console.warn("[zapi ingest] create call return task:", taskError.message);
+      }
+    }
+
+    return {
+      ok: true as const,
+      leadId,
+      conversationId,
+      call_event: parsed.callEvent.status,
+    };
+  }
+
   /**
    * CRM envia com texto; o webhook de entrega (DeliveryCallback) muitas vezes vem **sem** texto.
    * Com texto no payload: casa pelo body; sem texto: vincula ao envio órfão mais antigo (FIFO) na janela.
@@ -1680,6 +1815,7 @@ export async function ingestZapiMessage(parsed: ZapiInbound) {
         })
         .eq("id", pending.id);
       if (!uErr) {
+        await closePendingCallReturnTasks();
         await touchConversationTimestamp();
         return {
           ok: true as const,
@@ -1721,6 +1857,7 @@ export async function ingestZapiMessage(parsed: ZapiInbound) {
     throw mErr;
   }
 
+  await closePendingCallReturnTasks();
   await touchConversationTimestamp();
   return { ok: true as const, leadId, conversationId };
 }

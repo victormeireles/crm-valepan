@@ -186,7 +186,7 @@ export default async function InboxPage({
       ? await crm
           .from("v_conversation_last_message")
           .select(
-            "conversation_id, lead_id, last_direction, last_sent_at, last_body_preview, last_inbound_sent_at",
+            "conversation_id, lead_id, last_direction, last_sent_at, last_body_preview, event_kind, event_status, last_inbound_sent_at",
           )
           .in("conversation_id", loadedConversationIds)
       : { data: [], error: null };
@@ -497,6 +497,13 @@ export default async function InboxPage({
         (c as { last_read_at?: string | null }).last_read_at,
         tail?.last_inbound_sent_at ?? undefined,
       ),
+      callStatus:
+        tail?.event_kind === "whatsapp_call" &&
+        (tail.event_status === "ringing" ||
+          tail.event_status === "missed_voice" ||
+          tail.event_status === "missed_video")
+          ? tail.event_status
+          : null,
     };
   });
 

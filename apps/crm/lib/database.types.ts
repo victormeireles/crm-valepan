@@ -211,6 +211,9 @@ export interface Database {
           media_size_bytes: number | null;
           media_storage_status: "stored" | "remote" | "failed" | "missing" | null;
           provider_message_id: string | null;
+          event_kind: "whatsapp_call" | null;
+          event_status: "ringing" | "missed_voice" | "missed_video" | null;
+          provider_call_id: string | null;
           message_status: "sent" | "read" | null;
           read_at: string | null;
           sent_at: string;
@@ -229,6 +232,9 @@ export interface Database {
           media_size_bytes?: number | null;
           media_storage_status?: "stored" | "remote" | "failed" | "missing" | null;
           provider_message_id?: string | null;
+          event_kind?: "whatsapp_call" | null;
+          event_status?: "ringing" | "missed_voice" | "missed_video" | null;
+          provider_call_id?: string | null;
           message_status?: "sent" | "read" | null;
           read_at?: string | null;
           sent_at?: string;
@@ -274,6 +280,7 @@ export interface Database {
           title: string;
           due_at: string | null;
           assignee_id: string | null;
+          source_key: string | null;
           done: boolean;
           created_at: string;
           updated_at: string;
@@ -285,6 +292,7 @@ export interface Database {
           title: string;
           due_at?: string | null;
           assignee_id?: string | null;
+          source_key?: string | null;
           done?: boolean;
         };
         Update: Partial<Database["crm"]["Tables"]["tasks"]["Insert"]>;
@@ -468,6 +476,8 @@ export interface Database {
           last_direction: string;
           last_sent_at: string;
           last_body_preview: string | null;
+          event_kind: string | null;
+          event_status: string | null;
           last_inbound_sent_at: string | null;
         };
       };

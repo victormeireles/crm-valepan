@@ -170,6 +170,48 @@ function outboundStatusLabel(message: InboxMessageRow): string {
   return message.message_status === "read" ? "Lida" : "Enviada";
 }
 
+function CallEventCard({ message }: { message: InboxMessageRow }) {
+  const ringing = message.event_status === "ringing";
+  const video = message.event_status === "missed_video";
+  return (
+    <div
+      className={`mx-auto flex w-[min(92%,520px)] items-center gap-3 rounded-2xl border px-4 py-3 shadow-[var(--sh-sm)] ${
+        ringing
+          ? "animate-pulse border-[var(--vp-whatsapp)] bg-[rgba(37,211,102,0.12)]"
+          : "border-[var(--vp-gold-classic)]/55 bg-[var(--vp-paper)]"
+      }`}
+      role={ringing ? "alert" : "status"}
+    >
+      <span
+        className={`flex size-10 shrink-0 items-center justify-center rounded-full text-lg ${
+          ringing ? "bg-[var(--vp-whatsapp)] text-white" : "bg-[rgba(35,0,4,0.09)]"
+        }`}
+        aria-hidden
+      >
+        {video ? "🎥" : "📞"}
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="font-semibold text-[var(--foreground)]">
+          {message.body ?? (ringing ? "Cliente está ligando agora" : "Ligação não atendida")}
+        </p>
+        <time className="text-xs text-[var(--muted)]" dateTime={message.sent_at}>
+          {new Date(message.sent_at).toLocaleString("pt-BR", {
+            day: "2-digit",
+            month: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
+          })}
+        </time>
+      </div>
+      {ringing ? (
+        <span className="shrink-0 rounded-full bg-[var(--vp-whatsapp)] px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-white">
+          Ligando
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
 export function ChatThread({
   conversationId,
   initialMessages,
@@ -216,6 +258,9 @@ export function ChatThread({
         id: row.id,
         direction: row.direction,
         body: row.body ?? null,
+        event_kind: row.event_kind ?? null,
+        event_status: row.event_status ?? null,
+        provider_call_id: row.provider_call_id ?? null,
         media_kind: row.media_kind ?? null,
         media_url: row.media_url ?? null,
         media_mime_type: row.media_mime_type ?? null,
@@ -377,6 +422,9 @@ export function ChatThread({
                   <div className="h-px flex-1 bg-[var(--border)]" />
                 </div>
               ) : null}
+            {m.event_kind === "whatsapp_call" ? (
+              <CallEventCard message={m} />
+            ) : (
             <div
               className={`flex w-full ${out ? "justify-end" : "justify-start"}`}
             >
@@ -449,6 +497,7 @@ export function ChatThread({
                 </div>
               </div>
             </div>
+            )}
             </div>
           );
         })}

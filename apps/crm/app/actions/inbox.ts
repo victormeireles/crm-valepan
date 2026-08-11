@@ -6,7 +6,10 @@ import {
   loadOlderMessagesPage,
 } from "@/lib/inbox/load-messages";
 import { isInboxClassification } from "@/lib/inbox-classifications";
-import { storePrivateMedia } from "@/lib/media-storage";
+import {
+  MAX_WHATSAPP_MEDIA_BYTES,
+  storePrivateMedia,
+} from "@/lib/media-storage";
 
 import { createServerSupabaseClient, crmTables } from "@/lib/supabase/server";
 import { registerZapiLidMapForPhoneDigits } from "@/lib/zapi/phone-exists";
@@ -74,6 +77,13 @@ export async function sendConversationMessage(formData: FormData) {
     .eq("id", conversationId);
 
   if (conv?.lead_id) {
+    await crm
+      .from("tasks")
+      .update({ done: true, updated_at: new Date().toISOString() })
+      .eq("lead_id", conv.lead_id)
+      .eq("done", false)
+      .like("source_key", "whatsapp-call:%");
+
     await crm.from("activity_logs").insert({
       entity_type: "lead",
       entity_id: conv.lead_id,
@@ -366,8 +376,11 @@ export async function sendConversationAttachment(formData: FormData) {
   if (!user) return { ok: false as const, error: "Não autenticado" };
   const crm = crmTables(supabase);
 
-  if (file.size > 16 * 1024 * 1024) {
-    return { ok: false as const, error: "Arquivo muito grande (máximo 16MB)." };
+  if (file.size > MAX_WHATSAPP_MEDIA_BYTES) {
+    return {
+      ok: false as const,
+      error: "O WhatsApp aceita arquivos de até 100 MB neste canal.",
+    };
   }
 
   const mime = file.type.toLowerCase();

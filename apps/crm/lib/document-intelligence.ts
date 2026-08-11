@@ -81,7 +81,7 @@ async function loadMessageBytes(message: {
     if (!response.ok) throw new Error(`Falha ao baixar arquivo (${response.status}).`);
     const advertisedSize = Number(response.headers.get("content-length") || "0");
     if (advertisedSize > MAX_WHATSAPP_MEDIA_BYTES) {
-      throw new Error("Arquivo excede o limite de 16 MB.");
+      throw new Error("Arquivo excede o limite de 100 MB.");
     }
     const bytes = Buffer.from(await response.arrayBuffer());
     return {
@@ -141,7 +141,7 @@ export async function processDocumentInsight(messageId: string) {
   try {
     const loaded = await loadMessageBytes(message);
     if (loaded.bytes.byteLength > MAX_WHATSAPP_MEDIA_BYTES) {
-      throw new Error("Arquivo excede o limite de 16 MB.");
+      throw new Error("Arquivo excede o limite de 100 MB.");
     }
     const mimeType = loaded.mimeType.split(";")[0]?.trim() || "application/octet-stream";
     const dataUrl = `data:${mimeType};base64,${loaded.bytes.toString("base64")}`;

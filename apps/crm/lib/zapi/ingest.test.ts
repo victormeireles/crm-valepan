@@ -67,6 +67,39 @@ describe("parseZapiWebhookPayload media", () => {
   });
 });
 
+describe("parseZapiWebhookPayload calls", () => {
+  const callBase = {
+    type: "ReceivedCallback",
+    phone: "5511958761204",
+    callId: "CALL-123",
+    messageId: "call-message-1",
+    fromMe: false,
+  };
+
+  it("recognizes a voice call while it is ringing", () => {
+    const parsed = parseZapiWebhookPayload({
+      ...callBase,
+      notification: "CALL_VOICE",
+    });
+
+    expect(parsed?.callEvent).toEqual({ status: "ringing", callId: "CALL-123" });
+  });
+
+  it("recognizes missed voice and video calls", () => {
+    const voice = parseZapiWebhookPayload({
+      ...callBase,
+      notification: "CALL_MISSED_VOICE",
+    });
+    const video = parseZapiWebhookPayload({
+      ...callBase,
+      notification: "CALL_MISSED_VIDEO",
+    });
+
+    expect(voice?.callEvent?.status).toBe("missed_voice");
+    expect(video?.callEvent?.status).toBe("missed_video");
+  });
+});
+
 describe("hasZapiReactionPayload", () => {
   it("ignores a flat Z-API reaction instead of creating a chat bubble", () => {
     expect(

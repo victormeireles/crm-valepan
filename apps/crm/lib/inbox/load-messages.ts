@@ -11,6 +11,9 @@ export type InboxMessageRow = {
   direction: "in" | "out";
 
   body: string | null;
+  event_kind: "whatsapp_call" | null;
+  event_status: "ringing" | "missed_voice" | "missed_video" | null;
+  provider_call_id: string | null;
 
   media_kind: "image" | "video" | "audio" | "document" | null;
 
@@ -30,14 +33,19 @@ export type InboxMessageRow = {
 };
 
 const MESSAGES_SELECT_WITH_MEDIA =
-  "id, direction, body, media_kind, media_url, media_mime_type, media_file_name, media_storage_path, media_size_bytes, media_storage_status, message_status, read_at, sent_at";
+  "id, direction, body, event_kind, event_status, provider_call_id, media_kind, media_url, media_mime_type, media_file_name, media_storage_path, media_size_bytes, media_storage_status, message_status, read_at, sent_at";
 const MESSAGES_SELECT_WITH_LEGACY_MEDIA =
   "id, direction, body, media_kind, media_url, media_mime_type, media_file_name, message_status, read_at, sent_at";
 const MESSAGES_SELECT_LEGACY = "id, direction, body, sent_at";
 
 type LegacyMediaRow = Omit<
   InboxMessageRow,
-  "media_storage_path" | "media_size_bytes" | "media_storage_status"
+  | "media_storage_path"
+  | "media_size_bytes"
+  | "media_storage_status"
+  | "event_kind"
+  | "event_status"
+  | "provider_call_id"
 >;
 
 function isMissingMediaColumnError(error?: { message?: string; code?: string } | null) {
@@ -50,7 +58,10 @@ function isMissingMediaColumnError(error?: { message?: string; code?: string } |
     msg.includes("media_file_name") ||
     msg.includes("media_storage_path") ||
     msg.includes("media_size_bytes") ||
-    msg.includes("media_storage_status")
+    msg.includes("media_storage_status") ||
+    msg.includes("event_kind") ||
+    msg.includes("event_status") ||
+    msg.includes("provider_call_id")
   );
 }
 
@@ -60,6 +71,9 @@ function normalizeLegacyRows(
   return rows.map((row) => ({
     ...row,
     media_kind: null,
+    event_kind: null,
+    event_status: null,
+    provider_call_id: null,
     media_url: null,
     media_mime_type: null,
     media_file_name: null,
@@ -74,6 +88,9 @@ function normalizeLegacyRows(
 function normalizeLegacyMediaRows(rows: LegacyMediaRow[]): InboxMessageRow[] {
   return rows.map((row) => ({
     ...row,
+    event_kind: null,
+    event_status: null,
+    provider_call_id: null,
     media_storage_path: null,
     media_size_bytes: null,
     media_storage_status: row.media_url ? "remote" : null,

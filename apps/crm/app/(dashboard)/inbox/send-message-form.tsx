@@ -160,12 +160,17 @@ export function SendMessageForm({
     fd.set("phone", phone);
     fd.set("attachment_mode", mode);
     fd.set("attachment", file);
-    const res = await sendConversationAttachment(fd);
-    setUploadingAttachment(false);
-    e.currentTarget.value = "";
-    if (!res.ok) {
-      setErr(res.error ?? "Erro ao enviar arquivo.");
-      return;
+    try {
+      const res = await sendConversationAttachment(fd);
+      if (!res.ok) {
+        setErr(res.error ?? "Erro ao enviar arquivo.");
+      }
+    } catch (error) {
+      console.error("[inbox] attachment upload:", error);
+      setErr("Não foi possível enviar o arquivo. Tente novamente.");
+    } finally {
+      setUploadingAttachment(false);
+      e.target.value = "";
     }
   }
 
