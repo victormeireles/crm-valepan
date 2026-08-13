@@ -138,13 +138,19 @@ export function SendMessageForm({
     const fd = new FormData(form);
     fd.set("conversation_id", conversationId);
     fd.set("phone", phone);
-    const res = await sendConversationMessage(fd);
-    setLoading(false);
-    if (!res.ok) {
-      setErr(res.error ?? "Erro ao enviar");
-      return;
+    try {
+      const res = await sendConversationMessage(fd);
+      if (!res.ok) {
+        setErr(res.error ?? "Erro ao enviar");
+        return;
+      }
+      form.reset();
+    } catch (error) {
+      console.error("[inbox] message send:", error);
+      setErr("Não foi possível enviar a mensagem. Tente novamente.");
+    } finally {
+      setLoading(false);
     }
-    form.reset();
   }
 
   async function onPickAttachment(
@@ -284,6 +290,9 @@ export function SendMessageForm({
             required
             rows={1}
             placeholder="Mensagem"
+            onChange={() => {
+              if (err) setErr(null);
+            }}
             onKeyDown={(event) => {
               if (
                 event.key !== "Enter" ||
