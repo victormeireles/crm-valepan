@@ -1,6 +1,10 @@
 "use client";
 
-import { loadEarlierInboxMessages } from "@/app/actions/inbox";
+import {
+  addInboxMessageToNotes,
+  loadEarlierInboxMessages,
+  reactToInboxMessage,
+} from "@/app/actions/inbox";
 import type { InboxMessageRow } from "@/lib/inbox/load-messages";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -170,6 +174,119 @@ function outboundStatusLabel(message: InboxMessageRow): string {
   return message.message_status === "read" ? "Lida" : "Enviada";
 }
 
+const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🙏"] as const;
+
+function messagePreview(message: InboxMessageRow) {
+  return (
+    message.body?.trim() ||
+    message.media_file_name?.trim() ||
+    (message.media_kind ? `Mensagem com ${message.media_kind}` : "Mensagem sem texto")
+  );
+}
+
+function MessageActions({
+  message,
+  conversationId,
+  onClose,
+  onFeedback,
+}: {
+  message: InboxMessageRow;
+  conversationId: string;
+  onClose: () => void;
+  onFeedback: (message: string, error?: boolean) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+
+  async function react(reaction: string) {
+    if (busy) return;
+    setBusy(true);
+    const nextReaction = message.reaction === reaction ? null : reaction;
+    const result = await reactToInboxMessage({
+      conversationId,
+      messageId: message.id,
+      reaction: nextReaction,
+    });
+    setBusy(false);
+    if (!result.ok) return onFeedback(result.error, true);
+    onFeedback(nextReaction ? `Reação ${nextReaction} enviada.` : "Reação removida.");
+    onClose();
+  }
+
+  return (
+    <div
+      className={`absolute top-full z-40 mt-2 w-[min(19rem,calc(100vw-2rem))] ${
+        message.direction === "out" ? "right-0" : "left-0"
+      }`}
+      onClick={(event) => event.stopPropagation()}
+    >
+      <div className="mb-1 flex items-center justify-center gap-0.5 rounded-full border border-[var(--border)] bg-[var(--vp-paper-pure)] p-1 shadow-[var(--sh-md)]">
+        {QUICK_REACTIONS.map((reaction) => (
+          <button
+            key={reaction}
+            type="button"
+            disabled={busy || !message.provider_message_id}
+            onClick={() => void react(reaction)}
+            className={`flex size-9 items-center justify-center rounded-full text-xl transition hover:scale-110 hover:bg-black/5 disabled:cursor-not-allowed disabled:opacity-40 ${
+              message.reaction === reaction ? "bg-[rgba(35,0,4,0.10)] ring-1 ring-[var(--vp-wine)]/30" : ""
+            }`}
+            aria-label={`Reagir com ${reaction}`}
+          >
+            {reaction}
+          </button>
+        ))}
+      </div>
+      <div role="menu" className="overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--vp-paper-pure)] p-1.5 shadow-[var(--sh-lg)]">
+        <button
+          type="button"
+          role="menuitem"
+          disabled={!message.provider_message_id}
+          onClick={() => {
+            window.dispatchEvent(new CustomEvent("crm:reply-message", {
+              detail: { conversationId, id: message.id, preview: messagePreview(message) },
+            }));
+            onClose();
+          }}
+          className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-black/5 disabled:opacity-40"
+        >
+          ↩ Responder
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          onClick={async () => {
+            try {
+              await navigator.clipboard.writeText(messagePreview(message));
+              onFeedback("Mensagem copiada.");
+              onClose();
+            } catch {
+              onFeedback("Não foi possível copiar a mensagem.", true);
+            }
+          }}
+          className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-black/5"
+        >
+          ⧉ Copiar
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true);
+            const result = await addInboxMessageToNotes({ conversationId, messageId: message.id });
+            setBusy(false);
+            if (!result.ok) return onFeedback(result.error, true);
+            onFeedback("Mensagem adicionada às notas do lead.");
+            onClose();
+          }}
+          className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-black/5 disabled:opacity-40"
+        >
+          ＋ Adicionar às notas
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function CallEventCard({ message }: { message: InboxMessageRow }) {
   const ringing = message.event_status === "ringing";
   const video = message.event_status === "missed_video";
@@ -235,6 +352,8 @@ export function ChatThread({
   const [hasMoreOlder, setHasMoreOlder] = useState(hasMoreOlderInitial);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [selectedMessageId, setSelectedMessageId] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<{ text: string; error: boolean } | null>(null);
 
   const messages = useMemo(
     () => mergeById(mergeById(olderMessages, initialMessages), liveMessages),
@@ -246,6 +365,8 @@ export function ChatThread({
     setLiveMessages([]);
     setHasMoreOlder(hasMoreOlderInitial);
     setLoadError(null);
+    setSelectedMessageId(null);
+    setFeedback(null);
   }, [conversationId, hasMoreOlderInitial]);
 
   useEffect(() => {
@@ -256,6 +377,9 @@ export function ChatThread({
       }
       return {
         id: row.id,
+        provider_message_id: row.provider_message_id ?? null,
+        reply_to_message_id: row.reply_to_message_id ?? null,
+        reaction: row.reaction ?? null,
         direction: row.direction,
         body: row.body ?? null,
         event_kind: row.event_kind ?? null,
@@ -308,6 +432,12 @@ export function ChatThread({
       void supabase.removeChannel(channel);
     };
   }, [conversationId, supabase]);
+
+  useEffect(() => {
+    if (!feedback) return;
+    const timeout = window.setTimeout(() => setFeedback(null), 3200);
+    return () => window.clearTimeout(timeout);
+  }, [feedback]);
 
   const firstNewSinceReadIdx = useMemo(() => {
     const lr = (lastReadAtIso ?? "").trim();
@@ -377,6 +507,18 @@ export function ChatThread({
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <DocumentSearch conversationId={conversationId} />
+      {feedback ? (
+        <div
+          role={feedback.error ? "alert" : "status"}
+          className={`mx-auto mb-1 rounded-full px-3 py-1.5 text-xs font-medium shadow-sm ${
+            feedback.error
+              ? "bg-red-50 text-[var(--vp-error)]"
+              : "bg-[rgba(35,0,4,0.08)] text-[var(--vp-wine)]"
+          }`}
+        >
+          {feedback.text}
+        </div>
+      ) : null}
       <div
         ref={scrollRef}
         className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-1 py-2"
@@ -407,6 +549,9 @@ export function ChatThread({
             firstNewSinceReadIdx >= 0 &&
             idx >= firstNewSinceReadIdx &&
             (lastReadAtIso ?? "").trim().length > 0;
+          const repliedMessage = m.reply_to_message_id
+            ? messages.find((candidate) => candidate.id === m.reply_to_message_id) ?? null
+            : null;
           return (
             <div key={m.id} id={`message-${m.id}`} className="w-full space-y-3">
               {idx === firstNewSinceReadIdx && firstNewSinceReadIdx >= 0 ? (
@@ -429,12 +574,30 @@ export function ChatThread({
               className={`flex w-full ${out ? "justify-end" : "justify-start"}`}
             >
               <div
+                role="button"
+                tabIndex={0}
+                aria-label="Abrir ações da mensagem"
+                aria-expanded={selectedMessageId === m.id}
+                onClick={() => setSelectedMessageId((current) => current === m.id ? null : m.id)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    setSelectedMessageId((current) => current === m.id ? null : m.id);
+                  }
+                  if (event.key === "Escape") setSelectedMessageId(null);
+                }}
                 className={
                   out
-                    ? `max-w-[min(88%,440px)] rounded-2xl rounded-br-sm bg-[var(--vp-wine)] px-3 py-2 text-sm text-[var(--vp-gold)] shadow-[var(--sh-sm)]${isNewSinceRead && out ? " ring-2 ring-[var(--vp-gold)]/35" : ""}`
-                    : `max-w-[min(88%,440px)] rounded-2xl rounded-bl-sm border bg-[var(--vp-paper-pure)] px-3 py-2 text-sm text-[var(--foreground)] shadow-[var(--sh-sm)]${isNewSinceRead && !out ? " border-[var(--vp-wine)]/45 ring-1 ring-[var(--vp-wine)]/25" : " border-[var(--border)]"}`
+                    ? `relative max-w-[min(88%,440px)] cursor-pointer rounded-2xl rounded-br-sm bg-[var(--vp-wine)] px-3 py-2 text-sm text-[var(--vp-gold)] shadow-[var(--sh-sm)]${isNewSinceRead && out ? " ring-2 ring-[var(--vp-gold)]/35" : ""}${selectedMessageId === m.id ? " ring-2 ring-[var(--vp-gold)]/60" : ""}`
+                    : `relative max-w-[min(88%,440px)] cursor-pointer rounded-2xl rounded-bl-sm border bg-[var(--vp-paper-pure)] px-3 py-2 text-sm text-[var(--foreground)] shadow-[var(--sh-sm)]${isNewSinceRead && !out ? " border-[var(--vp-wine)]/45 ring-1 ring-[var(--vp-wine)]/25" : " border-[var(--border)]"}${selectedMessageId === m.id ? " ring-2 ring-[var(--vp-wine)]/35" : ""}`
                 }
               >
+                {repliedMessage ? (
+                  <div className={`mb-2 rounded-lg border-l-4 px-2.5 py-2 text-xs ${out ? "border-[var(--vp-gold)] bg-black/15" : "border-[var(--vp-wine)] bg-black/5"}`}>
+                    <p className="mb-0.5 font-semibold">Em resposta a</p>
+                    <p className="line-clamp-2 opacity-80">{messagePreview(repliedMessage)}</p>
+                  </div>
+                ) : null}
                 {contactCard ? (
                   <div className="w-[min(100%,360px)] overflow-hidden rounded-xl border border-[rgba(80,20,24,0.22)] bg-[#f1dddd] text-[#3e1317]">
                     <div className="flex items-center gap-2 border-b border-[rgba(80,20,24,0.14)] px-3 py-2">
@@ -495,6 +658,19 @@ export function ChatThread({
                     })}
                   </time>
                 </div>
+                {m.reaction ? (
+                  <span className={`absolute -bottom-3 ${out ? "left-2" : "right-2"} rounded-full border border-[var(--border)] bg-[var(--vp-paper-pure)] px-1.5 py-0.5 text-sm shadow-sm`}>
+                    {m.reaction}
+                  </span>
+                ) : null}
+                {selectedMessageId === m.id ? (
+                  <MessageActions
+                    message={m}
+                    conversationId={conversationId}
+                    onClose={() => setSelectedMessageId(null)}
+                    onFeedback={(text, error = false) => setFeedback({ text, error })}
+                  />
+                ) : null}
               </div>
             </div>
             )}

@@ -211,6 +211,8 @@ export interface Database {
           media_size_bytes: number | null;
           media_storage_status: "stored" | "remote" | "failed" | "missing" | null;
           provider_message_id: string | null;
+          reply_to_message_id: string | null;
+          reaction: string | null;
           event_kind: "whatsapp_call" | null;
           event_status: "ringing" | "missed_voice" | "missed_video" | null;
           provider_call_id: string | null;
@@ -232,6 +234,8 @@ export interface Database {
           media_size_bytes?: number | null;
           media_storage_status?: "stored" | "remote" | "failed" | "missing" | null;
           provider_message_id?: string | null;
+          reply_to_message_id?: string | null;
+          reaction?: string | null;
           event_kind?: "whatsapp_call" | null;
           event_status?: "ringing" | "missed_voice" | "missed_video" | null;
           provider_call_id?: string | null;

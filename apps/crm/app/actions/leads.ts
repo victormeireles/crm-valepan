@@ -1314,6 +1314,67 @@ export async function updateLeadCategoryContactInfo(input: {
 
   if (!updated) return { ok: false as const, error: "Não foi possível salvar as informações." };
 
+  if (leadStatus === "em negociação") {
+    const { data: negotiationStage, error: stageError } = await crm
+      .from("pipeline_stages")
+      .select("id")
+      .ilike("name", "NEGOCIAÇÃO")
+      .limit(1)
+      .maybeSingle();
+    if (stageError) return { ok: false as const, error: stageError.message };
+    if (!negotiationStage?.id) {
+      return { ok: false as const, error: "A etapa NEGOCIAÇÃO não foi encontrada no funil." };
+    }
+
+    const { data: opportunity, error: opportunityError } = await crm
+      .from("opportunities")
+      .select("id, stage_id, owner_id")
+      .eq("lead_id", leadId)
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (opportunityError) return { ok: false as const, error: opportunityError.message };
+
+    let opportunityId = opportunity?.id ?? null;
+    if (opportunityId) {
+      const { error: moveError } = await crm
+        .from("opportunities")
+        .update({ stage_id: negotiationStage.id, updated_at: new Date().toISOString() })
+        .eq("id", opportunityId);
+      if (moveError) return { ok: false as const, error: moveError.message };
+    } else {
+      const { data: insertedOpportunity, error: insertOpportunityError } = await crm
+        .from("opportunities")
+        .insert({
+          lead_id: leadId,
+          company_id: nextCompanyId,
+          owner_id: user.id,
+          stage_id: negotiationStage.id,
+          title: `Oportunidade ${normalizedLeadPhone ?? lead.phone_e164}`,
+        })
+        .select("id")
+        .single();
+      if (insertOpportunityError || !insertedOpportunity) {
+        return {
+          ok: false as const,
+          error: insertOpportunityError?.message ?? "Erro ao criar oportunidade.",
+        };
+      }
+      opportunityId = insertedOpportunity.id;
+    }
+
+    const automation = await applyPipelineStageEntryAutomations(crm, {
+      opportunityId,
+      leadId,
+      stageId: negotiationStage.id,
+      previousStageId: opportunity?.stage_id ?? null,
+      assigneeId: opportunity?.owner_id ?? user.id,
+      actorId: user.id,
+    });
+    if (automation.created > 0) revalidatePath("/tasks");
+    revalidatePath("/pipeline");
+  }
+
   revalidatePath("/leads", "page");
   revalidatePath("/leads", "layout");
   revalidatePath(`/leads/${leadId}`);

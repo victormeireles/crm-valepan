@@ -6,6 +6,8 @@ import {
   loadOlderMessagesPage,
 } from "@/lib/inbox/load-messages";
 import { isInboxClassification } from "@/lib/inbox-classifications";
+import { applyPipelineStageEntryAutomations } from "@/lib/pipeline-stage-automations";
+import { pipelineStageForInboxClassification } from "@/lib/pipeline-stage-for-inbox-classification";
 import {
   MAX_WHATSAPP_MEDIA_BYTES,
   storePrivateMedia,
@@ -20,6 +22,7 @@ import {
   sendZapiDocument,
   sendZapiImage,
   sendZapiText,
+  setZapiMessageReaction,
   sendZapiVideo,
 } from "@/lib/zapi/send";
 
@@ -27,6 +30,7 @@ export async function sendConversationMessage(formData: FormData) {
   const conversationId = String(formData.get("conversation_id") ?? "").trim();
   const phone = String(formData.get("phone") ?? "").trim();
   const message = String(formData.get("message") ?? "").trim();
+  const replyToMessageId = String(formData.get("reply_to_message_id") ?? "").trim();
   if (!conversationId || !phone || !message) {
     return { ok: false as const, error: "Dados incompletos para envio." };
   }
@@ -38,9 +42,24 @@ export async function sendConversationMessage(formData: FormData) {
   if (!user) return { ok: false as const, error: "Não autenticado" };
   const crm = crmTables(supabase);
 
+  let replyTo: { id: string; provider_message_id: string | null } | null = null;
+  if (replyToMessageId) {
+    const { data } = await crm
+      .from("messages")
+      .select("id, provider_message_id")
+      .eq("id", replyToMessageId)
+      .eq("conversation_id", conversationId)
+      .maybeSingle();
+    if (!data) return { ok: false as const, error: "Mensagem original não encontrada." };
+    if (!data.provider_message_id) {
+      return { ok: false as const, error: "Esta mensagem antiga não pode ser respondida no WhatsApp." };
+    }
+    replyTo = data;
+  }
+
   let providerMessageId: string | null = null;
   try {
-    const sent = await sendZapiText(phone, message);
+    const sent = await sendZapiText(phone, message, replyTo?.provider_message_id);
     providerMessageId = sent.providerMessageId;
     if (!phone.toLowerCase().includes("@g.us")) {
       try {
@@ -67,6 +86,7 @@ export async function sendConversationMessage(formData: FormData) {
     direction: "out",
     body: message,
     message_status: "sent",
+    ...(replyTo ? { reply_to_message_id: replyTo.id } : {}),
     ...(providerMessageId ? { provider_message_id: providerMessageId } : {}),
   });
   if (error) return { ok: false as const, error: error.message };
@@ -151,6 +171,112 @@ export async function markConversationRead(conversationId: string) {
   return { ok: true as const };
 }
 
+const ALLOWED_MESSAGE_REACTIONS = new Set(["👍", "❤️", "😂", "😮", "😢", "🙏"]);
+
+export async function reactToInboxMessage(input: {
+  conversationId: string;
+  messageId: string;
+  reaction: string | null;
+}) {
+  const conversationId = input.conversationId.trim();
+  const messageId = input.messageId.trim();
+  const reaction = input.reaction?.trim() || null;
+  if (!conversationId || !messageId || (reaction && !ALLOWED_MESSAGE_REACTIONS.has(reaction))) {
+    return { ok: false as const, error: "Reação inválida." };
+  }
+
+  const supabase = await createServerSupabaseClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false as const, error: "Não autenticado" };
+  const crm = crmTables(supabase);
+  const { data: message } = await crm
+    .from("messages")
+    .select("id, provider_message_id, conversations!inner(phone_e164)")
+    .eq("id", messageId)
+    .eq("conversation_id", conversationId)
+    .maybeSingle();
+  if (!message?.provider_message_id) {
+    return { ok: false as const, error: "Esta mensagem não possui identificação no WhatsApp." };
+  }
+  const conversationValue = message.conversations as unknown as
+    | { phone_e164: string }
+    | { phone_e164: string }[];
+  const phone = Array.isArray(conversationValue)
+    ? conversationValue[0]?.phone_e164
+    : conversationValue?.phone_e164;
+  if (!phone) return { ok: false as const, error: "Conversa não encontrada." };
+
+  try {
+    await setZapiMessageReaction({ phone, messageId: message.provider_message_id, reaction });
+  } catch (error) {
+    return {
+      ok: false as const,
+      error: error instanceof Error ? error.message : "Falha ao reagir no WhatsApp.",
+    };
+  }
+  const { error } = await crm.from("messages").update({ reaction }).eq("id", messageId);
+  if (error) return { ok: false as const, error: error.message };
+  return { ok: true as const };
+}
+
+export async function addInboxMessageToNotes(input: {
+  conversationId: string;
+  messageId: string;
+}) {
+  const conversationId = input.conversationId.trim();
+  const messageId = input.messageId.trim();
+  if (!conversationId || !messageId) return { ok: false as const, error: "Mensagem inválida." };
+
+  const supabase = await createServerSupabaseClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false as const, error: "Não autenticado" };
+  const crm = crmTables(supabase);
+  const { data: conversation } = await crm
+    .from("conversations")
+    .select("lead_id")
+    .eq("id", conversationId)
+    .maybeSingle();
+  if (!conversation?.lead_id) return { ok: false as const, error: "Conversa sem lead vinculado." };
+  const { data: message } = await crm
+    .from("messages")
+    .select("body, direction, sent_at, media_file_name")
+    .eq("id", messageId)
+    .eq("conversation_id", conversationId)
+    .maybeSingle();
+  if (!message) return { ok: false as const, error: "Mensagem não encontrada." };
+  const { data: opportunity } = await crm
+    .from("opportunities")
+    .select("id")
+    .eq("lead_id", conversation.lead_id)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const content = message.body?.trim() || message.media_file_name?.trim() || "Mensagem sem texto";
+  const body = [
+    "Mensagem do WhatsApp adicionada pelo Inbox",
+    `Data: ${new Date(message.sent_at).toLocaleString("pt-BR")}`,
+    `Origem: ${message.direction === "out" ? "Equipe comercial" : "Cliente"}`,
+    "",
+    content,
+  ].join("\n");
+  const { error } = await crm.from("notes").insert({
+    lead_id: conversation.lead_id,
+    opportunity_id: opportunity?.id ?? null,
+    author_id: user.id,
+    body,
+  });
+  if (error) return { ok: false as const, error: error.message };
+  await crm.from("activity_logs").insert({
+    entity_type: "lead",
+    entity_id: conversation.lead_id,
+    action: "message_added_to_notes",
+    actor_id: user.id,
+    payload: { message_id: messageId, preview: content.slice(0, 200) },
+  });
+  revalidatePath(`/leads/${conversation.lead_id}`);
+  return { ok: true as const };
+}
+
 export async function updateConversationClassification(input: {
   conversationId: string;
   classification: string | null;
@@ -174,6 +300,33 @@ export async function updateConversationClassification(input: {
     return { ok: false as const, error: "Classificação inválida." };
   }
 
+  const { data: conversation, error: conversationError } = await crm
+    .from("conversations")
+    .select("id, lead_id, phone_e164")
+    .eq("id", conversationId)
+    .maybeSingle();
+  if (conversationError) return { ok: false as const, error: conversationError.message };
+  if (!conversation) return { ok: false as const, error: "Conversa não encontrada." };
+
+  const targetStageName = pipelineStageForInboxClassification(classification);
+  let targetStageId: string | null = null;
+  if (targetStageName && conversation.lead_id) {
+    const { data: stage, error: stageError } = await crm
+      .from("pipeline_stages")
+      .select("id")
+      .ilike("name", targetStageName)
+      .limit(1)
+      .maybeSingle();
+    if (stageError) return { ok: false as const, error: stageError.message };
+    if (!stage?.id) {
+      return {
+        ok: false as const,
+        error: `A etapa ${targetStageName} não foi encontrada no funil.`,
+      };
+    }
+    targetStageId = stage.id;
+  }
+
   const { data: updated, error } = await crm
     .from("conversations")
     .update({
@@ -187,7 +340,54 @@ export async function updateConversationClassification(input: {
   if (error) return { ok: false as const, error: error.message };
   if (!updated) return { ok: false as const, error: "Não foi possível salvar a classificação." };
 
+  if (targetStageId && conversation.lead_id) {
+    const nowIso = new Date().toISOString();
+    const { data: opportunity, error: opportunityError } = await crm
+      .from("opportunities")
+      .select("id, stage_id, owner_id")
+      .eq("lead_id", conversation.lead_id)
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (opportunityError) return { ok: false as const, error: opportunityError.message };
+
+    let opportunityId = opportunity?.id ?? null;
+    if (opportunityId) {
+      const { error: moveError } = await crm
+        .from("opportunities")
+        .update({ stage_id: targetStageId, updated_at: nowIso })
+        .eq("id", opportunityId);
+      if (moveError) return { ok: false as const, error: moveError.message };
+    } else {
+      const { data: inserted, error: insertError } = await crm
+        .from("opportunities")
+        .insert({
+          lead_id: conversation.lead_id,
+          owner_id: user.id,
+          stage_id: targetStageId,
+          title: `Oportunidade ${conversation.phone_e164}`,
+        })
+        .select("id")
+        .single();
+      if (insertError || !inserted) {
+        return { ok: false as const, error: insertError?.message ?? "Erro ao criar oportunidade." };
+      }
+      opportunityId = inserted.id;
+    }
+
+    const automation = await applyPipelineStageEntryAutomations(crm, {
+      opportunityId,
+      leadId: conversation.lead_id,
+      stageId: targetStageId,
+      previousStageId: opportunity?.stage_id ?? null,
+      assigneeId: opportunity?.owner_id ?? user.id,
+      actorId: user.id,
+    });
+    if (automation.created > 0) revalidatePath("/tasks");
+  }
+
   revalidatePath("/inbox");
+  revalidatePath("/pipeline");
   return { ok: true as const };
 }
 

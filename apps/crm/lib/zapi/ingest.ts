@@ -7,7 +7,7 @@ import {
 } from "@/lib/media-storage";
 import { crmTables, createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { fetchZapiProfilePictureLink } from "@/lib/zapi/profile-picture";
-import { hasZapiReactionPayload } from "./webhook-event";
+import { hasZapiReactionPayload, isZapiDeletedMessageEvent } from "./webhook-event";
 
 /** Fallback quando o JID não é BR mas tem dígitos E.164 válidos (ex.: +351, +1). */
 function normalizeDigitsToE164Loose(digits: string): string | null {
@@ -387,6 +387,10 @@ export function planZapiWebhookAction(
 
   if (hasZapiReactionPayload(merged) || hasZapiReactionPayload(root)) {
     return { action: "skip", reason: "reaction_event" };
+  }
+
+  if (isZapiDeletedMessageEvent(merged) || isZapiDeletedMessageEvent(root)) {
+    return { action: "skip", reason: "deleted_message_event" };
   }
 
   const rawType = pickRawWebhookType(merged, root);
@@ -1310,6 +1314,7 @@ export async function ingestZapiMessage(parsed: ZapiInbound) {
   }
 
   const direction = parsed.fromMe ? ("out" as const) : ("in" as const);
+  const eventTypeLower = parsed.eventType?.trim().toLowerCase() ?? "";
 
   /**
    * Primeira etapa: tenta RPC em `public` (sempre exposta); depois REST em `crm`.
@@ -1373,8 +1378,20 @@ export async function ingestZapiMessage(parsed: ZapiInbound) {
     }
   }
 
+  // Callbacks de status confirmam envio/leitura, mas não são novas mensagens.
+  // Mesmo quando trazem telefone, nunca devem criar um balão vazio no Inbox.
+  if (eventTypeLower === "messagestatuscallback") {
+    return { ok: true as const, skipped: "message_status_without_match" as const };
+  }
+
   if (parsed.phoneE164 === "__status_only__") {
     return { ok: true as const, skipped: "status_without_message_match" as const };
+  }
+
+  // Eventos técnicos sem texto, mídia ou chamada eram persistidos com o placeholder
+  // "[Sem prévia]" e acabavam aparecendo como conversa apagada/sem conteúdo.
+  if (!parsed.body?.trim() && !parsed.media && !parsed.callEvent) {
+    return { ok: true as const, skipped: "empty_message_event" as const };
   }
 
   const messageTimeFields =

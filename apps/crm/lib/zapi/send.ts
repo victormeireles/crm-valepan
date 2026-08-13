@@ -24,6 +24,7 @@ export function formatPhoneForZapiSend(phone: string): string {
 export async function sendZapiText(
   toPhoneDigits: string,
   message: string,
+  replyToMessageId?: string | null,
 ): Promise<{ raw: unknown; providerMessageId: string | null }> {
   const base = process.env.ZAPI_BASE_URL ?? "https://api.z-api.io";
   const inst = process.env.ZAPI_INSTANCE_ID;
@@ -46,6 +47,7 @@ export async function sendZapiText(
     body: JSON.stringify({
       phone: phoneParam,
       message,
+      ...(replyToMessageId?.trim() ? { messageId: replyToMessageId.trim() } : {}),
     }),
   });
 
@@ -63,6 +65,54 @@ export async function sendZapiText(
     null;
 
   return { raw, providerMessageId };
+}
+
+async function postZapiMessageAction(
+  endpoint: "send-reaction" | "send-remove-reaction",
+  input: { phone: string; messageId: string; reaction?: string },
+) {
+  const base = process.env.ZAPI_BASE_URL ?? "https://api.z-api.io";
+  const inst = process.env.ZAPI_INSTANCE_ID;
+  const token = process.env.ZAPI_TOKEN;
+  const clientToken = process.env.ZAPI_CLIENT_TOKEN;
+  if (!inst || !token) {
+    throw new Error("ZAPI_INSTANCE_ID e ZAPI_TOKEN são obrigatórios para reagir");
+  }
+  const res = await fetch(
+    `${base.replace(/\/$/, "")}/instances/${inst}/token/${token}/${endpoint}`,
+    {
+      method: "POST",
+      signal: AbortSignal.timeout(20_000),
+      headers: {
+        "Content-Type": "application/json",
+        ...(clientToken ? { "Client-Token": clientToken } : {}),
+      },
+      body: JSON.stringify({
+        phone: formatPhoneForZapiSend(input.phone),
+        messageId: input.messageId,
+        ...(input.reaction ? { reaction: input.reaction } : {}),
+      }),
+    },
+  );
+  if (!res.ok) {
+    const responseText = await res.text();
+    throw new Error(`Z-API reaction failed: ${res.status} ${responseText}`);
+  }
+}
+
+export async function setZapiMessageReaction(input: {
+  phone: string;
+  messageId: string;
+  reaction: string | null;
+}) {
+  await postZapiMessageAction(
+    input.reaction ? "send-reaction" : "send-remove-reaction",
+    {
+      phone: input.phone,
+      messageId: input.messageId,
+      ...(input.reaction ? { reaction: input.reaction } : {}),
+    },
+  );
 }
 
 export type ZapiContactItem = {

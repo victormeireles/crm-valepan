@@ -7,6 +7,9 @@ import { isLegacyZapiReactionBody } from "@/lib/zapi/webhook-event";
 export type InboxMessageRow = {
 
   id: string;
+  provider_message_id: string | null;
+  reply_to_message_id: string | null;
+  reaction: string | null;
 
   direction: "in" | "out";
 
@@ -33,7 +36,7 @@ export type InboxMessageRow = {
 };
 
 const MESSAGES_SELECT_WITH_MEDIA =
-  "id, direction, body, event_kind, event_status, provider_call_id, media_kind, media_url, media_mime_type, media_file_name, media_storage_path, media_size_bytes, media_storage_status, message_status, read_at, sent_at";
+  "id, provider_message_id, reply_to_message_id, reaction, direction, body, event_kind, event_status, provider_call_id, media_kind, media_url, media_mime_type, media_file_name, media_storage_path, media_size_bytes, media_storage_status, message_status, read_at, sent_at";
 const MESSAGES_SELECT_WITH_LEGACY_MEDIA =
   "id, direction, body, media_kind, media_url, media_mime_type, media_file_name, message_status, read_at, sent_at";
 const MESSAGES_SELECT_LEGACY = "id, direction, body, sent_at";
@@ -46,6 +49,9 @@ type LegacyMediaRow = Omit<
   | "event_kind"
   | "event_status"
   | "provider_call_id"
+  | "provider_message_id"
+  | "reply_to_message_id"
+  | "reaction"
 >;
 
 function isMissingMediaColumnError(error?: { message?: string; code?: string } | null) {
@@ -61,7 +67,10 @@ function isMissingMediaColumnError(error?: { message?: string; code?: string } |
     msg.includes("media_storage_status") ||
     msg.includes("event_kind") ||
     msg.includes("event_status") ||
-    msg.includes("provider_call_id")
+    msg.includes("provider_call_id") ||
+    msg.includes("provider_message_id") ||
+    msg.includes("reply_to_message_id") ||
+    msg.includes("reaction")
   );
 }
 
@@ -74,6 +83,9 @@ function normalizeLegacyRows(
     event_kind: null,
     event_status: null,
     provider_call_id: null,
+    provider_message_id: null,
+    reply_to_message_id: null,
+    reaction: null,
     media_url: null,
     media_mime_type: null,
     media_file_name: null,
@@ -91,6 +103,9 @@ function normalizeLegacyMediaRows(rows: LegacyMediaRow[]): InboxMessageRow[] {
     event_kind: null,
     event_status: null,
     provider_call_id: null,
+    provider_message_id: null,
+    reply_to_message_id: null,
+    reaction: null,
     media_storage_path: null,
     media_size_bytes: null,
     media_storage_status: row.media_url ? "remote" : null,

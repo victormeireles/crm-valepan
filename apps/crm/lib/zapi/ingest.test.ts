@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseZapiWebhookPayload } from "./ingest";
+import { parseZapiWebhookPayload, planZapiWebhookAction } from "./ingest";
 import { hasZapiReactionPayload, isLegacyZapiReactionBody } from "./webhook-event";
 
 describe("parseZapiWebhookPayload media", () => {
@@ -145,5 +145,55 @@ describe("isLegacyZapiReactionBody", () => {
     expect(isLegacyZapiReactionBody("[Reação]")).toBe(true);
     expect(isLegacyZapiReactionBody("Reação: ❤️")).toBe(true);
     expect(isLegacyZapiReactionBody("Hoje você trabalha com qual gramatura de pão?")).toBe(false);
+  });
+});
+
+describe("planZapiWebhookAction deleted messages", () => {
+  it("ignores the Z-API deleted-conversation marker", () => {
+    expect(
+      planZapiWebhookAction({
+        type: "ReceivedCallback",
+        phone: "5511958761204",
+        messageId: "deleted-marker",
+        text: { message: "CONVERSA APAGADA" },
+      }),
+    ).toEqual({ action: "skip", reason: "deleted_message_event" });
+  });
+
+  it("ignores a Baileys revoke protocol event", () => {
+    expect(
+      planZapiWebhookAction({
+        type: "ReceivedCallback",
+        data: {
+          key: { remoteJid: "5511958761204@s.whatsapp.net" },
+          message: { protocolMessage: { type: 0, key: { id: "original-message" } } },
+        },
+      }),
+    ).toEqual({ action: "skip", reason: "deleted_message_event" });
+  });
+
+  it("keeps ordinary messages that merely mention deleting something", () => {
+    expect(
+      planZapiWebhookAction({
+        type: "ReceivedCallback",
+        phone: "5511958761204",
+        text: { message: "Pode apagar o pedido duplicado?" },
+      }),
+    ).toEqual({ action: "parse" });
+  });
+});
+
+describe("parseZapiWebhookPayload status callbacks", () => {
+  it("identifies a status callback with phone as a technical event", () => {
+    const parsed = parseZapiWebhookPayload({
+      type: "MessageStatusCallback",
+      phone: "5511958761204",
+      messageId: "status-only-message",
+      status: "READ",
+    });
+
+    expect(parsed?.eventType).toBe("MessageStatusCallback");
+    expect(parsed?.messageStatus).toBe("read");
+    expect(parsed?.body).toBeNull();
   });
 });

@@ -98,6 +98,7 @@ export function SendMessageForm({
   const [contactQ, setContactQ] = useState("");
   const [sendingContactPhone, setSendingContactPhone] = useState<string | null>(null);
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
+  const [replyTo, setReplyTo] = useState<{ id: string; preview: string } | null>(null);
   const attachRef = useRef<HTMLDivElement>(null);
   const emojiRef = useRef<HTMLDivElement>(null);
   const messageRef = useRef<HTMLTextAreaElement>(null);
@@ -118,6 +119,17 @@ export function SendMessageForm({
     document.addEventListener("mousedown", onPointerDown);
     return () => document.removeEventListener("mousedown", onPointerDown);
   }, []);
+
+  useEffect(() => {
+    function onReply(event: Event) {
+      const detail = (event as CustomEvent<{ conversationId: string; id: string; preview: string }>).detail;
+      if (!detail || detail.conversationId !== conversationId) return;
+      setReplyTo({ id: detail.id, preview: detail.preview });
+      requestAnimationFrame(() => messageRef.current?.focus());
+    }
+    window.addEventListener("crm:reply-message", onReply);
+    return () => window.removeEventListener("crm:reply-message", onReply);
+  }, [conversationId]);
 
   function insertEmoji(emoji: string) {
     const field = messageRef.current;
@@ -145,6 +157,7 @@ export function SendMessageForm({
         return;
       }
       form.reset();
+      setReplyTo(null);
     } catch (error) {
       console.error("[inbox] message send:", error);
       setErr("Não foi possível enviar a mensagem. Tente novamente.");
@@ -190,6 +203,7 @@ export function SendMessageForm({
     <form onSubmit={onSubmit} className="flex flex-col gap-2">
       <input type="hidden" name="conversation_id" value={conversationId} />
       <input type="hidden" name="phone" value={phone} />
+      <input type="hidden" name="reply_to_message_id" value={replyTo?.id ?? ""} />
       {err ? <p className="text-xs text-[var(--vp-error)]">{err}</p> : null}
       {uploadingAttachment ? (
         <p className="text-xs text-[var(--muted)]">Enviando anexo...</p>
@@ -208,6 +222,23 @@ export function SendMessageForm({
         className="hidden"
         onChange={(e) => onPickAttachment(e, "media")}
       />
+
+      {replyTo ? (
+        <div className="flex items-center gap-3 rounded-xl border-l-4 border-[var(--vp-wine)] bg-[rgba(35,0,4,0.05)] px-3 py-2">
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-semibold text-[var(--vp-wine)]">Respondendo à mensagem</p>
+            <p className="truncate text-xs text-[var(--muted)]">{replyTo.preview}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setReplyTo(null)}
+            className="flex size-7 items-center justify-center rounded-full text-lg text-[var(--muted)] hover:bg-black/5"
+            aria-label="Cancelar resposta"
+          >
+            ×
+          </button>
+        </div>
+      ) : null}
 
       <div className="flex items-end gap-2">
         <div className="flex min-h-12 flex-1 items-end gap-0.5 rounded-[1.5rem] border border-[var(--border)] bg-[var(--vp-paper-pure)] px-1 py-1 shadow-[var(--sh-sm)]">
