@@ -16,7 +16,11 @@ import {
 import { createServerSupabaseClient, crmTables } from "@/lib/supabase/server";
 import { registerZapiLidMapForPhoneDigits } from "@/lib/zapi/phone-exists";
 import {
+  deleteZapiMessage,
+  editZapiTextMessage,
   fetchZapiContacts,
+  forwardZapiMessage,
+  pinZapiMessage,
   sendZapiAudio,
   sendZapiContact,
   sendZapiDocument,
@@ -46,11 +50,11 @@ export async function sendConversationMessage(formData: FormData) {
   if (replyToMessageId) {
     const { data } = await crm
       .from("messages")
-      .select("id, provider_message_id")
+      .select("id, provider_message_id, deleted_at")
       .eq("id", replyToMessageId)
       .eq("conversation_id", conversationId)
       .maybeSingle();
-    if (!data) return { ok: false as const, error: "Mensagem original não encontrada." };
+    if (!data || data.deleted_at) return { ok: false as const, error: "Mensagem original não encontrada." };
     if (!data.provider_message_id) {
       return { ok: false as const, error: "Esta mensagem antiga não pode ser respondida no WhatsApp." };
     }
@@ -191,11 +195,11 @@ export async function reactToInboxMessage(input: {
   const crm = crmTables(supabase);
   const { data: message } = await crm
     .from("messages")
-    .select("id, provider_message_id, conversations!inner(phone_e164)")
+    .select("id, provider_message_id, deleted_at, conversations!inner(phone_e164)")
     .eq("id", messageId)
     .eq("conversation_id", conversationId)
     .maybeSingle();
-  if (!message?.provider_message_id) {
+  if (!message?.provider_message_id || message.deleted_at) {
     return { ok: false as const, error: "Esta mensagem não possui identificação no WhatsApp." };
   }
   const conversationValue = message.conversations as unknown as
@@ -275,6 +279,317 @@ export async function addInboxMessageToNotes(input: {
   });
   revalidatePath(`/leads/${conversation.lead_id}`);
   return { ok: true as const };
+}
+
+export async function listInboxForwardTargets(conversationId: string) {
+  const currentId = conversationId.trim();
+  const supabase = await createServerSupabaseClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false as const, error: "Não autenticado" };
+  const crm = crmTables(supabase);
+  const { data, error } = await crm
+    .from("conversations")
+    .select("id, phone_e164, group_display_name, conversation_kind")
+    .neq("id", currentId)
+    .order("updated_at", { ascending: false })
+    .limit(200);
+  if (error) return { ok: false as const, error: error.message };
+  return {
+    ok: true as const,
+    targets: (data ?? []).map((item) => ({
+      conversationId: item.id,
+      phone: item.phone_e164,
+      label: item.group_display_name?.trim() || item.phone_e164,
+      isGroup: item.conversation_kind === "group",
+    })),
+  };
+}
+
+export async function forwardInboxMessage(input: {
+  conversationId: string;
+  messageId: string;
+  targetConversationId: string;
+}) {
+  const supabase = await createServerSupabaseClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false as const, error: "Não autenticado" };
+  const crm = crmTables(supabase);
+  const { data: sourceMessage } = await crm
+    .from("messages")
+    .select("provider_message_id, deleted_at, conversations!inner(phone_e164)")
+    .eq("id", input.messageId.trim())
+    .eq("conversation_id", input.conversationId.trim())
+    .maybeSingle();
+  const { data: target } = await crm
+    .from("conversations")
+    .select("phone_e164, lead_id")
+    .eq("id", input.targetConversationId.trim())
+    .maybeSingle();
+  if (!sourceMessage?.provider_message_id || sourceMessage.deleted_at || !target?.phone_e164) {
+    return { ok: false as const, error: "Mensagem ou destino não encontrado." };
+  }
+  const sourceValue = sourceMessage.conversations as unknown as
+    | { phone_e164: string }
+    | { phone_e164: string }[];
+  const sourcePhone = Array.isArray(sourceValue)
+    ? sourceValue[0]?.phone_e164
+    : sourceValue?.phone_e164;
+  if (!sourcePhone) return { ok: false as const, error: "Conversa de origem não encontrada." };
+  try {
+    await forwardZapiMessage({
+      sourcePhone,
+      targetPhone: target.phone_e164,
+      messageId: sourceMessage.provider_message_id,
+    });
+  } catch (error) {
+    return { ok: false as const, error: error instanceof Error ? error.message : "Falha ao encaminhar." };
+  }
+  if (target.lead_id) {
+    await crm.from("activity_logs").insert({
+      entity_type: "lead",
+      entity_id: target.lead_id,
+      action: "whatsapp_message_forwarded",
+      actor_id: user.id,
+      payload: { source_message_id: input.messageId },
+    });
+  }
+  return { ok: true as const };
+}
+
+export async function editInboxMessage(input: {
+  conversationId: string;
+  messageId: string;
+  body: string;
+}) {
+  const body = input.body.trim();
+  if (!body) return { ok: false as const, error: "A mensagem não pode ficar vazia." };
+  const supabase = await createServerSupabaseClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false as const, error: "Não autenticado" };
+  const crm = crmTables(supabase);
+  const { data: message } = await crm
+    .from("messages")
+    .select("id, direction, provider_message_id, media_kind, deleted_at, conversations!inner(phone_e164, lead_id)")
+    .eq("id", input.messageId.trim())
+    .eq("conversation_id", input.conversationId.trim())
+    .maybeSingle();
+  if (!message || message.direction !== "out" || !message.provider_message_id || message.media_kind || message.deleted_at) {
+    return { ok: false as const, error: "Esta mensagem não pode ser editada." };
+  }
+  const conversationValue = message.conversations as unknown as
+    | { phone_e164: string; lead_id: string | null }
+    | { phone_e164: string; lead_id: string | null }[];
+  const conversation = Array.isArray(conversationValue) ? conversationValue[0] : conversationValue;
+  try {
+    await editZapiTextMessage({ phone: conversation.phone_e164, messageId: message.provider_message_id, message: body });
+  } catch (error) {
+    return { ok: false as const, error: error instanceof Error ? error.message : "Falha ao editar." };
+  }
+  const editedAt = new Date().toISOString();
+  const { error } = await crm.from("messages").update({ body, edited_at: editedAt }).eq("id", message.id);
+  if (error) return { ok: false as const, error: error.message };
+  if (conversation.lead_id) {
+    await crm.from("activity_logs").insert({
+      entity_type: "lead",
+      entity_id: conversation.lead_id,
+      action: "whatsapp_message_edited",
+      actor_id: user.id,
+      payload: { message_id: message.id },
+    });
+  }
+  return { ok: true as const };
+}
+
+export async function deleteInboxMessage(input: {
+  conversationId: string;
+  messageId: string;
+  deleteFromWhatsapp: boolean;
+}) {
+  const supabase = await createServerSupabaseClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false as const, error: "Não autenticado" };
+  const crm = crmTables(supabase);
+  const { data: message } = await crm
+    .from("messages")
+    .select("id, direction, provider_message_id, deleted_at, conversations!inner(phone_e164, lead_id)")
+    .eq("id", input.messageId.trim())
+    .eq("conversation_id", input.conversationId.trim())
+    .maybeSingle();
+  if (!message || message.deleted_at) return { ok: false as const, error: "Mensagem não encontrada." };
+  const conversationValue = message.conversations as unknown as
+    | { phone_e164: string; lead_id: string | null }
+    | { phone_e164: string; lead_id: string | null }[];
+  const conversation = Array.isArray(conversationValue) ? conversationValue[0] : conversationValue;
+  if (input.deleteFromWhatsapp) {
+    if (!message.provider_message_id) {
+      return { ok: false as const, error: "Esta mensagem antiga só pode ser apagada no CRM." };
+    }
+    try {
+      await deleteZapiMessage({
+        phone: conversation.phone_e164,
+        messageId: message.provider_message_id,
+        owner: message.direction === "out",
+      });
+    } catch (error) {
+      return { ok: false as const, error: error instanceof Error ? error.message : "Falha ao apagar no WhatsApp." };
+    }
+  }
+  const deletedAt = new Date().toISOString();
+  const { error } = await crm
+    .from("messages")
+    .update({ deleted_at: deletedAt, deleted_by: user.id, reaction: null })
+    .eq("id", message.id);
+  if (error) return { ok: false as const, error: error.message };
+  if (conversation.lead_id) {
+    await crm.from("activity_logs").insert({
+      entity_type: "lead",
+      entity_id: conversation.lead_id,
+      action: "whatsapp_message_deleted",
+      actor_id: user.id,
+      payload: { message_id: message.id, deleted_from_whatsapp: input.deleteFromWhatsapp },
+    });
+  }
+  return { ok: true as const };
+}
+
+export async function toggleInboxMessageFavorite(input: {
+  conversationId: string;
+  messageId: string;
+}) {
+  const supabase = await createServerSupabaseClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false as const, error: "Não autenticado" };
+  const crm = crmTables(supabase);
+  const { data: message } = await crm
+    .from("messages")
+    .select("id")
+    .eq("id", input.messageId.trim())
+    .eq("conversation_id", input.conversationId.trim())
+    .is("deleted_at", null)
+    .maybeSingle();
+  if (!message) return { ok: false as const, error: "Mensagem não encontrada." };
+  const { data: favorite } = await crm
+    .from("message_favorites")
+    .select("message_id")
+    .eq("message_id", message.id)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (favorite) {
+    const { error } = await crm.from("message_favorites").delete().eq("message_id", message.id).eq("user_id", user.id);
+    if (error) return { ok: false as const, error: error.message };
+    return { ok: true as const, favorite: false };
+  }
+  const { error } = await crm.from("message_favorites").insert({ message_id: message.id, user_id: user.id });
+  if (error) return { ok: false as const, error: error.message };
+  return { ok: true as const, favorite: true };
+}
+
+export async function setInboxMessagePinned(input: {
+  conversationId: string;
+  messageId: string;
+  pinned: boolean;
+  duration?: "24_hours" | "7_days" | "30_days";
+}) {
+  const supabase = await createServerSupabaseClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false as const, error: "Não autenticado" };
+  const crm = crmTables(supabase);
+  const { data: message } = await crm
+    .from("messages")
+    .select("id, provider_message_id, deleted_at, conversations!inner(phone_e164, lead_id)")
+    .eq("id", input.messageId.trim())
+    .eq("conversation_id", input.conversationId.trim())
+    .maybeSingle();
+  if (!message?.provider_message_id || message.deleted_at) {
+    return { ok: false as const, error: "Esta mensagem não pode ser fixada." };
+  }
+  const conversationValue = message.conversations as unknown as
+    | { phone_e164: string; lead_id: string | null }
+    | { phone_e164: string; lead_id: string | null }[];
+  const conversation = Array.isArray(conversationValue) ? conversationValue[0] : conversationValue;
+  const duration = input.duration ?? "7_days";
+  try {
+    await pinZapiMessage({
+      phone: conversation.phone_e164,
+      messageId: message.provider_message_id,
+      action: input.pinned ? "pin" : "unpin",
+      duration,
+    });
+  } catch (error) {
+    return { ok: false as const, error: error instanceof Error ? error.message : "Falha ao fixar mensagem." };
+  }
+  const pinnedAt = input.pinned ? new Date() : null;
+  const durationDays = duration === "24_hours" ? 1 : duration === "30_days" ? 30 : 7;
+  const pinnedUntil = pinnedAt
+    ? new Date(pinnedAt.getTime() + durationDays * 86_400_000).toISOString()
+    : null;
+  const { error } = await crm.from("messages").update({
+    pinned_at: pinnedAt?.toISOString() ?? null,
+    pinned_until: pinnedUntil,
+  }).eq("id", message.id);
+  if (error) return { ok: false as const, error: error.message };
+  if (conversation.lead_id) {
+    await crm.from("activity_logs").insert({
+      entity_type: "lead",
+      entity_id: conversation.lead_id,
+      action: input.pinned ? "whatsapp_message_pinned" : "whatsapp_message_unpinned",
+      actor_id: user.id,
+      payload: { message_id: message.id, duration: input.pinned ? duration : null },
+    });
+  }
+  return { ok: true as const };
+}
+
+export async function createCommercialBroadcast(input: {
+  conversationId: string;
+  messageId: string;
+  targetConversationIds: string[];
+}) {
+  const targetIds = [...new Set(input.targetConversationIds.map((id) => id.trim()).filter(Boolean))];
+  if (targetIds.length === 0 || targetIds.length > 20) {
+    return { ok: false as const, error: "Selecione entre 1 e 20 conversas." };
+  }
+  const supabase = await createServerSupabaseClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false as const, error: "Não autenticado" };
+  const crm = crmTables(supabase);
+  const { data: source } = await crm
+    .from("messages")
+    .select("provider_message_id, deleted_at, conversations!inner(phone_e164)")
+    .eq("id", input.messageId.trim())
+    .eq("conversation_id", input.conversationId.trim())
+    .maybeSingle();
+  if (!source?.provider_message_id || source.deleted_at) {
+    return { ok: false as const, error: "Mensagem de origem indisponível." };
+  }
+  const sourceValue = source.conversations as unknown as { phone_e164: string } | { phone_e164: string }[];
+  const sourcePhone = Array.isArray(sourceValue) ? sourceValue[0]?.phone_e164 : sourceValue?.phone_e164;
+  const { data: targets, error: targetsError } = await crm
+    .from("conversations")
+    .select("id, phone_e164, lead_id")
+    .in("id", targetIds);
+  if (targetsError || !sourcePhone) return { ok: false as const, error: targetsError?.message ?? "Origem não encontrada." };
+
+  let sent = 0;
+  const failed: string[] = [];
+  for (const target of targets ?? []) {
+    try {
+      await forwardZapiMessage({ sourcePhone, targetPhone: target.phone_e164, messageId: source.provider_message_id });
+      sent += 1;
+      if (target.lead_id) {
+        await crm.from("activity_logs").insert({
+          entity_type: "lead",
+          entity_id: target.lead_id,
+          action: "commercial_broadcast_sent",
+          actor_id: user.id,
+          payload: { source_message_id: input.messageId },
+        });
+      }
+    } catch {
+      failed.push(target.id);
+    }
+  }
+  return { ok: sent > 0 as boolean, sent, failed, error: sent === 0 ? "Não foi possível enviar a transmissão." : undefined };
 }
 
 export async function updateConversationClassification(input: {

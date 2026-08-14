@@ -2,8 +2,15 @@
 
 import {
   addInboxMessageToNotes,
+  createCommercialBroadcast,
+  deleteInboxMessage,
+  editInboxMessage,
+  forwardInboxMessage,
+  listInboxForwardTargets,
   loadEarlierInboxMessages,
   reactToInboxMessage,
+  setInboxMessagePinned,
+  toggleInboxMessageFavorite,
 } from "@/app/actions/inbox";
 import type { InboxMessageRow } from "@/lib/inbox/load-messages";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
@@ -177,6 +184,7 @@ function outboundStatusLabel(message: InboxMessageRow): string {
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🙏"] as const;
 
 function messagePreview(message: InboxMessageRow) {
+  if (message.deleted_at) return "Esta mensagem foi apagada";
   return (
     message.body?.trim() ||
     message.media_file_name?.trim() ||
@@ -189,13 +197,25 @@ function MessageActions({
   conversationId,
   onClose,
   onFeedback,
+  onFavoriteChange,
 }: {
   message: InboxMessageRow;
   conversationId: string;
   onClose: () => void;
   onFeedback: (message: string, error?: boolean) => void;
+  onFavoriteChange: (favorite: boolean) => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const [dialog, setDialog] = useState<"info" | "forward" | "broadcast" | "pin" | "edit" | "delete" | null>(null);
+  const [editBody, setEditBody] = useState(message.body ?? "");
+  const [targetQuery, setTargetQuery] = useState("");
+  const [targets, setTargets] = useState<Array<{
+    conversationId: string;
+    phone: string;
+    label: string;
+    isGroup: boolean;
+  }>>([]);
+  const [selectedTargetIds, setSelectedTargetIds] = useState<string[]>([]);
 
   async function react(reaction: string) {
     if (busy) return;
@@ -212,9 +232,61 @@ function MessageActions({
     onClose();
   }
 
+  async function openForward() {
+    setDialog("forward");
+    if (targets.length > 0) return;
+    setBusy(true);
+    const result = await listInboxForwardTargets(conversationId);
+    setBusy(false);
+    if (!result.ok) {
+      setDialog(null);
+      onFeedback(result.error, true);
+      return;
+    }
+    setTargets(result.targets);
+  }
+
+  async function openBroadcast() {
+    setDialog("broadcast");
+    setSelectedTargetIds([]);
+    if (targets.length > 0) return;
+    setBusy(true);
+    const result = await listInboxForwardTargets(conversationId);
+    setBusy(false);
+    if (!result.ok) {
+      setDialog(null);
+      onFeedback(result.error, true);
+      return;
+    }
+    setTargets(result.targets.filter((target) => !target.isGroup));
+  }
+
+  const filteredTargets = targets.filter((target) =>
+    `${target.label} ${target.phone}`.toLocaleLowerCase("pt-BR").includes(targetQuery.trim().toLocaleLowerCase("pt-BR")),
+  );
+
+  const canEdit =
+    message.direction === "out" &&
+    !!message.provider_message_id &&
+    !message.media_kind &&
+    !message.deleted_at;
+
+  const dialogTitle =
+    dialog === "info"
+      ? "Dados da mensagem"
+      : dialog === "forward"
+        ? "Encaminhar mensagem"
+        : dialog === "broadcast"
+          ? "Nova transmissão comercial"
+          : dialog === "pin"
+            ? "Fixar mensagem"
+        : dialog === "edit"
+          ? "Editar mensagem"
+          : "Apagar mensagem";
+
   return (
     <div
-      className={`absolute top-full z-40 mt-2 w-[min(19rem,calc(100vw-2rem))] ${
+      className={`absolute bottom-full z-40 mb-2 w-[min(19rem,calc(100vw-2rem))] ${
         message.direction === "out" ? "right-0" : "left-0"
       }`}
       onClick={(event) => event.stopPropagation()}
@@ -224,7 +296,7 @@ function MessageActions({
           <button
             key={reaction}
             type="button"
-            disabled={busy || !message.provider_message_id}
+            disabled={busy || !message.provider_message_id || !!message.deleted_at}
             onClick={() => void react(reaction)}
             className={`flex size-9 items-center justify-center rounded-full text-xl transition hover:scale-110 hover:bg-black/5 disabled:cursor-not-allowed disabled:opacity-40 ${
               message.reaction === reaction ? "bg-[rgba(35,0,4,0.10)] ring-1 ring-[var(--vp-wine)]/30" : ""
@@ -236,10 +308,13 @@ function MessageActions({
         ))}
       </div>
       <div role="menu" className="overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--vp-paper-pure)] p-1.5 shadow-[var(--sh-lg)]">
+        <button type="button" role="menuitem" onClick={() => setDialog("info")} className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-black/5">
+          ⓘ Dados da mensagem
+        </button>
         <button
           type="button"
           role="menuitem"
-          disabled={!message.provider_message_id}
+          disabled={!message.provider_message_id || !!message.deleted_at}
           onClick={() => {
             window.dispatchEvent(new CustomEvent("crm:reply-message", {
               detail: { conversationId, id: message.id, preview: messagePreview(message) },
@@ -269,7 +344,68 @@ function MessageActions({
         <button
           type="button"
           role="menuitem"
-          disabled={busy}
+          disabled={!message.provider_message_id || !!message.deleted_at || busy}
+          onClick={() => void openForward()}
+          className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-black/5 disabled:opacity-40"
+        >
+          ➜ Encaminhar
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          disabled={!message.provider_message_id || !!message.deleted_at || busy}
+          onClick={() => void openBroadcast()}
+          className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-black/5 disabled:opacity-40"
+        >
+          ◉ Nova transmissão comercial
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          disabled={!message.provider_message_id || !!message.deleted_at || busy}
+          onClick={async () => {
+            if (!message.pinned_at) return setDialog("pin");
+            setBusy(true);
+            const result = await setInboxMessagePinned({ conversationId, messageId: message.id, pinned: false });
+            setBusy(false);
+            if (!result.ok) return onFeedback(result.error, true);
+            onFeedback("Mensagem desafixada.");
+            onClose();
+          }}
+          className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-black/5 disabled:opacity-40"
+        >
+          ⚑ {message.pinned_at ? "Desafixar" : "Fixar"}
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          disabled={!!message.deleted_at || busy}
+          onClick={async () => {
+            setBusy(true);
+            const result = await toggleInboxMessageFavorite({ conversationId, messageId: message.id });
+            setBusy(false);
+            if (!result.ok) return onFeedback(result.error, true);
+            onFavoriteChange(result.favorite);
+            onFeedback(result.favorite ? "Mensagem adicionada aos favoritos." : "Mensagem removida dos favoritos.");
+            onClose();
+          }}
+          className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-black/5 disabled:opacity-40"
+        >
+          ☆ {message.is_favorite ? "Remover dos favoritos" : "Favoritar"}
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          disabled={!canEdit || busy}
+          onClick={() => setDialog("edit")}
+          className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-black/5 disabled:opacity-40"
+        >
+          ✎ Editar
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          disabled={busy || !!message.deleted_at}
           onClick={async () => {
             setBusy(true);
             const result = await addInboxMessageToNotes({ conversationId, messageId: message.id });
@@ -282,7 +418,184 @@ function MessageActions({
         >
           ＋ Adicionar às notas
         </button>
+        <div className="my-1 border-t border-[var(--border)]" />
+        <button
+          type="button"
+          role="menuitem"
+          disabled={!!message.deleted_at || busy}
+          onClick={() => setDialog("delete")}
+          className="w-full rounded-lg px-3 py-2 text-left text-sm text-[var(--vp-error)] hover:bg-red-50 disabled:opacity-40"
+        >
+          ⌫ Apagar
+        </button>
       </div>
+
+      {dialog ? (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/45 p-4" role="presentation" onMouseDown={() => !busy && setDialog(null)}>
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-label={dialogTitle}
+            className="max-h-[min(80vh,680px)] w-full max-w-md overflow-y-auto rounded-2xl border border-[var(--border)] bg-[var(--vp-paper-pure)] p-4 text-[var(--foreground)] shadow-2xl"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <h2 className="text-base font-semibold">{dialogTitle}</h2>
+              <button type="button" disabled={busy} onClick={() => setDialog(null)} className="flex size-8 items-center justify-center rounded-full text-xl text-[var(--muted)] hover:bg-black/5">×</button>
+            </div>
+
+            {dialog === "info" ? (
+              <dl className="grid grid-cols-[auto,1fr] gap-x-4 gap-y-3 text-sm">
+                <dt className="text-[var(--muted)]">Direção</dt><dd>{message.direction === "out" ? "Enviada" : "Recebida"}</dd>
+                <dt className="text-[var(--muted)]">Data</dt><dd>{new Date(message.sent_at).toLocaleString("pt-BR")}</dd>
+                <dt className="text-[var(--muted)]">Status</dt><dd>{message.deleted_at ? "Apagada" : message.direction === "out" ? outboundStatusLabel(message) : "Recebida"}</dd>
+                <dt className="text-[var(--muted)]">Conteúdo</dt><dd>{message.media_kind ?? "Texto"}</dd>
+                {message.edited_at ? <><dt className="text-[var(--muted)]">Editada em</dt><dd>{new Date(message.edited_at).toLocaleString("pt-BR")}</dd></> : null}
+                {message.read_at ? <><dt className="text-[var(--muted)]">Lida em</dt><dd>{new Date(message.read_at).toLocaleString("pt-BR")}</dd></> : null}
+                <dt className="text-[var(--muted)]">ID do CRM</dt><dd className="break-all font-mono text-xs">{message.id}</dd>
+                <dt className="text-[var(--muted)]">ID WhatsApp</dt><dd className="break-all font-mono text-xs">{message.provider_message_id ?? "Indisponível"}</dd>
+              </dl>
+            ) : null}
+
+            {dialog === "forward" ? (
+              <div className="space-y-3">
+                <input type="search" value={targetQuery} onChange={(event) => setTargetQuery(event.target.value)} placeholder="Buscar conversa ou telefone" className="w-full rounded-xl border border-[var(--border)] bg-[var(--vp-paper)] px-3 py-2 text-sm outline-none focus:border-[var(--vp-wine)]" autoFocus />
+                <div className="max-h-72 overflow-y-auto rounded-xl border border-[var(--border)]">
+                  {busy ? <p className="p-3 text-sm text-[var(--muted)]">Carregando conversas…</p> : null}
+                  {!busy && filteredTargets.length === 0 ? <p className="p-3 text-sm text-[var(--muted)]">Nenhuma conversa encontrada.</p> : null}
+                  {filteredTargets.map((target) => (
+                    <button
+                      key={target.conversationId}
+                      type="button"
+                      disabled={busy}
+                      onClick={async () => {
+                        setBusy(true);
+                        const result = await forwardInboxMessage({ conversationId, messageId: message.id, targetConversationId: target.conversationId });
+                        setBusy(false);
+                        if (!result.ok) return onFeedback(result.error, true);
+                        onFeedback(`Mensagem encaminhada para ${target.label}.`);
+                        onClose();
+                      }}
+                      className="flex w-full items-center justify-between gap-3 border-b border-[var(--border)] px-3 py-2.5 text-left text-sm last:border-b-0 hover:bg-black/5 disabled:opacity-40"
+                    >
+                      <span className="truncate">{target.isGroup ? "Grupo: " : ""}{target.label}</span>
+                      <span className="shrink-0 text-xs text-[var(--muted)]">{target.phone}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            {dialog === "broadcast" ? (
+              <div className="space-y-3">
+                <p className="text-sm text-[var(--muted)]">Selecione até 20 conversas. A mensagem será encaminhada individualmente para cada contato.</p>
+                <input type="search" value={targetQuery} onChange={(event) => setTargetQuery(event.target.value)} placeholder="Buscar contato ou telefone" className="w-full rounded-xl border border-[var(--border)] bg-[var(--vp-paper)] px-3 py-2 text-sm outline-none focus:border-[var(--vp-wine)]" autoFocus />
+                <div className="max-h-64 overflow-y-auto rounded-xl border border-[var(--border)]">
+                  {busy && targets.length === 0 ? <p className="p-3 text-sm text-[var(--muted)]">Carregando conversas…</p> : null}
+                  {filteredTargets.map((target) => {
+                    const selected = selectedTargetIds.includes(target.conversationId);
+                    return (
+                      <label key={target.conversationId} className="flex cursor-pointer items-center gap-3 border-b border-[var(--border)] px-3 py-2.5 text-sm last:border-b-0 hover:bg-black/5">
+                        <input
+                          type="checkbox"
+                          checked={selected}
+                          disabled={!selected && selectedTargetIds.length >= 20}
+                          onChange={() => setSelectedTargetIds((current) => selected ? current.filter((id) => id !== target.conversationId) : [...current, target.conversationId])}
+                        />
+                        <span className="min-w-0 flex-1 truncate">{target.label}</span>
+                        <span className="text-xs text-[var(--muted)]">{target.phone}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-xs text-[var(--muted)]">{selectedTargetIds.length}/20 selecionadas</span>
+                  <button
+                    type="button"
+                    disabled={busy || selectedTargetIds.length === 0}
+                    onClick={async () => {
+                      if (!window.confirm(`Enviar esta mensagem para ${selectedTargetIds.length} conversa(s)?`)) return;
+                      setBusy(true);
+                      const result = await createCommercialBroadcast({ conversationId, messageId: message.id, targetConversationIds: selectedTargetIds });
+                      setBusy(false);
+                      if (!result.ok) return onFeedback(result.error ?? "Falha na transmissão.", true);
+                      onFeedback(`Transmissão concluída: ${result.sent} envio(s)${result.failed.length ? `, ${result.failed.length} falha(s)` : ""}.`);
+                      onClose();
+                    }}
+                    className="rounded-xl bg-[var(--vp-wine)] px-4 py-2 text-sm font-semibold text-[var(--vp-gold)] disabled:opacity-40"
+                  >
+                    {busy ? "Enviando…" : "Enviar transmissão"}
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            {dialog === "pin" ? (
+              <div className="space-y-3 text-sm">
+                <p>Por quanto tempo esta mensagem deve permanecer fixada?</p>
+                {([ ["24_hours", "24 horas"], ["7_days", "7 dias"], ["30_days", "30 dias"] ] as const).map(([duration, label]) => (
+                  <button
+                    key={duration}
+                    type="button"
+                    disabled={busy}
+                    onClick={async () => {
+                      setBusy(true);
+                      const result = await setInboxMessagePinned({ conversationId, messageId: message.id, pinned: true, duration });
+                      setBusy(false);
+                      if (!result.ok) return onFeedback(result.error, true);
+                      onFeedback(`Mensagem fixada por ${label}.`);
+                      onClose();
+                    }}
+                    className="w-full rounded-xl border border-[var(--border)] px-4 py-2.5 text-left font-semibold hover:bg-black/5 disabled:opacity-40"
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+
+            {dialog === "edit" ? (
+              <form onSubmit={async (event) => {
+                event.preventDefault();
+                setBusy(true);
+                const result = await editInboxMessage({ conversationId, messageId: message.id, body: editBody });
+                setBusy(false);
+                if (!result.ok) return onFeedback(result.error, true);
+                onFeedback("Mensagem editada no WhatsApp.");
+                onClose();
+              }} className="space-y-3">
+                <textarea value={editBody} onChange={(event) => setEditBody(event.target.value)} rows={5} autoFocus className="w-full resize-y rounded-xl border border-[var(--border)] bg-[var(--vp-paper)] px-3 py-2 text-sm outline-none focus:border-[var(--vp-wine)]" />
+                <div className="flex justify-end gap-2">
+                  <button type="button" onClick={() => setDialog(null)} className="rounded-xl px-4 py-2 text-sm hover:bg-black/5">Cancelar</button>
+                  <button type="submit" disabled={busy || !editBody.trim() || editBody.trim() === message.body?.trim()} className="rounded-xl bg-[var(--vp-wine)] px-4 py-2 text-sm font-semibold text-[var(--vp-gold)] disabled:opacity-40">{busy ? "Salvando…" : "Salvar edição"}</button>
+                </div>
+              </form>
+            ) : null}
+
+            {dialog === "delete" ? (
+              <div className="space-y-3 text-sm">
+                <p>Escolha onde esta mensagem deve ser apagada. O CRM manterá somente o registro de auditoria.</p>
+                <button type="button" disabled={busy || !message.provider_message_id} onClick={async () => {
+                  setBusy(true);
+                  const result = await deleteInboxMessage({ conversationId, messageId: message.id, deleteFromWhatsapp: true });
+                  setBusy(false);
+                  if (!result.ok) return onFeedback(result.error, true);
+                  onFeedback("Mensagem apagada no WhatsApp e no CRM.");
+                  onClose();
+                }} className="w-full rounded-xl bg-[var(--vp-error)] px-4 py-2.5 font-semibold text-white disabled:opacity-40">Apagar também no WhatsApp</button>
+                <button type="button" disabled={busy} onClick={async () => {
+                  setBusy(true);
+                  const result = await deleteInboxMessage({ conversationId, messageId: message.id, deleteFromWhatsapp: false });
+                  setBusy(false);
+                  if (!result.ok) return onFeedback(result.error, true);
+                  onFeedback("Mensagem ocultada no CRM.");
+                  onClose();
+                }} className="w-full rounded-xl border border-[var(--border)] px-4 py-2.5 font-semibold hover:bg-black/5 disabled:opacity-40">Apagar somente no CRM</button>
+              </div>
+            ) : null}
+          </section>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -354,10 +667,17 @@ export function ChatThread({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedMessageId, setSelectedMessageId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{ text: string; error: boolean } | null>(null);
+  const [favoriteOverrides, setFavoriteOverrides] = useState<Record<string, boolean>>({});
 
   const messages = useMemo(
     () => mergeById(mergeById(olderMessages, initialMessages), liveMessages),
     [olderMessages, initialMessages, liveMessages],
+  );
+  const pinnedMessage = useMemo(
+    () => [...messages].reverse().find((message) =>
+      message.pinned_at && !message.deleted_at && (!message.pinned_until || message.pinned_until > new Date().toISOString()),
+    ) ?? null,
+    [messages],
   );
 
   useEffect(() => {
@@ -367,6 +687,7 @@ export function ChatThread({
     setLoadError(null);
     setSelectedMessageId(null);
     setFeedback(null);
+    setFavoriteOverrides({});
   }, [conversationId, hasMoreOlderInitial]);
 
   useEffect(() => {
@@ -380,6 +701,11 @@ export function ChatThread({
         provider_message_id: row.provider_message_id ?? null,
         reply_to_message_id: row.reply_to_message_id ?? null,
         reaction: row.reaction ?? null,
+        edited_at: row.edited_at ?? null,
+        deleted_at: row.deleted_at ?? null,
+        pinned_at: row.pinned_at ?? null,
+        pinned_until: row.pinned_until ?? null,
+        is_favorite: row.is_favorite ?? false,
         direction: row.direction,
         body: row.body ?? null,
         event_kind: row.event_kind ?? null,
@@ -507,6 +833,16 @@ export function ChatThread({
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <DocumentSearch conversationId={conversationId} />
+      {pinnedMessage ? (
+        <button
+          type="button"
+          onClick={() => document.getElementById(`message-${pinnedMessage.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" })}
+          className="mb-1 flex items-center gap-2 rounded-xl border-l-4 border-[var(--vp-wine)] bg-[rgba(35,0,4,0.05)] px-3 py-2 text-left text-xs hover:bg-[rgba(35,0,4,0.08)]"
+        >
+          <span aria-hidden>⚑</span>
+          <span className="min-w-0 flex-1 truncate"><strong>Mensagem fixada:</strong> {messagePreview(pinnedMessage)}</span>
+        </button>
+      ) : null}
       {feedback ? (
         <div
           role={feedback.error ? "alert" : "status"}
@@ -552,6 +888,7 @@ export function ChatThread({
           const repliedMessage = m.reply_to_message_id
             ? messages.find((candidate) => candidate.id === m.reply_to_message_id) ?? null
             : null;
+          const isFavorite = favoriteOverrides[m.id] ?? m.is_favorite;
           return (
             <div key={m.id} id={`message-${m.id}`} className="w-full space-y-3">
               {idx === firstNewSinceReadIdx && firstNewSinceReadIdx >= 0 ? (
@@ -598,7 +935,11 @@ export function ChatThread({
                     <p className="line-clamp-2 opacity-80">{messagePreview(repliedMessage)}</p>
                   </div>
                 ) : null}
-                {contactCard ? (
+                {m.deleted_at ? (
+                  <p className="flex items-center gap-2 italic opacity-70">
+                    <span aria-hidden>⌫</span> Esta mensagem foi apagada
+                  </p>
+                ) : contactCard ? (
                   <div className="w-[min(100%,360px)] overflow-hidden rounded-xl border border-[rgba(80,20,24,0.22)] bg-[#f1dddd] text-[#3e1317]">
                     <div className="flex items-center gap-2 border-b border-[rgba(80,20,24,0.14)] px-3 py-2">
                       <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#d7acac] text-xs font-semibold text-[#4a171c]">
@@ -657,18 +998,30 @@ export function ChatThread({
                       minute: "2-digit",
                     })}
                   </time>
+                  {m.edited_at && !m.deleted_at ? <span className="opacity-70">· editada</span> : null}
                 </div>
-                {m.reaction ? (
+                {m.reaction && !m.deleted_at ? (
                   <span className={`absolute -bottom-3 ${out ? "left-2" : "right-2"} rounded-full border border-[var(--border)] bg-[var(--vp-paper-pure)] px-1.5 py-0.5 text-sm shadow-sm`}>
                     {m.reaction}
                   </span>
                 ) : null}
+                {m.pinned_at && !m.deleted_at ? (
+                  <span className={`absolute -top-3 ${out ? "left-2" : "right-2"} rounded-full border border-[var(--border)] bg-[var(--vp-paper-pure)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--vp-wine)] shadow-sm`}>
+                    ⚑ Fixada
+                  </span>
+                ) : null}
+                {isFavorite && !m.deleted_at ? (
+                  <span className={`absolute -top-3 ${out ? "right-2" : "left-2"} rounded-full border border-[var(--border)] bg-[var(--vp-paper-pure)] px-1.5 py-0.5 text-xs text-[var(--vp-gold-deep)] shadow-sm`} title="Favorita">
+                    ★
+                  </span>
+                ) : null}
                 {selectedMessageId === m.id ? (
                   <MessageActions
-                    message={m}
+                    message={{ ...m, is_favorite: isFavorite }}
                     conversationId={conversationId}
                     onClose={() => setSelectedMessageId(null)}
                     onFeedback={(text, error = false) => setFeedback({ text, error })}
+                    onFavoriteChange={(favorite) => setFavoriteOverrides((current) => ({ ...current, [m.id]: favorite }))}
                   />
                 ) : null}
               </div>

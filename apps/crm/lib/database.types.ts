@@ -213,6 +213,11 @@ export interface Database {
           provider_message_id: string | null;
           reply_to_message_id: string | null;
           reaction: string | null;
+          edited_at: string | null;
+          deleted_at: string | null;
+          deleted_by: string | null;
+          pinned_at: string | null;
+          pinned_until: string | null;
           event_kind: "whatsapp_call" | null;
           event_status: "ringing" | "missed_voice" | "missed_video" | null;
           provider_call_id: string | null;
@@ -236,6 +241,11 @@ export interface Database {
           provider_message_id?: string | null;
           reply_to_message_id?: string | null;
           reaction?: string | null;
+          edited_at?: string | null;
+          deleted_at?: string | null;
+          deleted_by?: string | null;
+          pinned_at?: string | null;
+          pinned_until?: string | null;
           event_kind?: "whatsapp_call" | null;
           event_status?: "ringing" | "missed_voice" | "missed_video" | null;
           provider_call_id?: string | null;
@@ -243,6 +253,19 @@ export interface Database {
           read_at?: string | null;
           sent_at?: string;
         };
+      };
+      message_favorites: {
+        Row: {
+          message_id: string;
+          user_id: string;
+          created_at: string;
+        };
+        Insert: {
+          message_id: string;
+          user_id: string;
+          created_at?: string;
+        };
+        Update: never;
       };
       document_insights: {
         Row: {

@@ -8,6 +8,7 @@ import {
   parseZapiWebhookPayload,
   planZapiWebhookAction,
 } from "@/lib/zapi/ingest";
+import { syncZapiMessageEvent } from "@/lib/zapi/sync-message-event";
 
 const ZAPI_LOG_JSON_MAX = 56_000;
 
@@ -126,6 +127,12 @@ export async function POST(req: Request) {
     data: { rootKeyCount: rootKeys.length, rootKeys },
   });
   // #endregion
+
+  const syncedEvent = await syncZapiMessageEvent(body);
+  if (syncedEvent.handled) {
+    revalidatePath("/inbox");
+    return NextResponse.json({ ok: true as const, synced: syncedEvent.kind, matched: syncedEvent.matched });
+  }
 
   const intent = planZapiWebhookAction(body);
   // #region agent log

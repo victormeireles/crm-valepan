@@ -10,6 +10,11 @@ export type InboxMessageRow = {
   provider_message_id: string | null;
   reply_to_message_id: string | null;
   reaction: string | null;
+  edited_at: string | null;
+  deleted_at: string | null;
+  pinned_at: string | null;
+  pinned_until: string | null;
+  is_favorite: boolean;
 
   direction: "in" | "out";
 
@@ -36,7 +41,7 @@ export type InboxMessageRow = {
 };
 
 const MESSAGES_SELECT_WITH_MEDIA =
-  "id, provider_message_id, reply_to_message_id, reaction, direction, body, event_kind, event_status, provider_call_id, media_kind, media_url, media_mime_type, media_file_name, media_storage_path, media_size_bytes, media_storage_status, message_status, read_at, sent_at";
+  "id, provider_message_id, reply_to_message_id, reaction, edited_at, deleted_at, pinned_at, pinned_until, direction, body, event_kind, event_status, provider_call_id, media_kind, media_url, media_mime_type, media_file_name, media_storage_path, media_size_bytes, media_storage_status, message_status, read_at, sent_at, message_favorites(user_id)";
 const MESSAGES_SELECT_WITH_LEGACY_MEDIA =
   "id, direction, body, media_kind, media_url, media_mime_type, media_file_name, message_status, read_at, sent_at";
 const MESSAGES_SELECT_LEGACY = "id, direction, body, sent_at";
@@ -52,6 +57,11 @@ type LegacyMediaRow = Omit<
   | "provider_message_id"
   | "reply_to_message_id"
   | "reaction"
+  | "edited_at"
+  | "deleted_at"
+  | "pinned_at"
+  | "pinned_until"
+  | "is_favorite"
 >;
 
 function isMissingMediaColumnError(error?: { message?: string; code?: string } | null) {
@@ -71,6 +81,11 @@ function isMissingMediaColumnError(error?: { message?: string; code?: string } |
     msg.includes("provider_message_id") ||
     msg.includes("reply_to_message_id") ||
     msg.includes("reaction")
+    || msg.includes("edited_at")
+    || msg.includes("deleted_at")
+    || msg.includes("pinned_at")
+    || msg.includes("pinned_until")
+    || msg.includes("message_favorites")
   );
 }
 
@@ -86,6 +101,11 @@ function normalizeLegacyRows(
     provider_message_id: null,
     reply_to_message_id: null,
     reaction: null,
+    edited_at: null,
+    deleted_at: null,
+    pinned_at: null,
+    pinned_until: null,
+    is_favorite: false,
     media_url: null,
     media_mime_type: null,
     media_file_name: null,
@@ -106,6 +126,11 @@ function normalizeLegacyMediaRows(rows: LegacyMediaRow[]): InboxMessageRow[] {
     provider_message_id: null,
     reply_to_message_id: null,
     reaction: null,
+    edited_at: null,
+    deleted_at: null,
+    pinned_at: null,
+    pinned_until: null,
+    is_favorite: false,
     media_storage_path: null,
     media_size_bytes: null,
     media_storage_status: row.media_url ? "remote" : null,
@@ -114,6 +139,16 @@ function normalizeLegacyMediaRows(rows: LegacyMediaRow[]): InboxMessageRow[] {
 
 
 type CrmClient = ReturnType<typeof crmTables>;
+
+function normalizeLoadedRows(rows: unknown[]): InboxMessageRow[] {
+  return rows.map((value) => {
+    const row = value as InboxMessageRow & { message_favorites?: unknown[] };
+    return {
+      ...row,
+      is_favorite: Array.isArray(row.message_favorites) && row.message_favorites.length > 0,
+    };
+  });
+}
 
 
 
@@ -211,7 +246,7 @@ export async function loadRecentConversationMessages(
 
 
 
-  const rows = (res.data ?? []) as InboxMessageRow[];
+  const rows = normalizeLoadedRows(res.data ?? []);
 
   const hasMoreOlder = rows.length > INBOX_MESSAGE_PAGE_SIZE;
 
@@ -301,7 +336,7 @@ export async function loadOlderMessagesPage(
 
 
 
-  const rows = ((res.data ?? []) as InboxMessageRow[])
+  const rows = normalizeLoadedRows(res.data ?? [])
     .filter((row) => !isLegacyZapiReactionBody(row.body))
     .reverse();
 

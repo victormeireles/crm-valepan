@@ -115,6 +115,109 @@ export async function setZapiMessageReaction(input: {
   );
 }
 
+function zapiConfig() {
+  const base = process.env.ZAPI_BASE_URL ?? "https://api.z-api.io";
+  const instanceId = process.env.ZAPI_INSTANCE_ID;
+  const token = process.env.ZAPI_TOKEN;
+  const clientToken = process.env.ZAPI_CLIENT_TOKEN;
+  if (!instanceId || !token) {
+    throw new Error("ZAPI_INSTANCE_ID e ZAPI_TOKEN são obrigatórios");
+  }
+  return {
+    root: `${base.replace(/\/$/, "")}/instances/${instanceId}/token/${token}`,
+    headers: {
+      "Content-Type": "application/json",
+      ...(clientToken ? { "Client-Token": clientToken } : {}),
+    },
+  };
+}
+
+export async function editZapiTextMessage(input: {
+  phone: string;
+  messageId: string;
+  message: string;
+}) {
+  const config = zapiConfig();
+  const response = await fetch(`${config.root}/send-text`, {
+    method: "POST",
+    signal: AbortSignal.timeout(20_000),
+    headers: config.headers,
+    body: JSON.stringify({
+      phone: formatPhoneForZapiSend(input.phone),
+      message: input.message,
+      editMessageId: input.messageId,
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(`Z-API edit failed: ${response.status} ${await response.text()}`);
+  }
+}
+
+export async function forwardZapiMessage(input: {
+  targetPhone: string;
+  sourcePhone: string;
+  messageId: string;
+}) {
+  const config = zapiConfig();
+  const response = await fetch(`${config.root}/forward-message`, {
+    method: "POST",
+    signal: AbortSignal.timeout(20_000),
+    headers: config.headers,
+    body: JSON.stringify({
+      phone: formatPhoneForZapiSend(input.targetPhone),
+      messagePhone: formatPhoneForZapiSend(input.sourcePhone),
+      messageId: input.messageId,
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(`Z-API forward failed: ${response.status} ${await response.text()}`);
+  }
+}
+
+export async function deleteZapiMessage(input: {
+  phone: string;
+  messageId: string;
+  owner: boolean;
+}) {
+  const config = zapiConfig();
+  const query = new URLSearchParams({
+    phone: formatPhoneForZapiSend(input.phone),
+    messageId: input.messageId,
+    owner: String(input.owner),
+  });
+  const response = await fetch(`${config.root}/messages?${query.toString()}`, {
+    method: "DELETE",
+    signal: AbortSignal.timeout(20_000),
+    headers: config.headers,
+  });
+  if (!response.ok) {
+    throw new Error(`Z-API delete failed: ${response.status} ${await response.text()}`);
+  }
+}
+
+export async function pinZapiMessage(input: {
+  phone: string;
+  messageId: string;
+  action: "pin" | "unpin";
+  duration?: "24_hours" | "7_days" | "30_days";
+}) {
+  const config = zapiConfig();
+  const response = await fetch(`${config.root}/pin-message`, {
+    method: "POST",
+    signal: AbortSignal.timeout(20_000),
+    headers: config.headers,
+    body: JSON.stringify({
+      phone: formatPhoneForZapiSend(input.phone),
+      messageId: input.messageId,
+      messageAction: input.action,
+      pinMessageDuration: input.duration ?? "7_days",
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(`Z-API pin failed: ${response.status} ${await response.text()}`);
+  }
+}
+
 export type ZapiContactItem = {
   phone: string;
   name: string | null;

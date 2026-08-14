@@ -8,11 +8,10 @@ import {
 } from "@/lib/pipeline-signals";
 import { nestOne } from "@/lib/supabase/nested";
 import { createServerSupabaseClient, crmTables } from "@/lib/supabase/server";
-import { PaginationNav } from "@/components/pagination-nav";
 import { Suspense } from "react";
 import { PipelineBoard, type PipelineCardDTO, type PipelineStageDTO } from "./pipeline-board";
 
-const PAGE_SIZE = 60;
+const OPPORTUNITY_BATCH_SIZE = 500;
 import { PipelineFilters } from "./pipeline-filters";
 
 export const dynamic = "force-dynamic";
@@ -118,9 +117,6 @@ export default async function PipelinePage({
   const signalRaw = typeof sp.signal === "string" ? sp.signal.trim() : "";
   const signalFilter: PipelineSignal | null = isPipelineSignal(signalRaw) ? signalRaw : null;
   const query = typeof sp.q === "string" ? sp.q : "";
-  const requestedPage = typeof sp.page === "string" ? Number.parseInt(sp.page, 10) : 1;
-  const page = Number.isFinite(requestedPage) && requestedPage > 0 ? requestedPage : 1;
-
   const supabase = await createServerSupabaseClient();
   const {
     data: { user },
@@ -128,30 +124,43 @@ export default async function PipelinePage({
   const crm = crmTables(supabase);
 
   const ownerUserId = mineOnly && user?.id ? user.id : ownerParam.length > 0 ? ownerParam : null;
-  const opportunitiesBase = crm
-    .from("opportunities")
-    .select(
-      "id, title, lead_id, stage_id, lost_reason, owner_id, updated_at, next_action_at, pipeline_stages(name, sort_order, is_final), leads(phone_e164, owner_id, client_category, excluded_from_pipeline_at, contacts(full_name), companies(name), distributors(name))",
-      { count: "exact" },
-    )
-    .order("updated_at", { ascending: false });
-  const opportunitiesQuery = (ownerUserId
-    ? opportunitiesBase.eq("owner_id", ownerUserId)
-    : opportunitiesBase
-  ).range((page - 1) * PAGE_SIZE, page * PAGE_SIZE - 1);
-
   const [
     { data: stageRows },
-    { data: rows, count: opportunitiesCount },
     { data: teamProfiles },
   ] = await Promise.all([
     crm
       .from("pipeline_stages")
       .select("id, name, sort_order, is_final")
       .order("sort_order", { ascending: true }),
-    opportunitiesQuery,
     crm.from("profiles").select("id, full_name, role").order("full_name", { ascending: true }),
   ]);
+
+  // O funil precisa distribuir oportunidades entre colunas antes de exibi-las.
+  // Paginar globalmente aqui fazia as etapas mais recentes consumirem todo o
+  // lote e escondia etapas existentes (por exemplo, NEGOCIAÇÃO aparecia com 0).
+  const rows: Array<Parameters<typeof mapRowToCard>[0]> = [];
+  let opportunitiesCount = 0;
+  for (let offset = 0; ; offset += OPPORTUNITY_BATCH_SIZE) {
+    const opportunitiesBase = crm
+      .from("opportunities")
+      .select(
+        "id, title, lead_id, stage_id, lost_reason, owner_id, updated_at, next_action_at, pipeline_stages(name, sort_order, is_final), leads(phone_e164, owner_id, client_category, excluded_from_pipeline_at, contacts(full_name), companies(name), distributors(name))",
+        { count: "exact" },
+      )
+      .order("updated_at", { ascending: false });
+    const opportunitiesQuery = ownerUserId
+      ? opportunitiesBase.eq("owner_id", ownerUserId)
+      : opportunitiesBase;
+    const result = await opportunitiesQuery.range(
+      offset,
+      offset + OPPORTUNITY_BATCH_SIZE - 1,
+    );
+    if (result.error) throw result.error;
+    if (offset === 0) opportunitiesCount = result.count ?? 0;
+    const batch = (result.data ?? []) as unknown as Array<Parameters<typeof mapRowToCard>[0]>;
+    rows.push(...batch);
+    if (batch.length < OPPORTUNITY_BATCH_SIZE) break;
+  }
 
   const leadIds = [...new Set((rows ?? []).map((r) => r.lead_id).filter((id): id is string => !!id))];
 
@@ -249,13 +258,6 @@ export default async function PipelinePage({
       ) : (
         <PipelineBoard stages={stages} initialCards={filteredCards} />
       )}
-      <PaginationNav
-        pathname="/pipeline"
-        page={page}
-        pageSize={PAGE_SIZE}
-        totalCount={opportunitiesCount ?? 0}
-        searchParams={sp}
-      />
     </div>
   );
 }

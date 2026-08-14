@@ -1463,6 +1463,8 @@ export async function ingestZapiMessage(parsed: ZapiInbound) {
       const newBody = typeof parsed.body === "string" ? parsed.body.trim() : "";
       const oldBody = existing.body?.trim() ?? "";
       const shouldEnrichBody = newBody.length > 0 && oldBody.length === 0;
+      const shouldSyncEditedBody =
+        direction === "out" && newBody.length > 0 && oldBody.length > 0 && newBody !== oldBody;
       const shouldEnrichMedia =
         resolvedMedia != null &&
         (
@@ -1472,14 +1474,15 @@ export async function ingestZapiMessage(parsed: ZapiInbound) {
           (!existing.media_mime_type && !!resolvedMedia.mimeType) ||
           (!existing.media_file_name && !!resolvedMedia.fileName)
         );
-      if (shouldEnrichBody || shouldEnrichMedia) {
+      if (shouldEnrichBody || shouldSyncEditedBody || shouldEnrichMedia) {
         const existingMediaFields = shouldEnrichMedia
           ? await mediaFieldsForMessage(existing.id)
           : {};
         await crm
           .from("messages")
           .update({
-            ...(shouldEnrichBody ? { body: newBody } : {}),
+            ...(shouldEnrichBody || shouldSyncEditedBody ? { body: newBody } : {}),
+            ...(shouldSyncEditedBody ? { edited_at: new Date().toISOString() } : {}),
             ...(direction === "out" ? { message_status: "sent" } : {}),
             ...messageTimeFields,
             ...existingMediaFields,
