@@ -28,6 +28,8 @@ export function PipelineFilters({
   const owner = searchParams.get("owner")?.trim() ?? "";
   const signalRaw = searchParams.get("signal")?.trim() ?? "";
   const signal = isPipelineSignal(signalRaw) ? signalRaw : null;
+  const region = searchParams.get("region")?.trim() ?? "";
+  const clientCategory = searchParams.get("client_category")?.trim() ?? "";
   const q = searchParams.get("q") ?? "";
 
   const [draftQ, setDraftQ] = useState(q);
@@ -107,6 +109,34 @@ export function PipelineFilters({
         </label>
 
         <label className="flex min-w-[10rem] flex-col gap-1 text-xs">
+          <span className="text-[var(--muted)]">Região</span>
+          <select
+            className="rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1.5 text-sm"
+            value={region}
+            onChange={(e) => pushParams({ region: e.target.value || null })}
+          >
+            <option value="">Todas</option>
+            <option value="sp">São Paulo (DDD 11)</option>
+            <option value="rj">Rio de Janeiro (DDD 21)</option>
+          </select>
+        </label>
+
+        <label className="flex min-w-[10rem] flex-col gap-1 text-xs">
+          <span className="text-[var(--muted)]">Tipo de cliente</span>
+          <select
+            className="rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1.5 text-sm"
+            value={clientCategory}
+            onChange={(e) => pushParams({ client_category: e.target.value || null })}
+          >
+            <option value="">Todos</option>
+            <option value="hamburgueria">Hamburgueria</option>
+            <option value="distribuidor">Distribuidor</option>
+            <option value="parceiros">Parceiros</option>
+            <option value="outros">Outros</option>
+          </select>
+        </label>
+
+        <label className="flex min-w-[10rem] flex-col gap-1 text-xs">
           <span className="text-[var(--muted)]">Responsável</span>
           <select
             className="rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1.5 text-sm"
@@ -148,7 +178,7 @@ export function PipelineFilters({
         </label>
       </div>
 
-      {(mine || owner || signal || q) ? (
+      {(mine || owner || signal || region || clientCategory || q) ? (
         <button
           type="button"
           className="text-xs text-[var(--vp-wine)] hover:underline"

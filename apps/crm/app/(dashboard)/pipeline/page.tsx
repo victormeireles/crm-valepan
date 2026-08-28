@@ -4,14 +4,23 @@ import {
   cardMatchesPipelineFilters,
   computePipelineSignals,
   isPipelineSignal,
+  isPipelineRegion,
   type PipelineSignal,
 } from "@/lib/pipeline-signals";
+import { isClientCategoryValue, type ClientCategoryValue } from "@/lib/client-categories";
+import { isMissingNetworkTypeColumnError } from "@/lib/leads/list-query";
 import { nestOne } from "@/lib/supabase/nested";
 import { createServerSupabaseClient, crmTables } from "@/lib/supabase/server";
 import { Suspense } from "react";
 import { PipelineBoard, type PipelineCardDTO, type PipelineStageDTO } from "./pipeline-board";
 
 const OPPORTUNITY_BATCH_SIZE = 500;
+const OPPORTUNITY_SELECT_BASE =
+  "id, title, lead_id, stage_id, lost_reason, owner_id, updated_at, next_action_at, pipeline_stages(name, sort_order, is_final), leads(phone_e164, owner_id, client_category, distributor_id, excluded_from_pipeline_at, contacts(full_name), companies(name), distributors(name))";
+const OPPORTUNITY_SELECT_WITH_NETWORK = OPPORTUNITY_SELECT_BASE.replace(
+  "distributor_id, excluded_from_pipeline_at",
+  "distributor_id, network_type, excluded_from_pipeline_at",
+);
 import { PipelineFilters } from "./pipeline-filters";
 
 export const dynamic = "force-dynamic";
@@ -21,6 +30,8 @@ type LeadN = {
   owner_id?: string | null;
   excluded_from_pipeline_at?: string | null;
   client_category?: string | null;
+  distributor_id?: string | null;
+  network_type?: string | null;
   contacts?: { full_name: string | null } | { full_name: string | null }[] | null;
   companies?: { name: string | null } | { name: string | null }[] | null;
   distributors?: { name: string | null } | { name: string | null }[] | null;
@@ -95,6 +106,8 @@ function mapRowToCard(
     personName,
     companyLine,
     client_category: lead?.client_category ?? null,
+    distributor_id: lead?.distributor_id ?? null,
+    network_type: lead?.network_type ?? null,
     phone_e164: lead?.phone_e164 ?? null,
     ownerId: o.owner_id ?? lead?.owner_id ?? null,
     signals: computePipelineSignals({
@@ -116,6 +129,12 @@ export default async function PipelinePage({
   const ownerParam = typeof sp.owner === "string" ? sp.owner.trim() : "";
   const signalRaw = typeof sp.signal === "string" ? sp.signal.trim() : "";
   const signalFilter: PipelineSignal | null = isPipelineSignal(signalRaw) ? signalRaw : null;
+  const regionRaw = typeof sp.region === "string" ? sp.region.trim() : "";
+  const regionFilter = isPipelineRegion(regionRaw) ? regionRaw : null;
+  const categoryRaw = typeof sp.client_category === "string" ? sp.client_category.trim() : "";
+  const categoryFilter: ClientCategoryValue | null = isClientCategoryValue(categoryRaw)
+    ? categoryRaw
+    : null;
   const query = typeof sp.q === "string" ? sp.q : "";
   const supabase = await createServerSupabaseClient();
   const {
@@ -140,24 +159,36 @@ export default async function PipelinePage({
   // lote e escondia etapas existentes (por exemplo, NEGOCIAÇÃO aparecia com 0).
   const rows: Array<Parameters<typeof mapRowToCard>[0]> = [];
   let opportunitiesCount = 0;
+  let networkTypeAvailable = true;
   for (let offset = 0; ; offset += OPPORTUNITY_BATCH_SIZE) {
-    const opportunitiesBase = crm
+    const buildOpportunitiesQuery = (select: string) => {
+      const base = crm
       .from("opportunities")
-      .select(
-        "id, title, lead_id, stage_id, lost_reason, owner_id, updated_at, next_action_at, pipeline_stages(name, sort_order, is_final), leads(phone_e164, owner_id, client_category, excluded_from_pipeline_at, contacts(full_name), companies(name), distributors(name))",
-        { count: "exact" },
-      )
+      .select(select, { count: "exact" })
       .order("updated_at", { ascending: false });
-    const opportunitiesQuery = ownerUserId
-      ? opportunitiesBase.eq("owner_id", ownerUserId)
-      : opportunitiesBase;
-    const result = await opportunitiesQuery.range(
+      return ownerUserId ? base.eq("owner_id", ownerUserId) : base;
+    };
+    let result = await buildOpportunitiesQuery(
+      networkTypeAvailable ? OPPORTUNITY_SELECT_WITH_NETWORK : OPPORTUNITY_SELECT_BASE,
+    ).range(
       offset,
       offset + OPPORTUNITY_BATCH_SIZE - 1,
     );
+    if (result.error && networkTypeAvailable && isMissingNetworkTypeColumnError(result.error)) {
+      networkTypeAvailable = false;
+      result = await buildOpportunitiesQuery(OPPORTUNITY_SELECT_BASE).range(
+        offset,
+        offset + OPPORTUNITY_BATCH_SIZE - 1,
+      );
+    }
     if (result.error) throw result.error;
     if (offset === 0) opportunitiesCount = result.count ?? 0;
-    const batch = (result.data ?? []) as unknown as Array<Parameters<typeof mapRowToCard>[0]>;
+    const batch = (result.data ?? []).map((row) => {
+      if (networkTypeAvailable) return row;
+      const rowObject = row as unknown as Record<string, unknown>;
+      const lead = nestOne((rowObject.leads as LeadN | LeadN[] | null | undefined) ?? null);
+      return lead ? { ...rowObject, leads: { ...lead, network_type: null } } : row;
+    }) as unknown as Array<Parameters<typeof mapRowToCard>[0]>;
     rows.push(...batch);
     if (batch.length < OPPORTUNITY_BATCH_SIZE) break;
   }
@@ -201,6 +232,8 @@ export default async function PipelinePage({
     cardMatchesPipelineFilters(card, {
       ownerUserId,
       signal: signalFilter,
+      region: regionFilter,
+      clientCategory: categoryFilter,
       query,
     }),
   );

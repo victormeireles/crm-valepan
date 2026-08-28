@@ -156,6 +156,12 @@ function normalizeLoadedRows(rows: unknown[]): InboxMessageRow[] {
 
 export const INBOX_MESSAGE_PAGE_SIZE = 100;
 
+/**
+ * Filtro temporário de organização do Inbox: mantém visíveis as mensagens de
+ * agosto de 2026 em diante. Sem limite superior, para incluir mensagens novas.
+ */
+export const INBOX_MESSAGES_VISIBLE_SINCE = "2026-08-01T03:00:00.000Z";
+
 
 
 /**
@@ -188,6 +194,7 @@ export async function loadRecentConversationMessages(
     .from("messages")
     .select(MESSAGES_SELECT_WITH_MEDIA)
     .eq("conversation_id", conversationId)
+    .gte("sent_at", INBOX_MESSAGES_VISIBLE_SINCE)
     .order("sent_at", { ascending: false })
     .limit(take);
 
@@ -196,6 +203,7 @@ export async function loadRecentConversationMessages(
       .from("messages")
       .select(MESSAGES_SELECT_WITH_LEGACY_MEDIA)
       .eq("conversation_id", conversationId)
+      .gte("sent_at", INBOX_MESSAGES_VISIBLE_SINCE)
       .order("sent_at", { ascending: false })
       .limit(take);
     if (fallback.error && isMissingMediaColumnError(fallback.error)) {
@@ -203,6 +211,7 @@ export async function loadRecentConversationMessages(
         .from("messages")
         .select(MESSAGES_SELECT_LEGACY)
         .eq("conversation_id", conversationId)
+        .gte("sent_at", INBOX_MESSAGES_VISIBLE_SINCE)
         .order("sent_at", { ascending: false })
         .limit(take) as unknown as typeof fallback;
     }
@@ -284,10 +293,15 @@ export async function loadOlderMessagesPage(
 
 }> {
 
+  if (beforeSentAt <= INBOX_MESSAGES_VISIBLE_SINCE) {
+    return { messages: [] };
+  }
+
   let res = await crm
     .from("messages")
     .select(MESSAGES_SELECT_WITH_MEDIA)
     .eq("conversation_id", conversationId)
+    .gte("sent_at", INBOX_MESSAGES_VISIBLE_SINCE)
     .lt("sent_at", beforeSentAt)
     .order("sent_at", { ascending: false })
     .limit(INBOX_MESSAGE_PAGE_SIZE);
@@ -297,6 +311,7 @@ export async function loadOlderMessagesPage(
       .from("messages")
       .select(MESSAGES_SELECT_WITH_LEGACY_MEDIA)
       .eq("conversation_id", conversationId)
+      .gte("sent_at", INBOX_MESSAGES_VISIBLE_SINCE)
       .lt("sent_at", beforeSentAt)
       .order("sent_at", { ascending: false })
       .limit(INBOX_MESSAGE_PAGE_SIZE);
@@ -305,6 +320,7 @@ export async function loadOlderMessagesPage(
         .from("messages")
         .select(MESSAGES_SELECT_LEGACY)
         .eq("conversation_id", conversationId)
+        .gte("sent_at", INBOX_MESSAGES_VISIBLE_SINCE)
         .lt("sent_at", beforeSentAt)
         .order("sent_at", { ascending: false })
         .limit(INBOX_MESSAGE_PAGE_SIZE) as unknown as typeof fallback;

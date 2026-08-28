@@ -61,6 +61,9 @@ export function DashboardNav() {
                   <Link
                     key={item.href}
                     href={item.href}
+                    onClick={(event) => {
+                      event.currentTarget.closest("details")?.removeAttribute("open");
+                    }}
                     className={`block px-3 py-2 no-underline transition-colors ${
                       itemActive
                         ? "bg-[rgba(255,248,247,0.12)] text-[var(--vp-gold)]"

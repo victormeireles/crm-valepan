@@ -54,12 +54,15 @@ export function InboxSidebar({
   conversations,
   selectedId,
   activeTab,
+  renderNowMs,
 }: {
   conversations: InboxSidebarRow[];
   selectedId: string | null;
   activeTab: "qualify" | "pipeline" | "groups" | "archived";
+  renderNowMs: number;
 }) {
   const router = useRouter();
+  const [nowMs, setNowMs] = useState(renderNowMs);
   const [navigationPending, startNavigation] = useTransition();
   const [q, setQ] = useState("");
   const [optimisticSelectedId, setOptimisticSelectedId] = useState(selectedId);
@@ -89,6 +92,12 @@ export function InboxSidebar({
   useEffect(() => {
     setOptimisticSelectedId(selectedId);
   }, [selectedId]);
+
+  useEffect(() => {
+    setNowMs(Date.now());
+    const interval = window.setInterval(() => setNowMs(Date.now()), 60_000);
+    return () => window.clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     const onRead = (event: Event) => {
@@ -236,7 +245,7 @@ export function InboxSidebar({
                     className="text-[10px] text-[var(--muted)]"
                     title={new Date(c.lastAt).toLocaleString("pt-BR")}
                   >
-                    {formatRelativeShort(c.lastAt)}
+                    {formatRelativeShort(c.lastAt, nowMs)}
                   </span>
                 </span>
               </div>

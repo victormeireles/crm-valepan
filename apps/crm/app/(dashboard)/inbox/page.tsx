@@ -1,5 +1,6 @@
 import { LeadIdentity } from "@/components/lead-identity";
 import {
+  INBOX_MESSAGES_VISIBLE_SINCE,
   loadRecentConversationMessages,
   type InboxMessageRow,
 } from "@/lib/inbox/load-messages";
@@ -92,6 +93,7 @@ export default async function InboxPage({
 }: {
   searchParams: Promise<{ cid?: string; tab?: string; page?: string }>;
 }) {
+  const renderNowMs = Date.now();
   const params = await searchParams;
   const { cid, tab } = params;
   const requestedPage = params.page ? Number.parseInt(params.page, 10) : 1;
@@ -127,7 +129,8 @@ export default async function InboxPage({
   let conversationsQuery = crm
     .from("conversations")
     .select(conversationSelect, { count: "exact" })
-    .eq("conversation_kind", conversationKind);
+    .eq("conversation_kind", conversationKind)
+    .gte("last_message_at", INBOX_MESSAGES_VISIBLE_SINCE);
   if (activeTab === "qualify") {
     conversationsQuery = conversationsQuery.is("leads.excluded_from_pipeline_at", null);
     if (entryStageId) {
@@ -160,7 +163,8 @@ export default async function InboxPage({
       .from("conversations")
       .select(conversationSelect)
       .eq("id", cid)
-      .eq("conversation_kind", conversationKind);
+      .eq("conversation_kind", conversationKind)
+      .gte("last_message_at", INBOX_MESSAGES_VISIBLE_SINCE);
     if (activeTab === "qualify") {
       selectedQuery = selectedQuery.is("leads.excluded_from_pipeline_at", null);
       if (entryStageId) {
@@ -528,6 +532,7 @@ export default async function InboxPage({
               conversations={sidebarRows}
               selectedId={selectedId}
               activeTab={activeTab}
+              renderNowMs={renderNowMs}
             />
           </div>
           <PaginationNav

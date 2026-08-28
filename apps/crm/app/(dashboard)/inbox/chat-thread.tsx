@@ -12,7 +12,10 @@ import {
   setInboxMessagePinned,
   toggleInboxMessageFavorite,
 } from "@/app/actions/inbox";
-import type { InboxMessageRow } from "@/lib/inbox/load-messages";
+import {
+  INBOX_MESSAGES_VISIBLE_SINCE,
+  type InboxMessageRow,
+} from "@/lib/inbox/load-messages";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AudioMessagePlayer } from "./audio-message-player";
@@ -693,7 +696,12 @@ export function ChatThread({
   useEffect(() => {
     const normalizeRealtimeRow = (value: unknown): InboxMessageRow | null => {
       const row = value as Partial<InboxMessageRow> | null;
-      if (!row?.id || !row.sent_at || (row.direction !== "in" && row.direction !== "out")) {
+      if (
+        !row?.id ||
+        !row.sent_at ||
+        row.sent_at < INBOX_MESSAGES_VISIBLE_SINCE ||
+        (row.direction !== "in" && row.direction !== "out")
+      ) {
         return null;
       }
       return {

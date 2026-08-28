@@ -36,6 +36,8 @@ export type PipelineCardDTO = {
   personName: string;
   companyLine: string | null;
   client_category: string | null;
+  distributor_id: string | null;
+  network_type: string | null;
   phone_e164: string | null;
   ownerId: string | null;
   signals: PipelineSignal[];
@@ -389,6 +391,7 @@ export function PipelineBoard({
 
   return (
     <DndContext
+      id="pipeline-board"
       sensors={sensors}
       collisionDetection={closestCorners}
       onDragStart={handleDragStart}

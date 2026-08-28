@@ -18,7 +18,6 @@ export type DashboardNavItem = DashboardNavLink | DashboardNavDropdown;
 export const dashboardNavItems: DashboardNavItem[] = [
   { kind: "link", href: "/dashboard", label: "Dashboard" },
   { kind: "link", href: "/inbox", label: "Chat" },
-  { kind: "link", href: "/leads", label: "Leads" },
   { kind: "link", href: "/pipeline", label: "Funil" },
   { kind: "link", href: "/tasks", label: "Tarefas" },
   {

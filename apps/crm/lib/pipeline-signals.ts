@@ -1,6 +1,7 @@
 /** Regras pontuais de sinalização no funil (calculadas na leitura, sem gravar em BD). */
 
 import { pipelineCardMatchesQuery } from "@/lib/crm-text-search";
+import { isClientCategoryValue, type ClientCategoryValue } from "@/lib/client-categories";
 
 export { pipelineCardMatchesQuery } from "@/lib/crm-text-search";
 
@@ -14,6 +15,23 @@ export const PIPELINE_SIGNALS = [
 ] as const;
 
 export type PipelineSignal = (typeof PIPELINE_SIGNALS)[number];
+
+export const PIPELINE_REGIONS = ["sp", "rj"] as const;
+export type PipelineRegion = (typeof PIPELINE_REGIONS)[number];
+
+export function isPipelineRegion(value: string): value is PipelineRegion {
+  return (PIPELINE_REGIONS as readonly string[]).includes(value);
+}
+
+export function phoneMatchesPipelineRegion(
+  phone: string | null | undefined,
+  region: PipelineRegion,
+): boolean {
+  const digits = (phone ?? "").replace(/\D/g, "");
+  const national = digits.startsWith("55") ? digits.slice(2) : digits;
+  const ddd = national.slice(0, 2);
+  return region === "sp" ? ddd === "11" : ddd === "21";
+}
 
 export const PIPELINE_SIGNAL_LABELS: Record<PipelineSignal, string> = {
   awaiting_reply: "Sem resposta",
@@ -62,6 +80,9 @@ export function cardMatchesPipelineFilters(
     personName: string;
     companyLine: string | null;
     phone_e164: string | null;
+    client_category?: string | null;
+    distributor_id?: string | null;
+    network_type?: string | null;
     title: string | null;
     ownerId: string | null;
     signals: PipelineSignal[];
@@ -69,6 +90,8 @@ export function cardMatchesPipelineFilters(
   filters: {
     ownerUserId: string | null;
     signal: PipelineSignal | null;
+    region: PipelineRegion | null;
+    clientCategory: ClientCategoryValue | null;
     query: string;
   },
 ): boolean {
@@ -76,6 +99,18 @@ export function cardMatchesPipelineFilters(
     if (card.ownerId !== filters.ownerUserId) return false;
   }
   if (filters.signal && !card.signals.includes(filters.signal)) return false;
+  if (filters.region && !phoneMatchesPipelineRegion(card.phone_e164, filters.region)) return false;
+  if (filters.clientCategory) {
+    const category = (card.client_category ?? "").trim().toLowerCase();
+    if (filters.clientCategory === "distribuidor") {
+      const networkType = (card.network_type ?? "").trim().toLowerCase();
+      if (category !== "distribuidor" && !card.distributor_id && networkType !== "distribuidor") {
+        return false;
+      }
+    } else if (!isClientCategoryValue(category) || category !== filters.clientCategory) {
+      return false;
+    }
+  }
   if (!pipelineCardMatchesQuery(card, filters.query)) return false;
   return true;
 }
