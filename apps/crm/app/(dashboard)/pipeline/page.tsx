@@ -9,6 +9,7 @@ import {
 } from "@/lib/pipeline-signals";
 import { isClientCategoryValue, type ClientCategoryValue } from "@/lib/client-categories";
 import { isMissingNetworkTypeColumnError } from "@/lib/leads/list-query";
+import { INBOX_MESSAGES_VISIBLE_SINCE } from "@/lib/inbox/load-messages";
 import { nestOne } from "@/lib/supabase/nested";
 import { createServerSupabaseClient, crmTables } from "@/lib/supabase/server";
 import { Suspense } from "react";
@@ -158,13 +159,12 @@ export default async function PipelinePage({
   // Paginar globalmente aqui fazia as etapas mais recentes consumirem todo o
   // lote e escondia etapas existentes (por exemplo, NEGOCIAÇÃO aparecia com 0).
   const rows: Array<Parameters<typeof mapRowToCard>[0]> = [];
-  let opportunitiesCount = 0;
   let networkTypeAvailable = true;
   for (let offset = 0; ; offset += OPPORTUNITY_BATCH_SIZE) {
     const buildOpportunitiesQuery = (select: string) => {
       const base = crm
       .from("opportunities")
-      .select(select, { count: "exact" })
+      .select(select)
       .order("updated_at", { ascending: false });
       return ownerUserId ? base.eq("owner_id", ownerUserId) : base;
     };
@@ -182,7 +182,6 @@ export default async function PipelinePage({
       );
     }
     if (result.error) throw result.error;
-    if (offset === 0) opportunitiesCount = result.count ?? 0;
     const batch = (result.data ?? []).map((row) => {
       if (networkTypeAvailable) return row;
       const rowObject = row as unknown as Record<string, unknown>;
@@ -199,13 +198,16 @@ export default async function PipelinePage({
     leadIds.length > 0
       ? await crm
           .from("v_lead_last_message")
-          .select("lead_id, last_direction")
+          .select("lead_id, last_direction, last_sent_at")
           .in("lead_id", leadIds)
+          .gte("last_sent_at", INBOX_MESSAGES_VISIBLE_SINCE)
       : { data: [] as { lead_id: string; last_direction: string }[] };
 
   const lastDirectionByLead = new Map<string, string>();
+  const visibleLeadIds = new Set<string>();
   for (const row of lastMessages ?? []) {
     lastDirectionByLead.set(row.lead_id, row.last_direction);
+    visibleLeadIds.add(row.lead_id);
   }
 
   const stages: PipelineStageDTO[] = (stageRows ?? []).map((s) => ({
@@ -219,7 +221,7 @@ export default async function PipelinePage({
   const allCards: PipelineCardDTO[] = (rows ?? [])
     .filter((o) => {
       const lead = nestOne((o as { leads: LeadN | LeadN[] | null }).leads);
-      return !isLeadExcludedFromPipeline(lead);
+      return !!o.lead_id && visibleLeadIds.has(o.lead_id) && !isLeadExcludedFromPipeline(lead);
     })
     .map((o) =>
       mapRowToCard(
@@ -248,7 +250,7 @@ export default async function PipelinePage({
 
       <Suspense fallback={<p className="text-sm text-[var(--muted)]">Carregando filtros…</p>}>
         <PipelineFilters
-          totalCount={opportunitiesCount ?? 0}
+          totalCount={allCards.length}
           visibleCount={filteredCards.length}
           teamOptions={teamOptions}
         />
