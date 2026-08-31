@@ -8,16 +8,17 @@ import {
   type PipelineSignal,
 } from "@/lib/pipeline-signals";
 import { isClientCategoryValue, type ClientCategoryValue } from "@/lib/client-categories";
-import { isMissingNetworkTypeColumnError } from "@/lib/leads/list-query";
 import { INBOX_MESSAGES_VISIBLE_SINCE } from "@/lib/inbox/load-messages";
+import { isMissingNetworkTypeColumnError } from "@/lib/leads/list-query";
 import { nestOne } from "@/lib/supabase/nested";
-import { createServerSupabaseClient, crmTables } from "@/lib/supabase/server";
+import { createServerSupabaseClient, crmTables, getServerUser } from "@/lib/supabase/server";
 import { Suspense } from "react";
 import { PipelineBoard, type PipelineCardDTO, type PipelineStageDTO } from "./pipeline-board";
 
 const OPPORTUNITY_BATCH_SIZE = 500;
+const LAST_MESSAGE_LEAD_BATCH_SIZE = 100;
 const OPPORTUNITY_SELECT_BASE =
-  "id, title, lead_id, stage_id, lost_reason, owner_id, updated_at, next_action_at, pipeline_stages(name, sort_order, is_final), leads(phone_e164, owner_id, client_category, distributor_id, excluded_from_pipeline_at, contacts(full_name), companies(name), distributors(name))";
+  "id, title, lead_id, stage_id, lost_reason, owner_id, updated_at, next_action_at, pipeline_stages(name, sort_order, is_final), leads!inner(phone_e164, owner_id, client_category, distributor_id, excluded_from_pipeline_at, contacts(full_name), companies(name), distributors(name))";
 const OPPORTUNITY_SELECT_WITH_NETWORK = OPPORTUNITY_SELECT_BASE.replace(
   "distributor_id, excluded_from_pipeline_at",
   "distributor_id, network_type, excluded_from_pipeline_at",
@@ -138,22 +139,21 @@ export default async function PipelinePage({
     : null;
   const query = typeof sp.q === "string" ? sp.q : "";
   const supabase = await createServerSupabaseClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
   const crm = crmTables(supabase);
-
-  const ownerUserId = mineOnly && user?.id ? user.id : ownerParam.length > 0 ? ownerParam : null;
-  const [
-    { data: stageRows },
-    { data: teamProfiles },
-  ] = await Promise.all([
+  const userPromise = getServerUser();
+  const metadataPromise = Promise.all([
     crm
       .from("pipeline_stages")
       .select("id, name, sort_order, is_final")
       .order("sort_order", { ascending: true }),
     crm.from("profiles").select("id, full_name, role").order("full_name", { ascending: true }),
   ]);
+  const user = await userPromise;
+  const ownerUserId = mineOnly && user?.id ? user.id : ownerParam.length > 0 ? ownerParam : null;
+  const [
+    { data: stageRows },
+    { data: teamProfiles },
+  ] = await metadataPromise;
 
   // O funil precisa distribuir oportunidades entre colunas antes de exibi-las.
   // Paginar globalmente aqui fazia as etapas mais recentes consumirem todo o
@@ -165,6 +165,7 @@ export default async function PipelinePage({
       const base = crm
       .from("opportunities")
       .select(select)
+      .is("leads.excluded_from_pipeline_at", null)
       .order("updated_at", { ascending: false });
       return ownerUserId ? base.eq("owner_id", ownerUserId) : base;
     };
@@ -194,18 +195,33 @@ export default async function PipelinePage({
 
   const leadIds = [...new Set((rows ?? []).map((r) => r.lead_id).filter((id): id is string => !!id))];
 
-  const { data: lastMessages } =
-    leadIds.length > 0
-      ? await crm
-          .from("v_lead_last_message")
-          .select("lead_id, last_direction, last_sent_at")
-          .in("lead_id", leadIds)
-          .gte("last_sent_at", INBOX_MESSAGES_VISIBLE_SINCE)
-      : { data: [] as { lead_id: string; last_direction: string }[] };
+  // Uma única cláusula `in` com todos os leads do funil pode ultrapassar o
+  // limite de tamanho da URL do PostgREST. Quando isso acontecia, o erro era
+  // ignorado e todos os cartões eram eliminados como se não houvesse mensagens.
+  const lastMessageBatches = await Promise.all(
+    Array.from({ length: Math.ceil(leadIds.length / LAST_MESSAGE_LEAD_BATCH_SIZE) }, (_, index) =>
+      crm
+        .from("v_lead_last_message")
+        .select("lead_id, last_direction, last_sent_at")
+        .in(
+          "lead_id",
+          leadIds.slice(
+            index * LAST_MESSAGE_LEAD_BATCH_SIZE,
+            (index + 1) * LAST_MESSAGE_LEAD_BATCH_SIZE,
+          ),
+        )
+        .gte("last_sent_at", INBOX_MESSAGES_VISIBLE_SINCE),
+    ),
+  );
+  const lastMessages: { lead_id: string; last_direction: string; last_sent_at: string }[] = [];
+  for (const batch of lastMessageBatches) {
+    if (batch.error) throw batch.error;
+    lastMessages.push(...(batch.data ?? []));
+  }
 
   const lastDirectionByLead = new Map<string, string>();
   const visibleLeadIds = new Set<string>();
-  for (const row of lastMessages ?? []) {
+  for (const row of lastMessages) {
     lastDirectionByLead.set(row.lead_id, row.last_direction);
     visibleLeadIds.add(row.lead_id);
   }
@@ -216,7 +232,6 @@ export default async function PipelinePage({
     sort_order: s.sort_order,
     is_final: s.is_final,
   }));
-  const activeStages = stages.filter((stage) => !stage.is_final);
 
   const allCards: PipelineCardDTO[] = (rows ?? [])
     .filter((o) => {
@@ -255,32 +270,6 @@ export default async function PipelinePage({
           teamOptions={teamOptions}
         />
       </Suspense>
-
-      {activeStages.length > 0 ? (
-        <div className="w-full min-w-0 overflow-x-auto pb-1 [scrollbar-gutter:stable]">
-          <div
-            className="grid gap-1 sm:gap-1.5"
-            style={{
-              gridTemplateColumns: `repeat(${activeStages.length}, minmax(13rem, 1fr))`,
-              width: `max(100%, ${activeStages.length * 208}px)`,
-            }}
-          >
-            {activeStages.map((s) => {
-              const count = filteredCards.filter((c) => c.stage_id === s.id).length;
-              return (
-                <span
-                  key={s.id}
-                  title={`${s.name}: ${count}`}
-                  className="truncate rounded-md border border-[var(--border)] bg-[var(--card)] px-1 py-1.5 text-center text-[10px] leading-tight text-[var(--muted)] sm:text-[11px]"
-                >
-                  <span className="block truncate font-medium text-[var(--foreground)]">{s.name}</span>
-                  <strong className="tabular-nums text-[var(--foreground)]">{count}</strong>
-                </span>
-              );
-            })}
-          </div>
-        </div>
-      ) : null}
 
       {stages.length === 0 ? (
         <p className="text-sm text-[var(--muted)]">Nenhuma etapa do funil configurada.</p>
