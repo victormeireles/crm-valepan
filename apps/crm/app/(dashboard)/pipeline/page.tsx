@@ -11,7 +11,7 @@ import { isClientCategoryValue, type ClientCategoryValue } from "@/lib/client-ca
 import { INBOX_MESSAGES_VISIBLE_SINCE } from "@/lib/inbox/load-messages";
 import { isMissingNetworkTypeColumnError } from "@/lib/leads/list-query";
 import { nestOne } from "@/lib/supabase/nested";
-import { createServerSupabaseClient, crmTables, getServerUser } from "@/lib/supabase/server";
+import { createServerSupabaseClient, crmTables } from "@/lib/supabase/server";
 import { Suspense } from "react";
 import { PipelineBoard, type PipelineCardDTO, type PipelineStageDTO } from "./pipeline-board";
 
@@ -139,21 +139,21 @@ export default async function PipelinePage({
     : null;
   const query = typeof sp.q === "string" ? sp.q : "";
   const supabase = await createServerSupabaseClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
   const crm = crmTables(supabase);
-  const userPromise = getServerUser();
-  const metadataPromise = Promise.all([
+  const ownerUserId = mineOnly && user?.id ? user.id : ownerParam.length > 0 ? ownerParam : null;
+  const [
+    { data: stageRows },
+    { data: teamProfiles },
+  ] = await Promise.all([
     crm
       .from("pipeline_stages")
       .select("id, name, sort_order, is_final")
       .order("sort_order", { ascending: true }),
     crm.from("profiles").select("id, full_name, role").order("full_name", { ascending: true }),
   ]);
-  const user = await userPromise;
-  const ownerUserId = mineOnly && user?.id ? user.id : ownerParam.length > 0 ? ownerParam : null;
-  const [
-    { data: stageRows },
-    { data: teamProfiles },
-  ] = await metadataPromise;
 
   // O funil precisa distribuir oportunidades entre colunas antes de exibi-las.
   // Paginar globalmente aqui fazia as etapas mais recentes consumirem todo o
