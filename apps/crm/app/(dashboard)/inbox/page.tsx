@@ -117,8 +117,11 @@ export default async function InboxPage({
     .select("id, name, sort_order")
     .order("sort_order", { ascending: true });
   const { data: stages } = await stagesPromise;
-  const entryStageId =
-    stages?.find((stage) => stage.name.trim().toUpperCase() === "LEADS")?.id ?? null;
+  // LEADS e o nome legado ENTRADA representam a mesma fila de contatos ainda
+  // não qualificados. Aceitar ambos mantém o chat correto durante a migração.
+  const entryStageIds = (stages ?? [])
+    .filter((stage) => ["LEADS", "ENTRADA"].includes(stage.name.trim().toUpperCase()))
+    .map((stage) => stage.id);
   const opportunityRelation: string =
     activeTab === "pipeline" || activeTab === "qualify"
       ? "opportunities!inner(id, stage_id, updated_at)"
@@ -136,13 +139,17 @@ export default async function InboxPage({
     .gte("last_message_at", INBOX_MESSAGES_VISIBLE_SINCE);
   if (activeTab === "qualify") {
     conversationsQuery = conversationsQuery.is("leads.excluded_from_pipeline_at", null);
-    if (entryStageId) {
-      conversationsQuery = conversationsQuery.eq("leads.opportunities.stage_id", entryStageId);
+    if (entryStageIds.length > 0) {
+      conversationsQuery = conversationsQuery.in("leads.opportunities.stage_id", entryStageIds);
     }
   } else if (activeTab === "pipeline") {
     conversationsQuery = conversationsQuery.is("leads.excluded_from_pipeline_at", null);
-    if (entryStageId) {
-      conversationsQuery = conversationsQuery.neq("leads.opportunities.stage_id", entryStageId);
+    if (entryStageIds.length > 0) {
+      conversationsQuery = conversationsQuery.not(
+        "leads.opportunities.stage_id",
+        "in",
+        `(${entryStageIds.join(",")})`,
+      );
     }
   } else if (activeTab === "archived") {
     conversationsQuery = conversationsQuery.not("leads.excluded_from_pipeline_at", "is", null);
@@ -169,13 +176,17 @@ export default async function InboxPage({
       .gte("last_message_at", INBOX_MESSAGES_VISIBLE_SINCE);
     if (activeTab === "qualify") {
       selectedQuery = selectedQuery.is("leads.excluded_from_pipeline_at", null);
-      if (entryStageId) {
-        selectedQuery = selectedQuery.eq("leads.opportunities.stage_id", entryStageId);
+      if (entryStageIds.length > 0) {
+        selectedQuery = selectedQuery.in("leads.opportunities.stage_id", entryStageIds);
       }
     } else if (activeTab === "pipeline") {
       selectedQuery = selectedQuery.is("leads.excluded_from_pipeline_at", null);
-      if (entryStageId) {
-        selectedQuery = selectedQuery.neq("leads.opportunities.stage_id", entryStageId);
+      if (entryStageIds.length > 0) {
+        selectedQuery = selectedQuery.not(
+          "leads.opportunities.stage_id",
+          "in",
+          `(${entryStageIds.join(",")})`,
+        );
       }
     } else if (activeTab === "archived") {
       selectedQuery = selectedQuery.not("leads.excluded_from_pipeline_at", "is", null);

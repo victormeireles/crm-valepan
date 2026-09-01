@@ -226,24 +226,43 @@ export default async function PipelinePage({
     visibleLeadIds.add(row.lead_id);
   }
 
-  const stages: PipelineStageDTO[] = (stageRows ?? []).map((s) => ({
+  const rawStages: PipelineStageDTO[] = (stageRows ?? []).map((s) => ({
     id: s.id,
     name: s.name,
     sort_order: s.sort_order,
     is_final: s.is_final,
   }));
+  const entryStages = rawStages.filter((stage) =>
+    ["LEADS", "ENTRADA"].includes(stage.name.trim().toUpperCase()),
+  );
+  const canonicalEntryStage =
+    entryStages.find((stage) => stage.name.trim().toUpperCase() === "LEADS") ??
+    entryStages[0] ??
+    null;
+  const entryStageIds = new Set(entryStages.map((stage) => stage.id));
+  const stages: PipelineStageDTO[] = rawStages
+    .filter((stage) => !entryStageIds.has(stage.id) || stage.id === canonicalEntryStage?.id)
+    .map((stage) =>
+      stage.id === canonicalEntryStage?.id
+        ? { ...stage, name: "LEADS", sort_order: Number.MIN_SAFE_INTEGER, is_final: false }
+        : stage,
+    )
+    .sort((a, b) => a.sort_order - b.sort_order);
 
   const allCards: PipelineCardDTO[] = (rows ?? [])
     .filter((o) => {
       const lead = nestOne((o as { leads: LeadN | LeadN[] | null }).leads);
       return !!o.lead_id && visibleLeadIds.has(o.lead_id) && !isLeadExcludedFromPipeline(lead);
     })
-    .map((o) =>
-      mapRowToCard(
+    .map((o) => {
+      const card = mapRowToCard(
         o as unknown as Parameters<typeof mapRowToCard>[0],
         lastDirectionByLead,
-      ),
-    );
+      );
+      return canonicalEntryStage && entryStageIds.has(card.stage_id)
+        ? { ...card, stage_id: canonicalEntryStage.id }
+        : card;
+    });
 
   const filteredCards = allCards.filter((card) =>
     cardMatchesPipelineFilters(card, {
