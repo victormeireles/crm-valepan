@@ -1,8 +1,9 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
+import { cache } from "react";
 import type { Database } from "@/lib/database.types";
 
-export async function createServerSupabaseClient() {
+async function createServerSupabaseClientUncached() {
   const cookieStore = await cookies();
   const url =
     process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL;
@@ -30,6 +31,22 @@ export async function createServerSupabaseClient() {
     },
   });
 }
+
+/**
+ * Reutiliza o cliente durante uma mesma renderização do servidor. Layout e
+ * página são executados separadamente pelo React e, sem esse cache por
+ * requisição, repetiam a leitura dos cookies e a validação da sessão.
+ */
+export const createServerSupabaseClient = cache(createServerSupabaseClientUncached);
+
+/** Valida a sessão no máximo uma vez por renderização do servidor. */
+export const getServerUser = cache(async () => {
+  const supabase = await createServerSupabaseClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  return user;
+});
 
 /** Acesso às tabelas do schema `crm` via PostgREST. */
 export function crmTables(client: Awaited<ReturnType<typeof createServerSupabaseClient>>) {

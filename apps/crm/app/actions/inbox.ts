@@ -671,7 +671,7 @@ export async function updateConversationClassification(input: {
       const { error: moveError } = await crm
         .from("opportunities")
         .update({ stage_id: targetStageId, updated_at: nowIso })
-        .eq("id", opportunityId);
+        .eq("lead_id", conversation.lead_id);
       if (moveError) return { ok: false as const, error: moveError.message };
     } else {
       const { data: inserted, error: insertError } = await crm

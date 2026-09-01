@@ -36,13 +36,41 @@ export default async function LeadDetailPage({
   const supabase = await createServerSupabaseClient();
   const crm = crmTables(supabase);
 
-  const { data: lead } = await crm
-    .from("leads")
-    .select(
-      "*, companies(id, name, city, state, document), contacts(id, full_name, email, phone_e164), distributors(id, name)",
-    )
-    .eq("id", id)
-    .maybeSingle();
+  const [
+    { data: lead },
+    { data: opps },
+    { data: stages },
+    { data: timeline },
+    { data: leadTasksRaw },
+    { data: teamProfiles },
+  ] = await Promise.all([
+    crm
+      .from("leads")
+      .select(
+        "*, companies(id, name, city, state, document), contacts(id, full_name, email, phone_e164), distributors(id, name)",
+      )
+      .eq("id", id)
+      .maybeSingle(),
+    crm
+      .from("opportunities")
+      .select("*, pipeline_stages(name)")
+      .eq("lead_id", id)
+      .order("created_at", { ascending: false }),
+    crm.from("pipeline_stages").select("id, name, sort_order").order("sort_order", { ascending: true }),
+    crm
+      .from("timeline_events")
+      .select("*")
+      .eq("lead_id", id)
+      .order("at", { ascending: false })
+      .limit(120),
+    crm
+      .from("tasks")
+      .select("id, title, due_at, done, assignee_id")
+      .eq("lead_id", id)
+      .order("done", { ascending: true })
+      .order("due_at", { ascending: true, nullsFirst: false }),
+    crm.from("profiles").select("id, full_name, role").order("full_name", { ascending: true }),
+  ]);
 
   if (!lead) notFound();
 
@@ -71,34 +99,6 @@ export default async function LeadDetailPage({
   });
 
   const leadOwnerId = lead.owner_id ?? null;
-
-  const [
-    { data: opps },
-    { data: stages },
-    { data: timeline },
-    { data: leadTasksRaw },
-    { data: teamProfiles },
-  ] = await Promise.all([
-    crm
-      .from("opportunities")
-      .select("*, pipeline_stages(name)")
-      .eq("lead_id", id)
-      .order("created_at", { ascending: false }),
-    crm.from("pipeline_stages").select("id, name, sort_order").order("sort_order", { ascending: true }),
-    crm
-      .from("timeline_events")
-      .select("*")
-      .eq("lead_id", id)
-      .order("at", { ascending: false })
-      .limit(120),
-    crm
-      .from("tasks")
-      .select("id, title, due_at, done, assignee_id")
-      .eq("lead_id", id)
-      .order("done", { ascending: true })
-      .order("due_at", { ascending: true, nullsFirst: false }),
-    crm.from("profiles").select("id, full_name, role").order("full_name", { ascending: true }),
-  ]);
 
   const opportunity = opps?.[0] ?? null;
   const leadTasks = leadTasksRaw;

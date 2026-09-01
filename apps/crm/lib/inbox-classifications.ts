@@ -1,4 +1,5 @@
 export const INBOX_CLASSIFICATION_OPTIONS = [
+  "CHATBOT",
   "CLIENTE",
   "AMOSTRA",
   "NEGOCIAÇÃO",

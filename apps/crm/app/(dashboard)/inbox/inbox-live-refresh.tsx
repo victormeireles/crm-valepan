@@ -4,7 +4,8 @@ import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-const REFRESH_DEBOUNCE_MS = 300;
+const REFRESH_DEBOUNCE_MS = 750;
+const REFRESH_COOLDOWN_MS = 2_000;
 
 /** Atualiza o Inbox apenas quando o Supabase informa uma mudança relevante. */
 export function InboxLiveRefresh({
@@ -16,6 +17,7 @@ export function InboxLiveRefresh({
   const supabase = useMemo(() => createBrowserSupabaseClient(), []);
   const visible = useRef(true);
   const changedWhileHidden = useRef(false);
+  const lastRefreshAt = useRef(0);
   const [callAlert, setCallAlert] = useState<string | null>(null);
 
   const signalCall = (status: string | null | undefined) => {
@@ -68,10 +70,13 @@ export function InboxLiveRefresh({
         return;
       }
       if (refreshTimer) clearTimeout(refreshTimer);
+      const elapsed = Date.now() - lastRefreshAt.current;
+      const wait = Math.max(REFRESH_DEBOUNCE_MS, REFRESH_COOLDOWN_MS - elapsed);
       refreshTimer = setTimeout(() => {
         refreshTimer = null;
+        lastRefreshAt.current = Date.now();
         router.refresh();
-      }, REFRESH_DEBOUNCE_MS);
+      }, wait);
     };
 
     const onVis = () => {

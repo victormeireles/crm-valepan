@@ -109,6 +109,9 @@ export default async function InboxPage({
   const conversationKind = activeTab === "groups" ? "group" : "lead";
   const supabase = await createServerSupabaseClient();
   const crm = crmTables(supabase);
+  // A conversa solicitada já vem na URL; carregue suas mensagens enquanto a
+  // barra lateral e a etapa inicial são consultadas.
+  const requestedMessagesPromise = cid ? loadRecentConversationMessages(crm, cid) : null;
   const stagesPromise = crm
     .from("pipeline_stages")
     .select("id, name, sort_order")
@@ -154,7 +157,6 @@ export default async function InboxPage({
   const conversationsCount = conversationsResult.count;
 
   const pageConversationIds = (conversations ?? []).map((conversation) => conversation.id);
-  const requestedMessagesPromise = cid ? loadRecentConversationMessages(crm, cid) : null;
 
   let selectedOutsidePage: ConversationRow | null = null;
   let selectedConversationError: { message: string; code?: string } | null = null;
@@ -532,6 +534,7 @@ export default async function InboxPage({
               conversations={sidebarRows}
               selectedId={selectedId}
               activeTab={activeTab}
+              page={page}
               renderNowMs={renderNowMs}
             />
           </div>
@@ -541,6 +544,7 @@ export default async function InboxPage({
             pageSize={PAGE_SIZE}
             totalCount={conversationsCount ?? 0}
             searchParams={{ ...params, cid: undefined }}
+            showBoundaryLinks
           />
         </div>
 

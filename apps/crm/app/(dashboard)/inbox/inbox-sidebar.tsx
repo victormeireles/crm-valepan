@@ -54,11 +54,13 @@ export function InboxSidebar({
   conversations,
   selectedId,
   activeTab,
+  page,
   renderNowMs,
 }: {
   conversations: InboxSidebarRow[];
   selectedId: string | null;
   activeTab: "qualify" | "pipeline" | "groups" | "archived";
+  page: number;
   renderNowMs: number;
 }) {
   const router = useRouter();
@@ -70,6 +72,11 @@ export function InboxSidebar({
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [errorById, setErrorById] = useState<Record<string, string | null>>({});
+  const conversationHref = (conversationId: string) => {
+    const params = new URLSearchParams({ tab: activeTab, cid: conversationId });
+    if (page > 1) params.set("page", String(page));
+    return `/inbox?${params.toString()}`;
+  };
 
   const filtered = useMemo(() => {
     const needle = norm(q.trim());
@@ -183,14 +190,14 @@ export function InboxSidebar({
               }`}
           >
             <Link
-              href={`/inbox?tab=${activeTab}&cid=${c.id}`}
+              href={conversationHref(c.id)}
               prefetch
               scroll={false}
-              onMouseEnter={() => router.prefetch(`/inbox?tab=${activeTab}&cid=${c.id}`)}
-              onFocus={() => router.prefetch(`/inbox?tab=${activeTab}&cid=${c.id}`)}
+              onMouseEnter={() => router.prefetch(conversationHref(c.id))}
+              onFocus={() => router.prefetch(conversationHref(c.id))}
               onClick={(event) => {
                 event.preventDefault();
-                const href = `/inbox?tab=${activeTab}&cid=${c.id}`;
+                const href = conversationHref(c.id);
                 setOptimisticSelectedId(c.id);
                 startNavigation(() => router.push(href, { scroll: false }));
               }}
@@ -312,7 +319,7 @@ export function InboxSidebar({
                           return;
                         }
                         setOpenMenuId(null);
-                        router.push(`/inbox?tab=${activeTab}&cid=${c.id}`, { scroll: false });
+                        router.push(conversationHref(c.id), { scroll: false });
                       }}
                       className="w-full rounded px-2 py-1.5 text-left text-xs text-[var(--foreground)] hover:bg-[rgba(35,0,4,0.07)] disabled:opacity-50"
                     >

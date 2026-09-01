@@ -23,6 +23,15 @@ export async function middleware(request: NextRequest) {
     return response;
   }
 
+  const path = request.nextUrl.pathname;
+  const isProtected = protectedPrefixes.some((p) => path.startsWith(p));
+
+  // Todas as rotas protegidas abaixo pertencem ao route group `(dashboard)`,
+  // cujo layout valida a sessão e redireciona para /login. Repetir getUser no
+  // middleware acrescentava uma chamada remota ao Supabase em toda navegação
+  // (e chegava a consumir segundos quando a rede oscilava).
+  if (isProtected) return response;
+
   const supabase = createServerClient(url, anon, {
     cookies: {
       getAll() {
@@ -51,15 +60,6 @@ export async function middleware(request: NextRequest) {
     // O app continuará e as páginas protegidas farão validação própria no server quando necessário.
     console.warn("[middleware] supabase.auth.getUser falhou; seguindo sem redirect.", e);
     return response;
-  }
-
-  const path = request.nextUrl.pathname;
-  const isProtected = protectedPrefixes.some((p) => path.startsWith(p));
-
-  if (isProtected && !user) {
-    const redirectUrl = new URL("/login", request.url);
-    redirectUrl.searchParams.set("next", path);
-    return NextResponse.redirect(redirectUrl);
   }
 
   if (path === "/login" && user) {

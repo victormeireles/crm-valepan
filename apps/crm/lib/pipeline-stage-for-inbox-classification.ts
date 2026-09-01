@@ -1,4 +1,5 @@
 const PIPELINE_STAGE_BY_CLASSIFICATION: Readonly<Record<string, string>> = {
+  CHATBOT: "CHATBOT",
   AMOSTRA: "AMOSTRA",
   NEGOCIAÇÃO: "NEGOCIAÇÃO",
   "SEM INTERESSE": "SEM INTERESSE",

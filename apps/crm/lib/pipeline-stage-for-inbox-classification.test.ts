@@ -6,6 +6,10 @@ describe("pipelineStageForInboxClassification", () => {
     expect(pipelineStageForInboxClassification("NEGOCIAÇÃO")).toBe("NEGOCIAÇÃO");
   });
 
+  it("mantém chatbot como uma etapa selecionável separada", () => {
+    expect(pipelineStageForInboxClassification("CHATBOT")).toBe("CHATBOT");
+  });
+
   it("trata os nomes divergentes entre classificação e etapa", () => {
     expect(pipelineStageForInboxClassification("ENCAMINHADO PARA O DISTRIBUIDOR")).toBe(
       "ENCAMINHADO PARA DISTRIBUIDOR",

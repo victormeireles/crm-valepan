@@ -20,6 +20,8 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PipelineSignalBadges } from "./pipeline-signal-badges";
 
+const CARDS_PER_PAGE = 20;
+
 export type PipelineStageDTO = {
   id: string;
   name: string;
@@ -63,6 +65,27 @@ function cloneColumns(map: Map<string, PipelineCardDTO[]>) {
   return next;
 }
 
+function normalizeColumnSearch(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase("pt-BR")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function cardMatchesColumnSearch(card: PipelineCardDTO, query: string) {
+  const normalizedQuery = normalizeColumnSearch(query);
+  if (!normalizedQuery) return true;
+
+  const textQueryMatches = normalizeColumnSearch(card.personName).includes(normalizedQuery);
+  const queryDigits = query.replace(/\D/g, "");
+  const phoneDigits = card.phone_e164?.replace(/\D/g, "") ?? "";
+  const phoneQueryMatches = queryDigits.length > 0 && phoneDigits.includes(queryDigits);
+
+  return textQueryMatches || phoneQueryMatches;
+}
+
 function moveCard(
   columns: Map<string, PipelineCardDTO[]>,
   opportunityId: string,
@@ -89,11 +112,17 @@ function DroppableColumn({
   stageId,
   stageName,
   count,
+  totalCount,
+  searchValue,
+  onSearchChange,
   children,
 }: {
   stageId: string;
   stageName: string;
   count: number;
+  totalCount: number;
+  searchValue: string;
+  onSearchChange: (value: string) => void;
   children: React.ReactNode;
 }) {
   const { setNodeRef, isOver } = useDroppable({
@@ -105,14 +134,27 @@ function DroppableColumn({
     <section
       ref={setNodeRef}
       title={stageName}
-      className={`flex min-h-[min(62vh,26rem)] min-w-0 flex-col rounded-lg border border-[var(--border)] bg-[var(--card)] p-1.5 sm:p-2 ${
+      className={`flex h-[min(62vh,26rem)] min-w-0 flex-col rounded-lg border border-[var(--border)] bg-[var(--card)] p-1.5 sm:p-2 ${
         isOver ? "ring-2 ring-[var(--accent)] ring-offset-1 ring-offset-[var(--background)]" : ""
       }`}
     >
       <h2 className="line-clamp-3 text-center text-[10px] font-semibold leading-tight text-[var(--muted)] sm:text-[11px]">
         <span className="text-[var(--foreground)]">{stageName}</span>{" "}
-        <span className="font-normal tabular-nums text-[var(--muted)]">({count})</span>
+        <span className="font-normal tabular-nums text-[var(--muted)]">
+          ({searchValue.trim() ? `${count}/${totalCount}` : count})
+        </span>
       </h2>
+      <label className="mt-1.5 block">
+        <span className="sr-only">Filtrar {stageName} por nome ou telefone</span>
+        <input
+          type="search"
+          value={searchValue}
+          placeholder="Nome ou telefone"
+          aria-label={`Filtrar ${stageName} por nome ou telefone`}
+          className="w-full min-w-0 rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1 text-xs text-[var(--foreground)] placeholder:text-[var(--muted)]"
+          onChange={(event) => onSearchChange(event.target.value)}
+        />
+      </label>
       <ul className="mt-1.5 flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto overscroll-contain sm:mt-2 sm:gap-1.5">
         {children}
       </ul>
@@ -149,7 +191,7 @@ function DraggableCard({
       name={card.personName}
       companyName={card.companyLine}
       category={card.client_category}
-      phoneTitle={card.phone_e164}
+      phone={card.phone_e164}
       size="sm"
       layout="stacked"
     />
@@ -205,7 +247,7 @@ function CardPreview({ card }: { card: PipelineCardDTO }) {
           name={card.personName}
           companyName={card.companyLine}
           category={card.client_category}
-          phoneTitle={card.phone_e164}
+          phone={card.phone_e164}
           size="sm"
           layout="stacked"
         />
@@ -235,6 +277,8 @@ export function PipelineBoard({
   );
 
   const [columns, setColumns] = useState(() => groupByStage(activeStages, initialCards));
+  const [visibleCardsByStage, setVisibleCardsByStage] = useState<Record<string, number>>({});
+  const [searchByStage, setSearchByStage] = useState<Record<string, string>>({});
   const [activeCard, setActiveCard] = useState<PipelineCardDTO | null>(null);
   const [bannerError, setBannerError] = useState<string | null>(null);
   const [bannerSuccess, setBannerSuccess] = useState<string | null>(null);
@@ -257,6 +301,7 @@ export function PipelineBoard({
     const next = groupByStage(activeStages, initialCards);
     setColumns(next);
     columnsRef.current = next;
+    setVisibleCardsByStage({});
   }, [fingerprint, activeStages, initialCards]);
 
   useEffect(() => {
@@ -422,9 +467,29 @@ export function PipelineBoard({
         >
           {activeStages.map((stage) => {
             const items = columns.get(stage.id) ?? [];
+            const stageSearch = searchByStage[stage.id] ?? "";
+            const filteredItems = items.filter((card) => cardMatchesColumnSearch(card, stageSearch));
+            const visibleLimit = visibleCardsByStage[stage.id] ?? CARDS_PER_PAGE;
+            const visibleItems = filteredItems.slice(0, visibleLimit);
+            const hasMore = visibleItems.length < filteredItems.length;
+            const canHide = visibleLimit > CARDS_PER_PAGE;
             return (
-              <DroppableColumn key={stage.id} stageId={stage.id} stageName={stage.name} count={items.length}>
-                {items.map((card) => (
+              <DroppableColumn
+                key={stage.id}
+                stageId={stage.id}
+                stageName={stage.name}
+                count={filteredItems.length}
+                totalCount={items.length}
+                searchValue={stageSearch}
+                onSearchChange={(value) => {
+                  setSearchByStage((current) => ({ ...current, [stage.id]: value }));
+                  setVisibleCardsByStage((current) => ({
+                    ...current,
+                    [stage.id]: CARDS_PER_PAGE,
+                  }));
+                }}
+              >
+                {visibleItems.map((card) => (
                   <DraggableCard
                     key={card.id}
                     card={card}
@@ -438,6 +503,46 @@ export function PipelineBoard({
                     }
                   />
                 ))}
+                {stageSearch.trim() && filteredItems.length === 0 ? (
+                  <li className="px-2 py-4 text-center text-xs text-[var(--muted)]">
+                    Nenhum contato encontrado.
+                  </li>
+                ) : null}
+                {filteredItems.length > CARDS_PER_PAGE ? (
+                  <li className="sticky bottom-0 mt-auto flex flex-wrap items-center justify-center gap-1.5 border-t border-[var(--border)] bg-[var(--card)] px-1 py-2">
+                    {hasMore ? (
+                      <button
+                        type="button"
+                        className="rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1 text-[11px] font-medium text-[var(--foreground)] hover:border-[var(--accent)]"
+                        onClick={() =>
+                          setVisibleCardsByStage((current) => ({
+                            ...current,
+                            [stage.id]: visibleLimit + CARDS_PER_PAGE,
+                          }))
+                        }
+                      >
+                        Ver mais
+                      </button>
+                    ) : null}
+                    {canHide ? (
+                      <button
+                        type="button"
+                        className="rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1 text-[11px] text-[var(--muted)] hover:border-[var(--accent)] hover:text-[var(--foreground)]"
+                        onClick={() =>
+                          setVisibleCardsByStage((current) => ({
+                            ...current,
+                            [stage.id]: CARDS_PER_PAGE,
+                          }))
+                        }
+                      >
+                        Ocultar
+                      </button>
+                    ) : null}
+                    <span className="basis-full text-center text-[10px] tabular-nums text-[var(--muted)]">
+                      Exibindo {visibleItems.length} de {filteredItems.length}
+                    </span>
+                  </li>
+                ) : null}
               </DroppableColumn>
             );
           })}

@@ -1,5 +1,5 @@
 import { displayUserLabel } from "@/lib/auth/display-user-label";
-import { createServerSupabaseClient, crmTables } from "@/lib/supabase/server";
+import { createServerSupabaseClient, crmTables, getServerUser } from "@/lib/supabase/server";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { signOutAction } from "@/app/actions/auth";
@@ -18,9 +18,7 @@ export default async function DashboardLayout({
   children: React.ReactNode;
 }) {
   const supabase = await createServerSupabaseClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getServerUser();
   if (!user) redirect("/login");
 
   const crm = crmTables(supabase);
