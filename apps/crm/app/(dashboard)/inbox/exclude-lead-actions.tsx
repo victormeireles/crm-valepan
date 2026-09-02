@@ -44,7 +44,7 @@ function ActionPanel({
           type="button"
           disabled={busy}
           onClick={() => void onConfirm()}
-          className="rounded-md bg-[var(--vp-wine)] px-3 py-1 text-xs font-medium text-white disabled:opacity-50"
+          className="rounded-md bg-[var(--vp-wine)] px-3 py-1 text-xs font-medium text-[var(--vp-gold)] disabled:opacity-50"
         >
           {busy ? "Salvando…" : confirmLabel}
         </button>
@@ -56,9 +56,11 @@ function ActionPanel({
 export function ExcludeLeadButton({
   leadId,
   redirectTo = "/inbox?tab=archived",
+  iconOnly = false,
 }: {
   leadId: string;
   redirectTo?: string;
+  iconOnly?: boolean;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -71,14 +73,18 @@ export function ExcludeLeadButton({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="rounded-md border border-[var(--border)] bg-[var(--vp-paper-pure)] px-3 py-1.5 text-xs font-medium text-[var(--muted)] hover:border-[var(--vp-wine)] hover:text-[var(--vp-wine)]"
+        className={iconOnly
+          ? "grid size-[34px] place-items-center rounded-full border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] text-[var(--vp-ink-muted)] hover:text-[var(--vp-wine)]"
+          : "rounded-md border border-[var(--border)] bg-[var(--vp-paper-pure)] px-3 py-1.5 text-xs font-medium text-[var(--muted)] hover:border-[var(--vp-wine)] hover:text-[var(--vp-wine)]"}
+        aria-label={iconOnly ? "Arquivar conversa" : undefined}
       >
-        Não é lead
+        {iconOnly ? <span className="material-symbols-outlined text-lg" aria-hidden="true">archive</span> : "Não é lead"}
       </button>
     );
   }
 
   return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-[rgba(35,0,4,0.35)] p-4" role="dialog" aria-modal="true" aria-label="Arquivar conversa">
     <ActionPanel
       busy={busy}
       err={err}
@@ -128,6 +134,7 @@ export function ExcludeLeadButton({
         </p>
       ) : null}
     </ActionPanel>
+    </div>
   );
 }
 

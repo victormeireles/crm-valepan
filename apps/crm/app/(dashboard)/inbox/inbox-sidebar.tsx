@@ -1,8 +1,7 @@
 "use client";
 
-import { LeadIdentity } from "@/components/lead-identity";
 import { updateConversationContactName } from "@/app/actions/inbox";
-import { formatRelativeShort } from "@/lib/format-relative";
+import { getCustomerWaitSignal } from "@/lib/lead-signals";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
@@ -21,6 +20,9 @@ export type InboxSidebarRow = {
   identityName: string;
   companyName: string | null;
   clientCategory: string | null;
+  stageName: string | null;
+  weeklyVolumeKg: number | null;
+  lastDirection: string | null;
   unread: boolean;
   callStatus: "ringing" | "missed_voice" | "missed_video" | null;
 };
@@ -56,12 +58,14 @@ export function InboxSidebar({
   activeTab,
   page,
   renderNowMs,
+  tabCounts,
 }: {
   conversations: InboxSidebarRow[];
   selectedId: string | null;
-  activeTab: "qualify" | "pipeline" | "groups" | "archived";
+  activeTab: "waiting" | "qualify" | "pipeline" | "groups" | "archived";
   page: number;
   renderNowMs: number;
+  tabCounts: { waiting: number; qualify: number; pipeline: number };
 }) {
   const router = useRouter();
   const [nowMs, setNowMs] = useState(renderNowMs);
@@ -120,67 +124,69 @@ export function InboxSidebar({
   return (
     <div
       aria-busy={navigationPending}
-      className="relative flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-xl border-y border-r border-[var(--border)] border-l-[3px] border-l-[var(--vp-gold-classic)] bg-[var(--vp-paper-pure)] shadow-[var(--sh-sm)]"
+      className="relative flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-[14px] border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] shadow-[var(--sh-sm)]"
     >
-      <div className="shrink-0 border-b border-[var(--border)] bg-[var(--vp-paper)] p-2">
-        <div className="mb-2 grid grid-cols-2 gap-1 rounded-md bg-[rgba(35,0,4,0.06)] p-1">
+      <div className="shrink-0 border-b border-[var(--vp-ink-line)] p-3">
+        <div className="mb-2.5 flex gap-0.5 rounded-full bg-[rgba(35,0,4,0.06)] p-[3px]">
           <Link
-            href="/inbox?tab=qualify"
-            className={`rounded px-2 py-1 text-center text-xs font-medium ${
-              activeTab === "qualify"
-                ? "bg-[var(--vp-paper-pure)] text-[var(--foreground)] shadow-[var(--sh-sm)]"
-                : "text-[var(--muted)] hover:text-[var(--foreground)]"
+            href="/inbox?tab=waiting"
+            className={`min-h-8 flex-1 rounded-full px-2 py-1.5 text-center text-xs font-bold ${
+              activeTab === "waiting" ? "bg-[var(--vp-wine)] text-[var(--vp-gold)]" : "text-[var(--vp-ink-muted)]"
             }`}
           >
-            Para qualificar
+            Esperando {tabCounts.waiting.toLocaleString("pt-BR")}
+          </Link>
+          <Link
+            href="/inbox?tab=qualify"
+            className={`min-h-8 flex-1 rounded-full px-2 py-1.5 text-center text-xs font-bold ${
+              activeTab === "qualify"
+                ? "bg-[var(--vp-wine)] text-[var(--vp-gold)]"
+                : "text-[var(--vp-ink-muted)]"
+            }`}
+          >
+            Qualificar {tabCounts.qualify.toLocaleString("pt-BR")}
           </Link>
           <Link
             href="/inbox?tab=pipeline"
-            className={`rounded px-2 py-1 text-center text-xs font-medium ${
+            className={`min-h-8 flex-1 rounded-full px-2 py-1.5 text-center text-xs font-bold ${
               activeTab === "pipeline"
-                ? "bg-[var(--vp-paper-pure)] text-[var(--foreground)] shadow-[var(--sh-sm)]"
-                : "text-[var(--muted)] hover:text-[var(--foreground)]"
+                ? "bg-[var(--vp-wine)] text-[var(--vp-gold)]"
+                : "text-[var(--vp-ink-muted)]"
             }`}
           >
-            No funil
-          </Link>
-          <Link
-            href="/inbox?tab=archived"
-            className={`rounded px-2 py-1 text-center text-xs font-medium ${
-              activeTab === "archived"
-                ? "bg-[var(--vp-paper-pure)] text-[var(--foreground)] shadow-[var(--sh-sm)]"
-                : "text-[var(--muted)] hover:text-[var(--foreground)]"
-            }`}
-          >
-            Arquivados
-          </Link>
-          <Link
-            href="/inbox?tab=groups"
-            className={`rounded px-2 py-1 text-center text-xs font-medium ${
-              activeTab === "groups"
-                ? "bg-[var(--vp-paper-pure)] text-[var(--foreground)] shadow-[var(--sh-sm)]"
-                : "text-[var(--muted)] hover:text-[var(--foreground)]"
-            }`}
-          >
-            Grupos
+            Funil {tabCounts.pipeline.toLocaleString("pt-BR")}
           </Link>
         </div>
-        <label htmlFor="inbox-search" className="sr-only">
-          Buscar conversas
-        </label>
-        <input
-          id="inbox-search"
-          type="search"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="Buscar por nome, telefone ou mensagem…"
-          className="w-full rounded-md border border-[var(--border)] bg-[var(--vp-paper-pure)] px-3 py-2 text-sm text-[var(--foreground)] outline-none placeholder:text-[var(--muted)] focus:border-[var(--vp-wine)] focus:ring-2 focus:ring-[var(--vp-gold)]/30"
-          autoComplete="off"
-          spellCheck={false}
-        />
+        <div className="flex items-center gap-1.5">
+          <label htmlFor="inbox-search" className="flex min-h-10 flex-1 items-center gap-2 rounded-full border border-[var(--vp-ink-line)] bg-[var(--vp-paper)] px-3">
+            <span className="material-symbols-outlined text-[17px] text-[var(--vp-ink-soft)]" aria-hidden="true">search</span>
+            <span className="sr-only">Buscar conversas</span>
+            <input
+              id="inbox-search"
+              type="search"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Buscar conversa"
+              className="w-full border-0 bg-transparent text-[13px] outline-none placeholder:text-[var(--vp-ink-soft)]"
+              autoComplete="off"
+              spellCheck={false}
+            />
+          </label>
+          <details className="group relative">
+            <summary className={`grid size-10 cursor-pointer list-none place-items-center rounded-full text-[var(--vp-ink-muted)] marker:content-none hover:bg-[var(--vp-surface)] [&::-webkit-details-marker]:hidden ${activeTab === "groups" || activeTab === "archived" ? "bg-[var(--vp-surface)] text-[var(--vp-wine)]" : ""}`} aria-label="Outras filas">
+              <span className="material-symbols-outlined text-xl" aria-hidden="true">more_horiz</span>
+            </summary>
+            <div className="absolute right-0 z-30 mt-1 min-w-40 overflow-hidden rounded-xl border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] py-1 shadow-[var(--sh-md)]">
+              <Link href="/inbox?tab=archived" className="block min-h-10 px-3 py-2.5 text-xs text-[var(--vp-ink-muted)] hover:bg-[var(--vp-surface)]">Arquivados</Link>
+              <Link href="/inbox?tab=groups" className="block min-h-10 px-3 py-2.5 text-xs text-[var(--vp-ink-muted)] hover:bg-[var(--vp-surface)]">Grupos</Link>
+            </div>
+          </details>
+        </div>
       </div>
-      <ul className="min-h-0 flex-1 divide-y divide-[var(--border)] overflow-y-auto overscroll-contain">
-        {filtered.map((c) => (
+      <ul className="min-h-0 flex-1 divide-y divide-[var(--vp-surface-high)] overflow-y-auto overscroll-contain">
+        {filtered.map((c) => {
+          const wait = getCustomerWaitSignal({ lastDirection: c.lastDirection, lastSentAt: c.lastAt, nowMs });
+          return (
           <li
             key={c.id}
             className={`relative [contain-intrinsic-size:auto_88px] [content-visibility:auto] transition-colors hover:bg-[rgba(35,0,4,0.05)] ${
@@ -201,76 +207,56 @@ export function InboxSidebar({
                 setOptimisticSelectedId(c.id);
                 startNavigation(() => router.push(href, { scroll: false }));
               }}
-              className="block px-4 py-3 pr-10"
+              className="block px-3.5 py-3 pr-10"
             >
-              <div className="flex items-start justify-between gap-2">
-                <div className="flex min-w-0 items-start gap-2">
+              <div className="flex items-start gap-2.5">
+                <div className="relative shrink-0">
                   {validAvatarUrl(c.avatarUrl) ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
                       src={validAvatarUrl(c.avatarUrl) as string}
                       alt={`Foto de ${c.identityName}`}
-                      className="mt-0.5 h-9 w-9 shrink-0 rounded-full object-cover"
+                      className="size-10 rounded-full object-cover"
                     />
                   ) : (
                     <div
-                      className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[rgba(35,0,4,0.14)] text-xs font-semibold text-[var(--vp-wine)]"
+                      className="grid size-10 place-items-center rounded-full bg-[rgba(35,0,4,0.1)] text-[13px] font-extrabold text-[var(--vp-wine)]"
                       aria-label={`Avatar de ${c.identityName}`}
                       title={c.identityName}
                     >
                       {initials(c.identityName)}
                     </div>
                   )}
-                  <div className="min-w-0 flex-1">
-                    <LeadIdentity
-                      name={c.identityName}
-                      companyName={c.companyName}
-                      category={c.clientCategory}
-                      phone={c.kind === "lead" ? c.phone_e164 : null}
-                      size="sm"
-                      layout="stacked"
-                    />
+                  {c.unread && !readIds.has(c.id) ? <span className="absolute -right-0.5 -top-0.5 size-2.5 rounded-full border-2 border-[var(--vp-paper-pure)] bg-[var(--vp-wine)]" aria-label="Conversa com mensagens não lidas" /> : null}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="truncate text-sm font-bold text-[var(--vp-ink-body)]">{c.identityName}</span>
+                    <span className={`ml-auto shrink-0 text-[11px] font-bold tabular-nums ${c.awaiting ? "text-[var(--vp-error)]" : "text-[var(--vp-ink-soft)]"}`} title={new Date(c.lastAt).toLocaleString("pt-BR")}>{wait.elapsed ?? "—"}</span>
                   </div>
+                  <p className="truncate text-xs text-[var(--vp-ink-muted)]">{c.companyName ?? c.phone_e164}</p>
                 </div>
                 <span className="flex shrink-0 items-center gap-1">
-                  {c.unread && !readIds.has(c.id) ? (
-                    <span
-                      className="size-2 shrink-0 rounded-full bg-[var(--vp-wine)]"
-                      title="Mensagens não lidas"
-                      aria-label="Conversa com mensagens não lidas"
-                    />
-                  ) : null}
                   {c.callStatus === "ringing" ? (
                     <span
-                      className="animate-pulse rounded-full bg-[var(--vp-whatsapp)] px-2 py-0.5 text-[9px] font-bold uppercase text-white"
+                      className="animate-pulse rounded-full bg-[var(--vp-whatsapp)] px-2 py-0.5 text-[9px] font-bold uppercase text-[var(--vp-paper-pure)]"
                       title="Cliente ligando agora"
                     >
                       Ligando
                     </span>
                   ) : null}
-                  <span
-                    className="text-[10px] text-[var(--muted)]"
-                    title={new Date(c.lastAt).toLocaleString("pt-BR")}
-                  >
-                    {formatRelativeShort(c.lastAt, nowMs)}
-                  </span>
                 </span>
               </div>
-              <p className="line-clamp-2 text-xs text-[var(--muted)]">{c.preview}</p>
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-[var(--muted)]">
-                <span>{c.leadLine}</span>
-                {c.awaiting ? (
-                  <span
-                    className="inline-flex items-center gap-1 font-medium text-[var(--vp-wine)]"
-                    title="Última mensagem do cliente — aguarda resposta"
-                  >
-                    <span className="size-1.5 rounded-full bg-[var(--vp-wine)]" aria-hidden />
-                    Aguarda resposta
-                  </span>
-                ) : null}
+              <p className="mt-2 line-clamp-2 text-xs leading-relaxed text-[var(--vp-ink-muted)]">{c.preview}</p>
+              <div className="mt-2 flex flex-wrap items-center gap-1 text-[10px] font-bold text-[var(--vp-ink-muted)]">
+                <span className="rounded-full bg-[var(--vp-surface)] px-2 py-0.5">{c.stageName ?? c.leadLine}</span>
+                <span className="rounded-full bg-[var(--vp-surface)] px-2 py-0.5">{c.weeklyVolumeKg == null ? "volume não informado" : `${c.weeklyVolumeKg.toLocaleString("pt-BR")} kg/sem`}</span>
                 {c.callStatus && c.callStatus !== "ringing" ? (
                   <span className="font-semibold text-[var(--vp-wine)]">
-                    {c.callStatus === "missed_video" ? "🎥 Videochamada perdida" : "📞 Ligação perdida"}
+                    <span className="material-symbols-outlined mr-1 align-middle text-sm" aria-hidden="true">
+                      {c.callStatus === "missed_video" ? "videocam" : "call"}
+                    </span>
+                    {c.callStatus === "missed_video" ? "Videochamada perdida" : "Ligação perdida"}
                   </span>
                 ) : null}
               </div>
@@ -337,7 +323,7 @@ export function InboxSidebar({
               <p className="px-4 pb-2 text-[11px] text-[var(--vp-error)]">{errorById[c.id]}</p>
             ) : null}
           </li>
-        ))}
+        )})}
         {conversations.length === 0 && (
           <li className="px-4 py-8 text-center text-sm text-[var(--muted)]">Nenhuma conversa ainda.</li>
         )}

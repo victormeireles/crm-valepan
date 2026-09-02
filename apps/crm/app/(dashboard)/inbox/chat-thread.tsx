@@ -62,6 +62,25 @@ function initials(name: string) {
   return parts.map((p) => p[0]?.toUpperCase() ?? "").join("") || "?";
 }
 
+function messageDayKey(iso: string) {
+  return new Date(iso).toLocaleDateString("pt-BR", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+}
+
+function messageDayLabel(iso: string) {
+  const date = new Date(iso);
+  const today = messageDayKey(new Date().toISOString());
+  const yesterday = messageDayKey(new Date(Date.now() - 86_400_000).toISOString());
+  const key = messageDayKey(iso);
+  if (key === today) return "Hoje";
+  if (key === yesterday) return "Ontem";
+  return date.toLocaleDateString("pt-BR", { day: "2-digit", month: "long" });
+}
+
 function isPlayableMediaSrc(value: string | null | undefined): value is string {
   if (!value) return false;
   const src = value.trim();
@@ -847,7 +866,7 @@ export function ChatThread({
           onClick={() => document.getElementById(`message-${pinnedMessage.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" })}
           className="mb-1 flex items-center gap-2 rounded-xl border-l-4 border-[var(--vp-wine)] bg-[rgba(35,0,4,0.05)] px-3 py-2 text-left text-xs hover:bg-[rgba(35,0,4,0.08)]"
         >
-          <span aria-hidden>⚑</span>
+          <span className="material-symbols-outlined text-base" aria-hidden="true">keep</span>
           <span className="min-w-0 flex-1 truncate"><strong>Mensagem fixada:</strong> {messagePreview(pinnedMessage)}</span>
         </button>
       ) : null}
@@ -856,7 +875,7 @@ export function ChatThread({
           role={feedback.error ? "alert" : "status"}
           className={`mx-auto mb-1 rounded-full px-3 py-1.5 text-xs font-medium shadow-sm ${
             feedback.error
-              ? "bg-red-50 text-[var(--vp-error)]"
+              ? "bg-[var(--vp-error-container)] text-[var(--vp-error)]"
               : "bg-[rgba(35,0,4,0.08)] text-[var(--vp-wine)]"
           }`}
         >
@@ -899,6 +918,13 @@ export function ChatThread({
           const isFavorite = favoriteOverrides[m.id] ?? m.is_favorite;
           return (
             <div key={m.id} id={`message-${m.id}`} className="w-full space-y-3">
+              {idx === 0 || messageDayKey(messages[idx - 1]?.sent_at ?? "") !== messageDayKey(m.sent_at) ? (
+                <div className="flex justify-center py-1">
+                  <span className="rounded-full bg-[rgba(35,0,4,0.06)] px-3 py-1 text-[11px] font-bold text-[var(--vp-ink-muted)]">
+                    {messageDayLabel(m.sent_at)}
+                  </span>
+                </div>
+              ) : null}
               {idx === firstNewSinceReadIdx && firstNewSinceReadIdx >= 0 ? (
                 <div
                   className="flex items-center gap-2 py-1"
@@ -933,8 +959,8 @@ export function ChatThread({
                 }}
                 className={
                   out
-                    ? `relative max-w-[min(88%,440px)] cursor-pointer rounded-2xl rounded-br-sm bg-[var(--vp-wine)] px-3 py-2 text-sm text-[var(--vp-gold)] shadow-[var(--sh-sm)]${isNewSinceRead && out ? " ring-2 ring-[var(--vp-gold)]/35" : ""}${selectedMessageId === m.id ? " ring-2 ring-[var(--vp-gold)]/60" : ""}`
-                    : `relative max-w-[min(88%,440px)] cursor-pointer rounded-2xl rounded-bl-sm border bg-[var(--vp-paper-pure)] px-3 py-2 text-sm text-[var(--foreground)] shadow-[var(--sh-sm)]${isNewSinceRead && !out ? " border-[var(--vp-wine)]/45 ring-1 ring-[var(--vp-wine)]/25" : " border-[var(--border)]"}${selectedMessageId === m.id ? " ring-2 ring-[var(--vp-wine)]/35" : ""}`
+                    ? `relative max-w-[min(76%,460px)] cursor-pointer rounded-2xl rounded-br-[4px] bg-[var(--vp-wine)] px-3.5 py-[11px] text-sm leading-[1.45] text-[var(--vp-gold-cream)] shadow-[var(--sh-sm)]${isNewSinceRead && out ? " ring-2 ring-[var(--vp-gold)]/35" : ""}${selectedMessageId === m.id ? " ring-2 ring-[var(--vp-gold)]/60" : ""}`
+                    : `relative max-w-[min(76%,460px)] cursor-pointer rounded-2xl rounded-bl-[4px] border bg-[var(--vp-paper-pure)] px-3.5 py-[11px] text-sm leading-[1.45] text-[var(--vp-ink-body)] shadow-[var(--sh-sm)]${isNewSinceRead && !out ? " border-[var(--vp-wine)]/45 ring-1 ring-[var(--vp-wine)]/25" : " border-[var(--vp-ink-line)]"}${selectedMessageId === m.id ? " ring-2 ring-[var(--vp-wine)]/35" : ""}`
                 }
               >
                 {repliedMessage ? (
@@ -948,26 +974,26 @@ export function ChatThread({
                     <span aria-hidden>⌫</span> Esta mensagem foi apagada
                   </p>
                 ) : contactCard ? (
-                  <div className="w-[min(100%,360px)] overflow-hidden rounded-xl border border-[rgba(80,20,24,0.22)] bg-[#f1dddd] text-[#3e1317]">
-                    <div className="flex items-center gap-2 border-b border-[rgba(80,20,24,0.14)] px-3 py-2">
-                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#d7acac] text-xs font-semibold text-[#4a171c]">
+                  <div className="w-[min(100%,360px)] overflow-hidden rounded-xl border border-[var(--vp-ink-line)] bg-[var(--vp-surface)] text-[var(--vp-ink-body)]">
+                    <div className="flex items-center gap-2 border-b border-[var(--vp-ink-line)] px-3 py-2">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--vp-surface-highest)] text-xs font-semibold text-[var(--vp-wine)]">
                         {initials(contactCard.name)}
                       </div>
                       <div className="min-w-0">
                         <p className="truncate text-sm font-semibold">{contactCard.name}</p>
-                        <p className="truncate text-xs text-[#6b2a2f]">{contactCard.phone}</p>
+                        <p className="truncate text-xs text-[var(--vp-ink-muted)]">{contactCard.phone}</p>
                       </div>
                     </div>
                     <div className="grid grid-cols-2 divide-x divide-[rgba(80,20,24,0.14)]">
                       <button
                         type="button"
-                        className="px-2 py-2 text-xs font-medium text-[#6b2a2f] hover:bg-[rgba(80,20,24,0.08)]"
+                        className="px-2 py-2 text-xs font-medium text-[var(--vp-wine)] hover:bg-[rgba(35,0,4,0.08)]"
                       >
                         Conversar
                       </button>
                       <button
                         type="button"
-                        className="px-2 py-2 text-xs font-medium text-[#6b2a2f] hover:bg-[rgba(80,20,24,0.08)]"
+                        className="px-2 py-2 text-xs font-medium text-[var(--vp-wine)] hover:bg-[rgba(35,0,4,0.08)]"
                       >
                         Adicionar a um grupo
                       </button>
@@ -990,22 +1016,16 @@ export function ChatThread({
                       : "justify-end text-[var(--muted)]"
                   }`}
                 >
-                  <span
-                    className={`font-medium ${
-                      out ? "text-[var(--vp-gold)]" : "text-[var(--foreground)]"
-                    }`}
-                  >
-                    {out ? outboundStatusLabel(m) : "Recebida"}
-                  </span>
-                  <span className="opacity-70">·</span>
                   <time dateTime={m.sent_at}>
-                    {new Date(m.sent_at).toLocaleString("pt-BR", {
-                      day: "2-digit",
-                      month: "2-digit",
+                    {new Date(m.sent_at).toLocaleTimeString("pt-BR", {
                       hour: "2-digit",
                       minute: "2-digit",
                     })}
                   </time>
+                  <span className="opacity-70">·</span>
+                  <span className="font-medium">
+                    {out ? outboundStatusLabel(m) : "Recebida"}
+                  </span>
                   {m.edited_at && !m.deleted_at ? <span className="opacity-70">· editada</span> : null}
                 </div>
                 {m.reaction && !m.deleted_at ? (

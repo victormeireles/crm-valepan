@@ -8,85 +8,16 @@ import {
 } from "@/app/actions/inbox";
 import { useEffect, useRef, useState } from "react";
 import { EmojiPicker } from "./emoji-picker";
-
-function IconSend({ className }: { className?: string }) {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 24 24"
-      fill="currentColor"
-      className={className}
-      aria-hidden
-    >
-      <path d="M2.01 21 23 12 2.01 3 2 10l15 2-15 2z" />
-    </svg>
-  );
-}
-
-function IconSpinner({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 24 24"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      aria-hidden
-    >
-      <circle
-        cx="12"
-        cy="12"
-        r="10"
-        stroke="currentColor"
-        strokeWidth="2.5"
-        strokeLinecap="round"
-        strokeDasharray="48 80"
-      />
-    </svg>
-  );
-}
-
-function IconAdd({ className }: { className?: string }) {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2.25"
-      strokeLinecap="round"
-      className={className}
-      aria-hidden
-    >
-      <path d="M12 5v14M5 12h14" />
-    </svg>
-  );
-}
-
-function IconMood({ className }: { className?: string }) {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.75"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-      aria-hidden
-    >
-      <circle cx="12" cy="12" r="10" />
-      <path d="M8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01" />
-    </svg>
-  );
-}
+import { QUICK_REPLIES, renderQuickReply } from "@/lib/inbox/quick-replies";
 
 export function SendMessageForm({
   conversationId,
   phone,
+  firstName,
 }: {
   conversationId: string;
   phone: string;
+  firstName: string;
 }) {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -240,7 +171,26 @@ export function SendMessageForm({
         </div>
       ) : null}
 
-      <div className="flex items-end gap-2">
+      <div className="flex items-center gap-2 overflow-x-auto pb-1">
+        <span className="shrink-0 text-[10px] font-extrabold uppercase tracking-[0.14em] text-[var(--vp-ink-soft)]">Respostas rápidas</span>
+        {QUICK_REPLIES.map((reply) => (
+          <button
+            key={reply.title}
+            type="button"
+            className="min-h-9 shrink-0 rounded-full border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] px-3 text-xs font-semibold text-[var(--vp-wine)]"
+            onClick={() => {
+              if (!messageRef.current) return;
+              messageRef.current.value = renderQuickReply(reply.body, firstName);
+              messageRef.current.focus();
+              messageRef.current.setSelectionRange(messageRef.current.value.length, messageRef.current.value.length);
+            }}
+          >
+            {reply.title}
+          </button>
+        ))}
+      </div>
+
+      <div className="flex items-end gap-2.5">
         <div className="flex min-h-12 flex-1 items-end gap-0.5 rounded-[1.5rem] border border-[var(--border)] bg-[var(--vp-paper-pure)] px-1 py-1 shadow-[var(--sh-sm)]">
           <div ref={attachRef} className="relative">
             <button
@@ -251,7 +201,7 @@ export function SendMessageForm({
               aria-haspopup="menu"
               aria-expanded={attachOpen}
             >
-              <IconAdd className="size-[22px]" />
+              <span className="material-symbols-outlined text-[22px]" aria-hidden="true">add</span>
             </button>
             {attachOpen ? (
               <div
@@ -307,7 +257,7 @@ export function SendMessageForm({
               aria-haspopup="dialog"
               aria-expanded={emojiOpen}
             >
-              <IconMood className="size-[22px]" />
+              <span className="material-symbols-outlined text-[22px]" aria-hidden="true">mood</span>
             </button>
             {emojiOpen ? (
               <div className="absolute bottom-12 left-[-2.75rem] z-30" role="dialog" aria-label="Selecionar emoji">
@@ -320,7 +270,7 @@ export function SendMessageForm({
             name="message"
             required
             rows={1}
-            placeholder="Mensagem"
+            placeholder={`Escreva para ${firstName} — Enter envia, Shift+Enter quebra linha`}
             onChange={() => {
               if (err) setErr(null);
             }}
@@ -345,14 +295,14 @@ export function SendMessageForm({
         <button
           type="submit"
           disabled={loading || uploadingAttachment}
-          className="flex size-12 shrink-0 items-center justify-center rounded-full bg-[var(--vp-wine)] text-[var(--vp-gold)] shadow-[var(--sh-md)] transition-[transform,background-color,box-shadow] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] hover:bg-[var(--vp-wine-classic)] hover:shadow-[var(--sh-lg)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--vp-gold-deep)] disabled:pointer-events-none disabled:opacity-50"
+          className="inline-flex h-[50px] shrink-0 items-center gap-2 rounded-full bg-[var(--vp-wine)] px-5 text-sm font-bold text-[var(--vp-gold)] shadow-[var(--sh-md)] transition-[transform,background-color,box-shadow] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] hover:bg-[var(--vp-wine-classic)] hover:shadow-[var(--sh-lg)] disabled:pointer-events-none disabled:opacity-50"
         >
           {loading ? (
-            <IconSpinner className="size-[22px] animate-spin text-[var(--vp-gold)]" />
+            <span className="material-symbols-outlined animate-spin text-xl" aria-hidden="true">progress_activity</span>
           ) : (
-            <IconSend className="size-[22px] translate-x-px" />
+            <span className="material-symbols-outlined text-xl" aria-hidden="true">send</span>
           )}
-          <span className="sr-only">{loading ? "A enviar…" : "Enviar mensagem"}</span>
+          <span>{loading ? "Enviando…" : "Enviar"}</span>
         </button>
       </div>
       {contactPickerOpen ? (

@@ -11,6 +11,7 @@ type Props = {
   className?: string;
   placeholder?: string;
   disabled?: boolean;
+  onBlur?: () => void;
 };
 
 export function CityAutocompleteInput({
@@ -20,6 +21,7 @@ export function CityAutocompleteInput({
   className,
   placeholder,
   disabled,
+  onBlur,
 }: Props) {
   const listId = useId().replace(/:/g, "");
   const rootRef = useRef<HTMLDivElement>(null);
@@ -91,6 +93,7 @@ export function CityAutocompleteInput({
         autoComplete="off"
         placeholder={placeholder}
         disabled={disabled}
+        onBlur={onBlur}
         aria-autocomplete="list"
         aria-expanded={showList}
       />
