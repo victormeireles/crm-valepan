@@ -1,7 +1,10 @@
 "use client";
 
 import { updateOpportunityStage } from "@/app/actions/opportunity";
-import { LeadIdentity } from "@/components/lead-identity";
+import {
+  loadPipelineStagePage,
+  type PipelinePageFilters,
+} from "@/app/actions/pipeline";
 import {
   closestCorners,
   DndContext,
@@ -19,8 +22,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PipelineSignalBadges } from "./pipeline-signal-badges";
-
-const CARDS_PER_PAGE = 20;
 
 export type PipelineStageDTO = {
   id: string;
@@ -44,6 +45,14 @@ export type PipelineCardDTO = {
   ownerId: string | null;
   ownerName: string | null;
   signals: PipelineSignal[];
+  companyCity: string | null;
+  companyState: string | null;
+  conversationId: string | null;
+  weeklyVolumeKg: number | null;
+  lastDirection: string | null;
+  lastSentAt: string | null;
+  opportunityUpdatedAt: string;
+  nextActionAt: string | null;
 };
 
 function groupByStage(
@@ -64,27 +73,6 @@ function cloneColumns(map: Map<string, PipelineCardDTO[]>) {
   const next = new Map<string, PipelineCardDTO[]>();
   for (const [k, v] of map) next.set(k, [...v]);
   return next;
-}
-
-function normalizeColumnSearch(value: string) {
-  return value
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLocaleLowerCase("pt-BR")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function cardMatchesColumnSearch(card: PipelineCardDTO, query: string) {
-  const normalizedQuery = normalizeColumnSearch(query);
-  if (!normalizedQuery) return true;
-
-  const textQueryMatches = normalizeColumnSearch(card.personName).includes(normalizedQuery);
-  const queryDigits = query.replace(/\D/g, "");
-  const phoneDigits = card.phone_e164?.replace(/\D/g, "") ?? "";
-  const phoneQueryMatches = queryDigits.length > 0 && phoneDigits.includes(queryDigits);
-
-  return textQueryMatches || phoneQueryMatches;
 }
 
 function moveCard(
@@ -112,18 +100,16 @@ function moveCard(
 function DroppableColumn({
   stageId,
   stageName,
-  count,
   totalCount,
-  searchValue,
-  onSearchChange,
+  volumeKg,
+  maxVolumeKg,
   children,
 }: {
   stageId: string;
   stageName: string;
-  count: number;
   totalCount: number;
-  searchValue: string;
-  onSearchChange: (value: string) => void;
+  volumeKg: number;
+  maxVolumeKg: number;
   children: React.ReactNode;
 }) {
   const { setNodeRef, isOver } = useDroppable({
@@ -135,28 +121,24 @@ function DroppableColumn({
     <section
       ref={setNodeRef}
       title={stageName}
-      className={`flex h-[min(62vh,26rem)] min-w-0 flex-col rounded-lg border border-[var(--border)] bg-[var(--card)] p-1.5 sm:p-2 ${
-        isOver ? "ring-2 ring-[var(--accent)] ring-offset-1 ring-offset-[var(--background)]" : ""
+      className={`flex h-[min(62vh,42rem)] min-w-0 snap-start flex-col rounded-[14px] border border-[var(--vp-ink-line)] bg-[var(--vp-surface-low)] p-2.5 ${
+        isOver ? "ring-2 ring-[var(--vp-gold-deep)] ring-offset-1 ring-offset-[var(--vp-paper)]" : ""
       }`}
     >
-      <h2 className="line-clamp-3 text-center text-[10px] font-semibold leading-tight text-[var(--muted)] sm:text-[11px]">
-        <span className="text-[var(--foreground)]">{stageName}</span>{" "}
-        <span className="font-normal tabular-nums text-[var(--muted)]">
-          ({searchValue.trim() ? `${count}/${totalCount}` : count})
-        </span>
-      </h2>
-      <label className="mt-1.5 block">
-        <span className="sr-only">Filtrar {stageName} por nome ou telefone</span>
-        <input
-          type="search"
-          value={searchValue}
-          placeholder="Nome ou telefone"
-          aria-label={`Filtrar ${stageName} por nome ou telefone`}
-          className="w-full min-w-0 rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1 text-xs text-[var(--foreground)] placeholder:text-[var(--muted)]"
-          onChange={(event) => onSearchChange(event.target.value)}
-        />
-      </label>
-      <ul className="mt-1.5 flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto overscroll-contain sm:mt-2 sm:gap-1.5">
+      <header className="shrink-0 px-1 pb-2.5 pt-0.5">
+        <div className="flex items-baseline justify-between gap-1.5">
+          <h2 className="truncate text-[11px] font-extrabold uppercase tracking-[0.1em] text-[var(--vp-wine)]">{stageName}</h2>
+          <span className="text-[13px] font-extrabold tabular-nums text-[var(--vp-ink-body)]">{totalCount.toLocaleString("pt-BR")}</span>
+        </div>
+        <p className="mb-1.5 mt-0.5 text-[11px] tabular-nums text-[var(--vp-ink-muted)]">{volumeKg.toLocaleString("pt-BR")} kg/sem</p>
+        <div className="h-[3px] overflow-hidden rounded-full bg-[rgba(35,0,4,0.1)]">
+          <div
+            className="h-full rounded-full bg-[var(--vp-gold-classic)]"
+            style={{ width: `${maxVolumeKg > 0 ? Math.max(3, (volumeKg / maxVolumeKg) * 100) : 0}%` }}
+          />
+        </div>
+      </header>
+      <ul className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overscroll-contain px-0.5 pb-0.5">
         {children}
       </ul>
     </section>
@@ -166,12 +148,16 @@ function DroppableColumn({
 function DraggableCard({
   card,
   stageId,
-  showOwner,
+  stages,
+  onOpen,
+  onMove,
   onClose,
 }: {
   card: PipelineCardDTO;
   stageId: string;
-  showOwner: boolean;
+  stages: PipelineStageDTO[];
+  onOpen: () => void;
+  onMove: (opportunityId: string, fromStageId: string, toStageId: string) => void;
   onClose: (card: PipelineCardDTO, stageId: string) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
@@ -189,81 +175,120 @@ function DraggableCard({
       }
     : undefined;
 
-  const body = (
-    <LeadIdentity
-      name={card.personName}
-      companyName={card.companyLine}
-      category={card.client_category}
-      phone={card.phone_e164}
-      size="sm"
-      layout="stacked"
-    />
-  );
   const ownerInitials = card.ownerName
     ?.split(/\s+/)
     .filter(Boolean)
     .slice(0, 2)
     .map((part) => part[0]?.toUpperCase())
     .join("");
+  const categoryLetter = (card.client_category?.trim()[0] ?? "?").toLocaleUpperCase("pt-BR");
+  const regionLabel = [card.companyState, card.companyCity].filter(Boolean).join(" · ") || "Região não informada";
+  const borderSignal = card.signals.includes("awaiting_reply")
+    ? "border-l-[var(--vp-error)]"
+    : card.signals.includes("followup_overdue")
+      ? "border-l-[var(--vp-gold-classic)]"
+      : card.signals.includes("stale")
+        ? "border-l-[var(--vp-ink-soft)]"
+        : "border-l-[var(--vp-ink-line)]";
+  const stopPointer = (event: React.SyntheticEvent) => event.stopPropagation();
 
   return (
     <li
       ref={setNodeRef}
       style={style}
-      className={`flex gap-1 rounded border border-[var(--border)] bg-[var(--background)] px-1 py-1 sm:gap-1.5 sm:px-1.5 sm:py-1.5 ${
+      {...listeners}
+      {...attributes}
+      className={`cursor-pointer rounded-xl border border-l-[3px] border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] px-3 pb-2.5 pt-[11px] shadow-[var(--sh-sm)] md:touch-none md:cursor-grab md:active:cursor-grabbing ${borderSignal} ${
         isDragging ? "opacity-40" : ""
       }`}
+      tabIndex={0}
+      aria-label={`${card.personName}. Abrir oportunidade`}
+      onClick={onOpen}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onOpen();
+        }
+      }}
     >
-      <button
-        type="button"
-        className="mt-0.5 shrink-0 cursor-grab touch-none px-0.5 text-[10px] text-[var(--muted)] hover:text-[var(--foreground)] active:cursor-grabbing sm:text-sm"
-        aria-label={`Arrastar: ${card.personName}`}
-        {...listeners}
-        {...attributes}
-      >
-        ⠿
-      </button>
-      <div className="min-w-0 flex-1">
-        {card.lead_id ? (
-          <Link className="block hover:underline" href={`/leads/${card.lead_id}`}>
-            {body}
-          </Link>
-        ) : (
-          <div className="block">{body}</div>
-        )}
-        {showOwner ? (
-          <div
-            className={`mt-1.5 inline-flex max-w-full items-center gap-1.5 rounded-full border px-1.5 py-0.5 text-[10px] ${
-              card.ownerName
-                ? "border-[var(--vp-gold)]/60 bg-[var(--vp-gold)]/10 text-[var(--vp-wine)]"
-                : "border-[var(--border)] bg-[var(--card)] text-[var(--muted)]"
-            }`}
-            title={card.ownerName ? `Responsável: ${card.ownerName}` : "Sem responsável"}
-          >
-            <span
-              aria-hidden="true"
-              className={`grid size-4 shrink-0 place-items-center rounded-full text-[8px] font-bold ${
-                card.ownerName
-                  ? "bg-[var(--vp-gold)] text-[var(--vp-wine)]"
-                  : "bg-[var(--border)] text-[var(--muted)]"
-              }`}
+      <div className="flex items-start gap-2">
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-bold leading-tight text-[var(--vp-ink-body)]">{card.personName}</p>
+          <p className="mt-0.5 truncate text-xs text-[var(--vp-ink-muted)]">{card.companyLine ?? "Empresa não informada"}</p>
+        </div>
+        <span className="grid size-[22px] shrink-0 place-items-center rounded-[7px] border border-[var(--vp-ink-line)] bg-[var(--vp-surface)] text-[10px] font-extrabold text-[var(--vp-wine)]" aria-label={card.client_category ? `Categoria: ${card.client_category}` : "Categoria não informada"}>
+          {categoryLetter}
+        </span>
+      </div>
+      <div className="mt-2 flex flex-wrap gap-1">
+        <span className="rounded-full bg-[var(--vp-surface)] px-2 py-0.5 text-[10px] font-bold tracking-[0.04em] text-[var(--vp-ink-muted)]">{regionLabel}</span>
+        <span className="rounded-full bg-[var(--vp-surface)] px-2 py-0.5 text-[10px] font-bold tracking-[0.04em] text-[var(--vp-ink-muted)]">
+          {card.weeklyVolumeKg == null ? "volume não informado" : `${card.weeklyVolumeKg.toLocaleString("pt-BR")} kg/sem`}
+        </span>
+      </div>
+      <PipelineSignalBadges
+        lastDirection={card.lastDirection}
+        lastSentAt={card.lastSentAt}
+        opportunityUpdatedAt={card.opportunityUpdatedAt}
+        nextActionAt={card.nextActionAt}
+      />
+      <div className="mt-2.5 flex items-center justify-between gap-1.5 border-t border-[var(--vp-surface-high)] pt-2">
+        <span className="inline-flex min-w-0 items-center gap-1.5">
+          <span className="grid size-5 shrink-0 place-items-center rounded-full bg-[var(--vp-gold)] text-[9px] font-extrabold text-[var(--vp-wine)]">{ownerInitials || "—"}</span>
+          <span className="truncate text-[11px] text-[var(--vp-ink-muted)]">{card.ownerName ?? "Sem responsável"}</span>
+        </span>
+        <span className="relative inline-flex shrink-0 items-center gap-0.5">
+          {card.conversationId ? (
+            <Link
+              href={`/inbox?cid=${card.conversationId}`}
+              title="Responder no chat"
+              aria-label={`Responder ${card.personName} no chat`}
+              className="grid size-11 place-items-center rounded-lg bg-[var(--vp-surface)] text-[var(--vp-wine)] md:size-7"
+              onPointerDown={stopPointer}
+              onClick={stopPointer}
             >
-              {ownerInitials || "—"}
-            </span>
-            <span className="truncate">{card.ownerName ?? "Sem responsável"}</span>
-          </div>
-        ) : null}
-        <PipelineSignalBadges signals={card.signals} />
-        <button
-          type="button"
-          className="mt-2 rounded border border-[var(--border)] px-2 py-1 text-[11px] text-[var(--muted)] hover:border-[var(--accent)] hover:text-[var(--foreground)]"
-          onClick={() => onClose(card, stageId)}
-        >
-          Encerrar
-        </button>
-        {card.lost_reason ? (
-          <p className="mt-1 text-xs text-[var(--muted)]">Motivo: {card.lost_reason}</p>
-        ) : null}
+              <span className="material-symbols-outlined text-[17px]" aria-hidden="true">chat</span>
+            </Link>
+          ) : null}
+          {card.lead_id ? (
+            <Link
+              href={`/leads/${card.lead_id}#proxima-acao`}
+              title="Agendar follow-up"
+              aria-label={`Agendar follow-up para ${card.personName}`}
+              className="grid size-11 place-items-center rounded-lg bg-[var(--vp-surface)] text-[var(--vp-wine)] md:size-7"
+              onPointerDown={stopPointer}
+              onClick={stopPointer}
+            >
+              <span className="material-symbols-outlined text-[17px]" aria-hidden="true">event</span>
+            </Link>
+          ) : null}
+          <details className="group relative" onPointerDown={stopPointer} onClick={stopPointer}>
+            <summary className="grid size-11 cursor-pointer list-none place-items-center rounded-lg bg-[var(--vp-surface)] text-[var(--vp-wine)] marker:content-none md:size-7 [&::-webkit-details-marker]:hidden" aria-label="Mais ações">
+              <span className="material-symbols-outlined text-[17px]" aria-hidden="true">more_horiz</span>
+            </summary>
+            <div className="absolute bottom-full right-0 z-30 mb-1 min-w-52 overflow-hidden rounded-xl border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] py-1 shadow-[var(--sh-md)]">
+              <p className="px-3 py-1 text-[10px] font-extrabold uppercase tracking-[0.1em] text-[var(--vp-ink-soft)] md:hidden">Mover para</p>
+              {stages.filter((stage) => !stage.is_final && stage.id !== stageId).map((stage) => (
+                <button
+                  key={stage.id}
+                  type="button"
+                  className="block min-h-11 w-full px-3 text-left text-xs text-[var(--vp-ink-muted)] hover:bg-[var(--vp-surface)] md:hidden"
+                  onClick={() => onMove(card.id, stageId, stage.id)}
+                >
+                  {stage.name}
+                </button>
+              ))}
+              <button
+                type="button"
+                className="flex min-h-11 w-full items-center gap-2 px-3 text-left text-xs font-semibold text-[var(--vp-error)] hover:bg-[var(--vp-surface)]"
+                onClick={() => onClose(card, stageId)}
+              >
+                <span className="material-symbols-outlined text-base" aria-hidden="true">block</span>
+                Encerrar oportunidade
+              </button>
+            </div>
+          </details>
+        </span>
       </div>
     </li>
   );
@@ -271,18 +296,9 @@ function DraggableCard({
 
 function CardPreview({ card }: { card: PipelineCardDTO }) {
   return (
-    <div className="pointer-events-none flex gap-2 rounded border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 shadow-lg">
-      <span className="mt-0.5 shrink-0 text-[var(--muted)]">⠿</span>
-      <div className="min-w-0 flex-1">
-        <LeadIdentity
-          name={card.personName}
-          companyName={card.companyLine}
-          category={card.client_category}
-          phone={card.phone_e164}
-          size="sm"
-          layout="stacked"
-        />
-      </div>
+    <div className="pointer-events-none w-56 rounded-xl border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] px-3 py-2.5 shadow-[var(--sh-lg)]">
+      <p className="truncate text-sm font-bold text-[var(--vp-ink-body)]">{card.personName}</p>
+      <p className="mt-0.5 truncate text-xs text-[var(--vp-ink-muted)]">{card.companyLine ?? "Empresa não informada"}</p>
     </div>
   );
 }
@@ -290,11 +306,15 @@ function CardPreview({ card }: { card: PipelineCardDTO }) {
 export function PipelineBoard({
   stages,
   initialCards,
-  showOwners = false,
+  stageTotals,
+  stageVolumes,
+  filters,
 }: {
   stages: PipelineStageDTO[];
   initialCards: PipelineCardDTO[];
-  showOwners?: boolean;
+  stageTotals: Record<string, number>;
+  stageVolumes: Record<string, number>;
+  filters: PipelinePageFilters;
 }) {
   const router = useRouter();
   const activeStages = useMemo(() => stages.filter((stage) => !stage.is_final), [stages]);
@@ -310,8 +330,7 @@ export function PipelineBoard({
   );
 
   const [columns, setColumns] = useState(() => groupByStage(activeStages, initialCards));
-  const [visibleCardsByStage, setVisibleCardsByStage] = useState<Record<string, number>>({});
-  const [searchByStage, setSearchByStage] = useState<Record<string, string>>({});
+  const [loadingStageId, setLoadingStageId] = useState<string | null>(null);
   const [activeCard, setActiveCard] = useState<PipelineCardDTO | null>(null);
   const [bannerError, setBannerError] = useState<string | null>(null);
   const [bannerSuccess, setBannerSuccess] = useState<string | null>(null);
@@ -334,8 +353,27 @@ export function PipelineBoard({
     const next = groupByStage(activeStages, initialCards);
     setColumns(next);
     columnsRef.current = next;
-    setVisibleCardsByStage({});
   }, [fingerprint, activeStages, initialCards]);
+
+  const loadMore = useCallback(
+    async (stageId: string) => {
+      setLoadingStageId(stageId);
+      setBannerError(null);
+      const current = columnsRef.current.get(stageId) ?? [];
+      const result = await loadPipelineStagePage({ stageId, offset: current.length, filters });
+      setLoadingStageId(null);
+      if (!result.ok) {
+        setBannerError(result.error ?? "Não foi possível carregar mais oportunidades.");
+        return;
+      }
+      const next = cloneColumns(columnsRef.current);
+      const existing = new Set(current.map((card) => card.id));
+      next.set(stageId, [...current, ...result.cards.filter((card) => !existing.has(card.id))]);
+      setColumns(next);
+      columnsRef.current = next;
+    },
+    [filters],
+  );
 
   useEffect(() => {
     const d = dialogRef.current;
@@ -466,6 +504,7 @@ export function PipelineBoard({
     setClosingReason("");
     setBannerError(null);
   }
+  const maxVolumeKg = Math.max(0, ...activeStages.map((stage) => stageVolumes[stage.id] ?? 0));
 
   return (
     <DndContext
@@ -487,47 +526,30 @@ export function PipelineBoard({
       ) : null}
 
       <div className="w-full min-w-0 overflow-x-auto pb-1 [scrollbar-gutter:stable]">
-        <div
-          className="grid w-full min-w-0 gap-1.5 sm:gap-2"
-          style={
-            activeStages.length > 0
-              ? {
-                  gridTemplateColumns: `repeat(${activeStages.length}, minmax(13rem, 1fr))`,
-                  width: `max(100%, ${activeStages.length * 208}px)`,
-                }
-              : undefined
-          }
-        >
+        <div className="grid w-max min-w-full snap-x snap-mandatory grid-flow-col auto-cols-[calc(100vw-3rem)] gap-3 md:w-full md:grid-flow-row md:auto-cols-auto md:grid-cols-6">
           {activeStages.map((stage) => {
             const items = columns.get(stage.id) ?? [];
-            const stageSearch = searchByStage[stage.id] ?? "";
-            const filteredItems = items.filter((card) => cardMatchesColumnSearch(card, stageSearch));
-            const visibleLimit = visibleCardsByStage[stage.id] ?? CARDS_PER_PAGE;
-            const visibleItems = filteredItems.slice(0, visibleLimit);
-            const hasMore = visibleItems.length < filteredItems.length;
-            const canHide = visibleLimit > CARDS_PER_PAGE;
+            const totalCount = stageTotals[stage.id] ?? items.length;
+            const hasMore = items.length < totalCount;
             return (
               <DroppableColumn
                 key={stage.id}
                 stageId={stage.id}
                 stageName={stage.name}
-                count={filteredItems.length}
-                totalCount={items.length}
-                searchValue={stageSearch}
-                onSearchChange={(value) => {
-                  setSearchByStage((current) => ({ ...current, [stage.id]: value }));
-                  setVisibleCardsByStage((current) => ({
-                    ...current,
-                    [stage.id]: CARDS_PER_PAGE,
-                  }));
-                }}
+                totalCount={totalCount}
+                volumeKg={stageVolumes[stage.id] ?? 0}
+                maxVolumeKg={maxVolumeKg}
               >
-                {visibleItems.map((card) => (
+                {items.map((card) => (
                   <DraggableCard
                     key={card.id}
                     card={card}
                     stageId={stage.id}
-                    showOwner={showOwners}
+                    stages={activeStages}
+                    onOpen={() => card.lead_id && router.push(`/leads/${card.lead_id}`)}
+                    onMove={(opportunityId, fromStageId, toStageId) => {
+                      void commitMove(opportunityId, fromStageId, toStageId, null);
+                    }}
                     onClose={(selectedCard, fromStageId) =>
                       setPendingClose({
                         opportunityId: selectedCard.id,
@@ -537,57 +559,23 @@ export function PipelineBoard({
                     }
                   />
                 ))}
-                {stageSearch.trim() && filteredItems.length === 0 ? (
-                  <li className="px-2 py-4 text-center text-xs text-[var(--muted)]">
-                    Nenhum contato encontrado.
+                {items.length === 0 ? (
+                  <li className="px-2 py-6 text-center text-xs text-[var(--vp-ink-soft)]">
+                    Nenhuma oportunidade nesta etapa.
                   </li>
                 ) : null}
-                {filteredItems.length > CARDS_PER_PAGE ? (
-                  <li className="sticky bottom-0 mt-auto flex flex-wrap items-center justify-center gap-1.5 border-t border-[var(--border)] bg-[var(--card)] px-1 py-2">
-                    {hasMore ? (
-                      <button
-                        type="button"
-                        className="rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1 text-[11px] font-medium text-[var(--foreground)] hover:border-[var(--accent)]"
-                        onClick={() =>
-                          setVisibleCardsByStage((current) => ({
-                            ...current,
-                            [stage.id]: visibleLimit + CARDS_PER_PAGE,
-                          }))
-                        }
-                      >
-                        Ver mais
-                      </button>
-                    ) : null}
-                    {canHide ? (
-                      <button
-                        type="button"
-                        className="rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1 text-[11px] text-[var(--muted)] hover:border-[var(--accent)] hover:text-[var(--foreground)]"
-                        onClick={() =>
-                          setVisibleCardsByStage((current) => ({
-                            ...current,
-                            [stage.id]: CARDS_PER_PAGE,
-                          }))
-                        }
-                      >
-                        Ocultar
-                      </button>
-                    ) : null}
-                    {hasMore ? (
-                      <button
-                        type="button"
-                        className="rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1 text-[11px] text-[var(--muted)] hover:border-[var(--accent)] hover:text-[var(--foreground)]"
-                        onClick={() =>
-                          setVisibleCardsByStage((current) => ({
-                            ...current,
-                            [stage.id]: filteredItems.length,
-                          }))
-                        }
-                      >
-                        Ir para o final
-                      </button>
-                    ) : null}
+                {hasMore ? (
+                  <li className="sticky bottom-0 mt-auto flex flex-wrap items-center justify-center gap-1.5 border-t border-[var(--vp-ink-line)] bg-[var(--vp-surface-low)] px-1 py-2">
+                    <button
+                      type="button"
+                      className="min-h-11 rounded-lg border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] px-3 text-[11px] font-bold text-[var(--vp-wine)] hover:border-[var(--vp-gold-classic)] disabled:opacity-50 md:min-h-8"
+                      onClick={() => void loadMore(stage.id)}
+                      disabled={loadingStageId === stage.id}
+                    >
+                      {loadingStageId === stage.id ? "Carregando…" : "Ver mais"}
+                    </button>
                     <span className="basis-full text-center text-[10px] tabular-nums text-[var(--muted)]">
-                      Exibindo {visibleItems.length} de {filteredItems.length}
+                      Carregados {items.length} de {totalCount}
                     </span>
                   </li>
                 ) : null}

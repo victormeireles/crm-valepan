@@ -518,6 +518,94 @@ export interface Database {
       };
     };
     Functions: {
+      pipeline_cards_page: {
+        Args: {
+          p_messages_visible_since: string;
+          p_owner_user_id?: string | null;
+          p_signal?: string | null;
+          p_region?: string | null;
+          p_client_category?: string | null;
+          p_query?: string | null;
+          p_stage_id?: string | null;
+          p_offset?: number;
+          p_limit?: number;
+          p_volume?: string | null;
+        };
+        Returns: Database["crm"]["Functions"]["pipeline_cards"]["Returns"];
+      };
+      pipeline_stage_counts: {
+        Args: {
+          p_messages_visible_since: string;
+          p_owner_user_id?: string | null;
+          p_signal?: string | null;
+          p_region?: string | null;
+          p_client_category?: string | null;
+          p_query?: string | null;
+          p_stage_id?: string | null;
+          p_volume?: string | null;
+        };
+        Returns: { stage_id: string; card_count: number; volume_kg: number }[];
+      };
+      pipeline_owner_counts: {
+        Args: {
+          p_messages_visible_since: string;
+          p_signal?: string | null;
+          p_region?: string | null;
+          p_client_category?: string | null;
+          p_query?: string | null;
+          p_stage_id?: string | null;
+          p_volume?: string | null;
+        };
+        Returns: { owner_id: string; card_count: number }[];
+      };
+      pipeline_owner_summary: {
+        Args: {
+          p_messages_visible_since: string;
+          p_owner_user_id?: string | null;
+          p_region?: string | null;
+          p_client_category?: string | null;
+          p_query?: string | null;
+          p_stage_id?: string | null;
+          p_volume?: string | null;
+        };
+        Returns: {
+          open_count: number;
+          awaiting_reply_count: number;
+          stale_count: number;
+          overdue_count: number;
+        }[];
+      };
+      pipeline_cards: {
+        Args: {
+          p_messages_visible_since: string;
+        };
+        Returns: {
+          opportunity_id: string;
+          title: string | null;
+          lead_id: string;
+          stage_id: string;
+          lost_reason: string | null;
+          opportunity_owner_id: string | null;
+          lead_owner_id: string | null;
+          opportunity_updated_at: string;
+          next_action_at: string | null;
+          stage_is_final: boolean;
+          phone_e164: string;
+          client_category: string | null;
+          distributor_id: string | null;
+          network_type: string | null;
+          contact_name: string | null;
+          company_name: string | null;
+          distributor_name: string | null;
+          company_city: string | null;
+          company_state: string | null;
+          weekly_bread_consumption: number | null;
+          bread_weight_grams: number | null;
+          conversation_id: string;
+          last_direction: string;
+          last_sent_at: string;
+        }[];
+      };
       dashboard_pipeline_stage_counts: {
         Args: Record<string, never>;
         Returns: {

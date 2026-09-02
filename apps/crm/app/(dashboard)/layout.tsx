@@ -4,6 +4,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { signOutAction } from "@/app/actions/auth";
 import { DashboardNav } from "./dashboard-nav";
+import { DashboardContextSearch } from "./dashboard-context-search";
 
 const roleLabel: Record<string, string> = {
   admin: "Administrador",
@@ -54,7 +55,8 @@ export default async function DashboardLayout({
             </Link>
             <DashboardNav />
           </div>
-          <div className="flex items-center border-l border-[rgba(255,248,247,0.2)] pl-4 md:pl-5">
+          <div className="flex items-center gap-3 border-l border-[rgba(255,248,247,0.2)] pl-4 md:pl-5">
+            <DashboardContextSearch />
             <div className="flex flex-wrap items-center gap-3 rounded-xl bg-[rgba(255,248,247,0.08)] px-3 py-2 text-sm backdrop-blur-sm">
               <span className="text-[rgba(255,248,247,0.88)]">
                 {displayUserLabel(user, profile)}{" "}

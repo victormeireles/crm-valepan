@@ -1,265 +1,217 @@
 "use client";
 
-import {
-  isPipelineSignal,
-  PIPELINE_SIGNAL_LABELS,
-  PIPELINE_SIGNALS,
-  PIPELINE_STALE_DAYS,
-} from "@/lib/pipeline-signals";
-import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useState, useTransition } from "react";
+import type { PipelinePageFilters, PipelineVolumeFilter } from "@/app/actions/pipeline";
+import type { ClientCategoryValue } from "@/lib/client-categories";
+import { PIPELINE_STALE_DAYS, type PipelineRegion } from "@/lib/pipeline-signals";
+import type { PipelineStageDTO } from "./pipeline-board";
 
-const SEARCH_DEBOUNCE_MS = 300;
+type TeamOption = { id: string; label: string; count: number };
 
-export function PipelineFilters({
-  totalCount,
+function initials(name: string) {
+  return name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("");
+}
+
+function firstName(name: string) {
+  return name.trim().split(/\s+/)[0] || "Sem nome";
+}
+
+export function PipelineHeader({
   visibleCount,
+  volumeKg,
+  totalCount,
   teamOptions,
   mineCount,
   canViewTeam,
+  currentUserId,
+  filters,
+  pending,
+  onFilterChange,
 }: {
-  totalCount: number;
   visibleCount: number;
-  teamOptions: { id: string; label: string; count: number }[];
+  volumeKg: number;
+  totalCount: number;
+  teamOptions: TeamOption[];
   mineCount: number;
   canViewTeam: boolean;
+  currentUserId: string | null;
+  filters: PipelinePageFilters;
+  pending: boolean;
+  onFilterChange: (patch: Record<string, string | null>) => void;
 }) {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const [pending, startTransition] = useTransition();
-
-  const mine = searchParams.get("mine") === "1";
-  const owner = searchParams.get("owner")?.trim() ?? "";
-  const signalRaw = searchParams.get("signal")?.trim() ?? "";
-  const signal = isPipelineSignal(signalRaw) ? signalRaw : null;
-  const region = searchParams.get("region")?.trim() ?? "";
-  const clientCategory = searchParams.get("client_category")?.trim() ?? "";
-  const q = searchParams.get("q") ?? "";
-
-  const [draftQ, setDraftQ] = useState(q);
-
-  useEffect(() => {
-    setDraftQ(q);
-  }, [q]);
-
-  const pushParams = useCallback(
-    (patch: Record<string, string | null>) => {
-      const next = new URLSearchParams(searchParams.toString());
-      for (const [key, value] of Object.entries(patch)) {
-        if (value === null || value === "") next.delete(key);
-        else next.set(key, value);
-      }
-      next.delete("page");
-      if (patch.owner !== undefined && patch.owner) next.delete("mine");
-      if (patch.mine !== undefined && patch.mine === "1") next.delete("owner");
-      const qs = next.toString();
-      startTransition(() => {
-        router.push(qs ? `/pipeline?${qs}` : "/pipeline");
-      });
-    },
-    [router, searchParams],
-  );
-
-  const commitSearch = useCallback(
-    (value: string) => {
-      const trimmed = value.trim();
-      if (trimmed === q.trim()) return;
-      pushParams({ q: trimmed || null });
-    },
-    [pushParams, q],
-  );
-
-  useEffect(() => {
-    const trimmed = draftQ.trim();
-    if (trimmed === q.trim()) return;
-    const id = window.setTimeout(() => commitSearch(draftQ), SEARCH_DEBOUNCE_MS);
-    return () => window.clearTimeout(id);
-  }, [draftQ, q, commitSearch]);
-
-  const ownerButtonClass = (selected: boolean) =>
-    `flex shrink-0 items-center gap-2 rounded-full border px-3 py-2 text-sm transition-colors ${
-      selected
-        ? "border-[var(--vp-gold)] bg-[var(--vp-wine)] font-semibold text-[var(--vp-gold)] shadow-sm"
-        : "border-[var(--border)] bg-[var(--background)] text-[var(--foreground)] hover:border-[var(--vp-gold)]"
-    }`;
+  const number = new Intl.NumberFormat("pt-BR");
 
   return (
-    <div className="space-y-4">
-      {canViewTeam ? <section
-        aria-label="Funil por vendedor"
-        className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-3"
-      >
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <h2 className="text-sm font-semibold text-[var(--foreground)]">Funil por vendedor</h2>
-            <p className="text-xs text-[var(--muted)]">
-              Selecione um responsável para ver a carteira dele.
-            </p>
-          </div>
-          {pending ? <span className="text-xs text-[var(--muted)]">Atualizando…</span> : null}
-        </div>
-
-        <div className="flex gap-2 overflow-x-auto pb-1" role="group" aria-label="Selecionar vendedor">
-          <button
-            type="button"
-            className={ownerButtonClass(!mine && !owner)}
-            aria-pressed={!mine && !owner}
-            onClick={() => pushParams({ mine: null, owner: null })}
-          >
-            <span>Todos</span>
-            <span className="rounded-full bg-black/10 px-1.5 py-0.5 text-xs tabular-nums">
-              {totalCount}
-            </span>
-          </button>
-          <button
-            type="button"
-            className={ownerButtonClass(mine)}
-            aria-pressed={mine}
-            onClick={() => pushParams({ mine: "1", owner: null })}
-          >
-            <span>Meus</span>
-            <span className="rounded-full bg-black/10 px-1.5 py-0.5 text-xs tabular-nums">
-              {mineCount}
-            </span>
-          </button>
-          {teamOptions.map((option) => {
-            const selected = !mine && owner === option.id;
-            const initials = option.label
-              .split(/\s+/)
-              .filter(Boolean)
-              .slice(0, 2)
-              .map((part) => part[0]?.toUpperCase())
-              .join("");
-            return (
-              <button
-                key={option.id}
-                type="button"
-                className={ownerButtonClass(selected)}
-                aria-pressed={selected}
-                onClick={() => pushParams({ mine: null, owner: option.id })}
-              >
-                <span
-                  aria-hidden="true"
-                  className="grid size-6 place-items-center rounded-full bg-[var(--vp-gold)] text-[10px] font-bold text-[var(--vp-wine)]"
-                >
-                  {initials || "?"}
-                </span>
-                <span>{option.label}</span>
-                <span className="rounded-full bg-black/10 px-1.5 py-0.5 text-xs tabular-nums">
-                  {option.count}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      </section> : (
-        <section className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-3">
-          <h2 className="text-sm font-semibold text-[var(--foreground)]">Novos leads e minha carteira</h2>
-          <p className="mt-1 text-xs text-[var(--muted)]">
-            Você vê a fila de novos contatos e os leads atribuídos ao seu usuário.
-          </p>
-        </section>
-      )}
-
-      <div className="space-y-3 rounded-lg border border-[var(--border)] bg-[var(--card)] p-3">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="text-xs font-medium text-[var(--muted)]">Filtros do funil</p>
-          <p className="text-xs tabular-nums text-[var(--muted)]">
-          {visibleCount === totalCount ? (
-            <>{totalCount} oportunidade{totalCount === 1 ? "" : "s"}</>
-          ) : (
-            <>
-              {visibleCount} de {totalCount}
-            </>
-          )}
-          {pending ? " · …" : null}
-          </p>
-        </div>
-
-      <div className="flex flex-wrap gap-2">
-        <label className="flex min-w-[12rem] flex-1 flex-col gap-1 text-xs">
-          <span className="text-[var(--muted)]">Buscar por nome ou telefone</span>
-          <input
-            type="search"
-            value={draftQ}
-            placeholder="Ex.: Maria, Valepan, 11999998888…"
-            className="rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1.5 text-sm"
-            onChange={(e) => setDraftQ(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key !== "Enter") return;
-              e.preventDefault();
-              commitSearch(e.currentTarget.value);
-            }}
-          />
-          <span className="text-[10px] text-[var(--muted)]">
-            Também busca empresa e título da oportunidade. Atualiza ao digitar.
-          </span>
-        </label>
-
-        <label className="flex min-w-[10rem] flex-col gap-1 text-xs">
-          <span className="text-[var(--muted)]">Região</span>
-          <select
-            className="rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1.5 text-sm"
-            value={region}
-            onChange={(e) => pushParams({ region: e.target.value || null })}
-          >
-            <option value="">Todas</option>
-            <option value="sp">São Paulo (DDD 11)</option>
-            <option value="rj">Rio de Janeiro (DDD 21)</option>
-          </select>
-        </label>
-
-        <label className="flex min-w-[10rem] flex-col gap-1 text-xs">
-          <span className="text-[var(--muted)]">Tipo de cliente</span>
-          <select
-            className="rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1.5 text-sm"
-            value={clientCategory}
-            onChange={(e) => pushParams({ client_category: e.target.value || null })}
-          >
-            <option value="">Todos</option>
-            <option value="hamburgueria">Hamburgueria</option>
-            <option value="distribuidor">Distribuidor</option>
-            <option value="parceiros">Parceiros</option>
-            <option value="outros">Outros</option>
-          </select>
-        </label>
-
-        <label className="flex min-w-[10rem] flex-col gap-1 text-xs">
-          <span className="text-[var(--muted)]">Status automático</span>
-          <select
-            className="rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1.5 text-sm"
-            value={signal ?? ""}
-            onChange={(e) => {
-              const v = e.target.value;
-              pushParams({ signal: v || null });
-            }}
-          >
-            <option value="">Todos</option>
-            {PIPELINE_SIGNALS.map((s) => (
-              <option key={s} value={s}>
-                {PIPELINE_SIGNAL_LABELS[s]}
-              </option>
-            ))}
-          </select>
-        </label>
+    <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+      <div>
+        <h1
+          className="text-[40px] leading-none tracking-[0.01em] text-[var(--vp-wine)]"
+          style={{ fontFamily: "var(--font-display)" }}
+        >
+          Funil comercial
+        </h1>
+        <p className="mt-1.5 text-[13px] text-[var(--vp-ink-muted)]" aria-live="polite">
+          {number.format(visibleCount)} oportunidades abertas · {number.format(volumeKg)} kg/semana em jogo · {pending ? "atualizando…" : "atualizado agora"}
+        </p>
       </div>
 
-      {(mine || owner || signal || region || clientCategory || q) ? (
-        <button
-          type="button"
-          className="text-xs text-[var(--vp-wine)] hover:underline"
-          onClick={() => router.push("/pipeline")}
-        >
+      {canViewTeam ? (
+        <section className="min-w-0" aria-label="Funil por vendedor">
+          <div className="mb-1.5 text-[11px] font-extrabold uppercase tracking-[0.14em] text-[var(--vp-ink-soft)] lg:text-right">
+            Vendedor
+          </div>
+          <div className="flex max-w-full gap-1.5 overflow-x-auto pb-1" role="group" aria-label="Selecionar vendedor">
+            <button
+              type="button"
+              className={`min-h-9 shrink-0 rounded-full border px-3.5 text-[13px] font-bold ${
+                !filters.ownerUserId
+                  ? "border-[var(--vp-wine)] bg-[var(--vp-wine)] text-[var(--vp-gold)]"
+                  : "border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] text-[var(--vp-ink-body)]"
+              }`}
+              aria-pressed={!filters.ownerUserId}
+              onClick={() => onFilterChange({ mine: null, owner: null })}
+            >
+              Todos <span className="ml-1 opacity-70">{number.format(totalCount)}</span>
+            </button>
+            {currentUserId ? (
+              <button
+                type="button"
+                className={`inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-full border py-1 pl-1 pr-3 text-[13px] ${
+                  filters.ownerUserId === currentUserId
+                    ? "border-[var(--vp-wine)] bg-[var(--vp-wine)] font-bold text-[var(--vp-gold)]"
+                    : "border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] text-[var(--vp-ink-body)]"
+                }`}
+                aria-pressed={filters.ownerUserId === currentUserId}
+                onClick={() => onFilterChange({ mine: "1", owner: null })}
+              >
+                <span className="grid size-[22px] place-items-center rounded-full bg-[var(--vp-gold)] text-[10px] font-extrabold text-[var(--vp-wine)]">EU</span>
+                Meus <span className="text-[var(--vp-ink-soft)]">{number.format(mineCount)}</span>
+              </button>
+            ) : null}
+            {teamOptions.filter((option) => option.id !== currentUserId).map((option) => {
+              const selected = filters.ownerUserId === option.id;
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  className={`inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-full border py-1 pl-1 pr-3 text-[13px] ${
+                    selected
+                      ? "border-[var(--vp-wine)] bg-[var(--vp-wine)] font-bold text-[var(--vp-gold)]"
+                      : "border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] text-[var(--vp-ink-body)]"
+                  }`}
+                  aria-pressed={selected}
+                  onClick={() => onFilterChange({ mine: null, owner: option.id })}
+                >
+                  <span className="grid size-[22px] place-items-center rounded-full bg-[var(--vp-gold)] text-[10px] font-extrabold text-[var(--vp-wine)]">
+                    {initials(option.label) || "?"}
+                  </span>
+                  {firstName(option.label)} <span className={selected ? "opacity-70" : "text-[var(--vp-ink-soft)]"}>{number.format(option.count)}</span>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
+    </header>
+  );
+}
+
+function FilterMenu({
+  label,
+  options,
+  value,
+  onChange,
+}: {
+  label: string;
+  options: { value: string; label: string }[];
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <details className="group relative shrink-0">
+      <summary className="inline-flex min-h-9 cursor-pointer list-none items-center gap-1.5 rounded-full border border-dotted border-[rgba(35,0,4,0.35)] px-3 text-xs font-semibold text-[var(--vp-ink-muted)] marker:content-none [&::-webkit-details-marker]:hidden">
+        {label}
+        <span className="material-symbols-outlined text-[14px] transition-transform group-open:rotate-180" aria-hidden="true">expand_more</span>
+      </summary>
+      <div className="absolute left-0 z-40 mt-1 min-w-52 overflow-hidden rounded-xl border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] py-1 shadow-[var(--sh-md)]">
+        {options.map((option) => (
+          <button
+            key={option.value || "all"}
+            type="button"
+            className={`flex min-h-10 w-full items-center justify-between px-3 text-left text-xs hover:bg-[var(--vp-surface)] ${value === option.value ? "font-bold text-[var(--vp-wine)]" : "text-[var(--vp-ink-muted)]"}`}
+            onClick={(event) => {
+              onChange(option.value);
+              event.currentTarget.closest("details")?.removeAttribute("open");
+            }}
+          >
+            {option.label}
+            {value === option.value ? <span className="material-symbols-outlined text-base" aria-hidden="true">check</span> : null}
+          </button>
+        ))}
+      </div>
+    </details>
+  );
+}
+
+export function PipelineFilters({
+  stages,
+  filters,
+  hasAnyFilter,
+  onFilterChange,
+}: {
+  stages: PipelineStageDTO[];
+  filters: PipelinePageFilters;
+  hasAnyFilter: boolean;
+  onFilterChange: (patch: Record<string, string | null>) => void;
+}) {
+  const selectedStage = stages.find((stage) => stage.id === filters.stageId);
+  const regionLabels: Record<PipelineRegion, string> = { sp: "São Paulo", rj: "Rio de Janeiro" };
+  const categoryLabels: Record<ClientCategoryValue, string> = {
+    hamburgueria: "Hamburgueria",
+    distribuidor: "Distribuidor",
+    parceiros: "Parceiros",
+    outros: "Outros",
+  };
+  const volumeLabels: Record<Exclude<PipelineVolumeFilter, null>, string> = {
+    informado: "informado",
+    ate_100: "até 100 kg/sem",
+    acima_100: "acima de 100 kg/sem",
+  };
+
+  return (
+    <div className="flex flex-wrap items-center gap-2.5">
+      <span className="text-[11px] font-extrabold uppercase tracking-[0.14em] text-[var(--vp-ink-soft)]">Filtros</span>
+      <FilterMenu
+        label={`Região: ${filters.region ? regionLabels[filters.region] : "todas"}`}
+        value={filters.region ?? ""}
+        options={[{ value: "", label: "Todas" }, { value: "sp", label: "São Paulo (DDD 11)" }, { value: "rj", label: "Rio de Janeiro (DDD 21)" }]}
+        onChange={(value) => onFilterChange({ region: value || null })}
+      />
+      <FilterMenu
+        label={`Tipo de cliente: ${filters.clientCategory ? categoryLabels[filters.clientCategory].toLocaleLowerCase("pt-BR") : "todos"}`}
+        value={filters.clientCategory ?? ""}
+        options={[{ value: "", label: "Todos" }, ...Object.entries(categoryLabels).map(([value, label]) => ({ value, label }))]}
+        onChange={(value) => onFilterChange({ client_category: value || null })}
+      />
+      <FilterMenu
+        label={`Etapa: ${selectedStage?.name.toLocaleLowerCase("pt-BR") ?? "abertas"}`}
+        value={filters.stageId ?? ""}
+        options={[{ value: "", label: "Todas as abertas" }, ...stages.filter((stage) => !stage.is_final).map((stage) => ({ value: stage.id, label: stage.name }))]}
+        onChange={(value) => onFilterChange({ stage: value || null })}
+      />
+      <FilterMenu
+        label={`Volume: ${filters.volume ? volumeLabels[filters.volume] : "qualquer"}`}
+        value={filters.volume ?? ""}
+        options={[{ value: "", label: "Qualquer volume" }, { value: "informado", label: "Volume informado" }, { value: "ate_100", label: "Até 100 kg/sem" }, { value: "acima_100", label: "Acima de 100 kg/sem" }]}
+        onChange={(value) => onFilterChange({ volume: value || null })}
+      />
+      {hasAnyFilter ? (
+        <button type="button" className="min-h-9 text-xs font-semibold text-[var(--vp-wine)] hover:underline" onClick={() => onFilterChange({ mine: null, owner: null, signal: null, region: null, client_category: null, stage: null, volume: null, q: null })}>
           Limpar filtros
         </button>
       ) : null}
-
-        <p className="text-[11px] leading-relaxed text-[var(--muted)]">
-          Sinais: última mensagem do cliente (sem resposta) ou da equipe no WhatsApp/chat
-          (respondido); oportunidade aberta sem movimento há {PIPELINE_STALE_DAYS}+ dias; próxima
-          ação do funil vencida.
-        </p>
-      </div>
+      <p className="ml-auto text-[11px] text-[var(--vp-ink-soft)]">
+        Sinais: resposta pendente, follow-up vencido e oportunidade parada há {PIPELINE_STALE_DAYS}+ dias · arraste para mudar de etapa
+      </p>
     </div>
   );
 }

@@ -1,25 +1,35 @@
-import { PIPELINE_SIGNAL_LABELS, type PipelineSignal } from "@/lib/pipeline-signals";
+import { getCustomerWaitSignal, getNextActionSignal } from "@/lib/lead-signals";
 
-const SIGNAL_STYLES: Record<PipelineSignal, string> = {
-  awaiting_reply: "border-[var(--vp-error)]/40 bg-[rgba(180,40,40,0.08)] text-[var(--vp-error)]",
-  replied: "border-[var(--vp-whatsapp)]/50 bg-[rgba(37,211,102,0.1)] text-[var(--vp-wine)]",
-  stale: "border-[var(--border)] bg-[var(--vp-surface-low)] text-[var(--muted)]",
-  followup_overdue: "border-[var(--vp-gold-classic)]/50 bg-[rgba(199,166,77,0.15)] text-[var(--vp-wine)]",
-};
+export function PipelineSignalBadges({
+  lastDirection,
+  lastSentAt,
+  opportunityUpdatedAt,
+  nextActionAt,
+}: {
+  lastDirection: string | null;
+  lastSentAt: string | null;
+  opportunityUpdatedAt: string;
+  nextActionAt: string | null;
+}) {
+  const wait = getCustomerWaitSignal({
+    lastDirection,
+    lastSentAt: lastSentAt ?? opportunityUpdatedAt,
+  });
+  const nextAction = getNextActionSignal(nextActionAt);
+  const emphasized = nextAction.state === "sem_acao" || nextAction.state === "vencida";
 
-export function PipelineSignalBadges({ signals }: { signals: PipelineSignal[] }) {
-  if (signals.length === 0) return null;
   return (
-    <ul className="mt-1 flex flex-wrap gap-0.5">
-      {signals.map((s) => (
-        <li
-          key={s}
-          className={`rounded px-1 py-px text-[9px] font-semibold leading-tight ${SIGNAL_STYLES[s]}`}
-          title={PIPELINE_SIGNAL_LABELS[s]}
-        >
-          {PIPELINE_SIGNAL_LABELS[s]}
-        </li>
-      ))}
-    </ul>
+    <div className="mt-2 space-y-1.5">
+      <div className="flex items-center gap-1.5 rounded-lg bg-[rgba(35,0,4,0.045)] px-2 py-1.5">
+        <span className="material-symbols-outlined text-[15px] text-[var(--vp-ink-muted)]" aria-hidden="true">schedule</span>
+        <span className="text-[11px] font-bold text-[var(--vp-ink-muted)]">{wait.label}</span>
+      </div>
+      <div className="flex items-center gap-1.5 px-0.5">
+        <span className="material-symbols-outlined text-[15px] text-[var(--vp-gold-deep)]" aria-hidden="true">flag</span>
+        <span className={`text-[11px] ${emphasized ? "font-bold text-[var(--vp-ink-body)]" : "font-semibold text-[var(--vp-ink-muted)]"}`}>
+          {nextAction.label}
+        </span>
+      </div>
+    </div>
   );
 }

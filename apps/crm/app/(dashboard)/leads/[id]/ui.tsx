@@ -263,7 +263,7 @@ export function LeadActions({
           onChange={(e) => setTitle(e.target.value)}
         />
       </label>
-      <label className="flex flex-col gap-1">
+      <label id="proxima-acao" className="flex scroll-mt-28 flex-col gap-1">
         Próxima ação
         <input
           type="datetime-local"
