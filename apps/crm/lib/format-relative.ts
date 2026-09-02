@@ -18,3 +18,20 @@ export function formatRelativeShort(iso: string, nowMs = Date.now()): string {
     minute: "2-digit",
   });
 }
+
+/** Duração passada compacta para sinais operacionais (ex.: 8min, 6h, 3d). */
+export function formatElapsedShort(iso: string, nowMs = Date.now()): string | null {
+  const thenMs = new Date(iso).getTime();
+  if (!Number.isFinite(thenMs)) return null;
+
+  const elapsedSeconds = Math.max(0, Math.floor((nowMs - thenMs) / 1_000));
+  if (elapsedSeconds < 60) return "agora";
+
+  const elapsedMinutes = Math.floor(elapsedSeconds / 60);
+  if (elapsedMinutes < 60) return `${elapsedMinutes}min`;
+
+  const elapsedHours = Math.floor(elapsedMinutes / 60);
+  if (elapsedHours < 24) return `${elapsedHours}h`;
+
+  return `${Math.floor(elapsedHours / 24)}d`;
+}

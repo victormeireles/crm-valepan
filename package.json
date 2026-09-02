@@ -15,7 +15,7 @@
     "dev:fresh": "node scripts/dev.cjs",
     "dev:node": "node scripts/sync-env.cjs && node scripts/run-in-app.cjs dev --turbopack",
     "build": "node scripts/run-in-app.cjs build",
-    "lint": "node scripts/run-in-app.cjs lint",
+    "lint": "npm --workspace apps/crm run lint",
     "test": "node scripts/run-vitest.cjs",
     "typecheck": "node ./node_modules/typescript/bin/tsc --noEmit -p packages/shared && node ./node_modules/typescript/bin/tsc --noEmit -p apps/crm",
     "seed:admin": "node scripts/seed-admin.cjs",
