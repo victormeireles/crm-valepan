@@ -1,7 +1,6 @@
 import { LeadIdentity } from "@/components/lead-identity";
 import { formatRelativeShort } from "@/lib/format-relative";
 import { displayCompanyName, displayPersonName } from "@/lib/lead-identity";
-import { isLeadExcludedFromPipeline } from "@/lib/lead-pipeline-exclusion";
 import { nestOne } from "@/lib/supabase/nested";
 import { createServerSupabaseClient, crmTables } from "@/lib/supabase/server";
 import Link from "next/link";
@@ -58,7 +57,7 @@ export default async function DashboardPage() {
     { count: openTasks },
     { count: samples },
     { data: stages },
-    { data: opps },
+    { data: pipelineCounts, error: pipelineCountsError },
     { count: overdue },
     { data: kpiRows, error: kpiError },
     { data: recentLeads },
@@ -73,9 +72,7 @@ export default async function DashboardPage() {
       .from("pipeline_stages")
       .select("id, name, sort_order, is_final")
       .order("sort_order", { ascending: true }),
-    crm
-      .from("opportunities")
-      .select("stage_id, leads(excluded_from_pipeline_at)"),
+    crm.rpc("dashboard_pipeline_stage_counts"),
     crm
       .from("tasks")
       .select("*", { count: "exact", head: true })
@@ -94,25 +91,20 @@ export default async function DashboardPage() {
   ]);
 
   const stageRows = stages ?? [];
-  const finalStageIds = new Set(stageRows.filter((s) => s.is_final).map((s) => s.id));
-  const activeOpps = (opps ?? []).filter((o) => {
-    const lead = nestOne(
-      (o as { leads?: { excluded_from_pipeline_at?: string | null } | { excluded_from_pipeline_at?: string | null }[] | null })
-        .leads ?? null,
-    );
-    return !isLeadExcludedFromPipeline(lead);
-  });
-
-  const openPipelineCount = activeOpps.filter(
-    (o) => o.stage_id && !finalStageIds.has(o.stage_id),
-  ).length;
-
-  const totalOpps = activeOpps.length;
-  const countByStage = new Map<string, number>();
-  for (const o of activeOpps) {
-    if (!o.stage_id) continue;
-    countByStage.set(o.stage_id, (countByStage.get(o.stage_id) ?? 0) + 1);
-  }
+  const pipelineCountRows = (pipelineCountsError ? [] : (pipelineCounts ?? [])) as Array<{
+    stage_id: string;
+    opportunity_count: number | string;
+  }>;
+  const countByStage = new Map<string, number>(
+    pipelineCountRows.map((row) => [
+      row.stage_id,
+      num(row.opportunity_count),
+    ]),
+  );
+  const totalOpps = [...countByStage.values()].reduce((total, count) => total + count, 0);
+  const openPipelineCount = stageRows
+    .filter((stage) => !stage.is_final)
+    .reduce((total, stage) => total + (countByStage.get(stage.id) ?? 0), 0);
 
   const funnelRows = stageRows.map((s) => {
     const c = countByStage.get(s.id) ?? 0;

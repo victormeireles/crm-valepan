@@ -518,6 +518,13 @@ export interface Database {
       };
     };
     Functions: {
+      dashboard_pipeline_stage_counts: {
+        Args: Record<string, never>;
+        Returns: {
+          stage_id: string;
+          opportunity_count: number;
+        }[];
+      };
       dashboard_kpis_extra: {
         Args: Record<string, never>;
         Returns: {
