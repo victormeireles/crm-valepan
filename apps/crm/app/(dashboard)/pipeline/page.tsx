@@ -243,6 +243,15 @@ export default async function PipelinePage({
         <p className="text-sm text-[var(--muted)]">Nenhuma etapa do funil configurada.</p>
       ) : (
         <PipelineWorkspace
+          key={[
+            ownerUserId ?? "",
+            signalFilter ?? "",
+            regionFilter ?? "",
+            categoryFilter ?? "",
+            query,
+            stageFilter ?? "",
+            volumeFilter ?? "",
+          ].join("|")}
           stages={stages}
           initialCards={initialCards}
           initialStageTotals={stageTotals}

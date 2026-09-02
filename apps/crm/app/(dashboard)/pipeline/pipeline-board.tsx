@@ -20,7 +20,7 @@ import {
 import type { PipelineSignal } from "@/lib/pipeline-signals";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { PipelineSignalBadges } from "./pipeline-signal-badges";
 
 export type PipelineStageDTO = {
@@ -97,6 +97,20 @@ function moveCard(
   return next;
 }
 
+function useDesktopDrag() {
+  const [enabled, setEnabled] = useState(false);
+
+  useEffect(() => {
+    const media = window.matchMedia("(min-width: 768px)");
+    const update = () => setEnabled(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+
+  return enabled;
+}
+
 function DroppableColumn({
   stageId,
   stageName,
@@ -160,8 +174,10 @@ function DraggableCard({
   onMove: (opportunityId: string, fromStageId: string, toStageId: string) => void;
   onClose: (card: PipelineCardDTO, stageId: string) => void;
 }) {
+  const dragEnabled = useDesktopDrag();
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `opp:${card.id}`,
+    disabled: !dragEnabled,
     data: {
       type: "opportunity" as const,
       opportunityId: card.id,
@@ -196,8 +212,9 @@ function DraggableCard({
     <li
       ref={setNodeRef}
       style={style}
-      {...listeners}
-      {...attributes}
+      {...(dragEnabled ? listeners : {})}
+      {...(dragEnabled ? attributes : {})}
+      role="button"
       className={`cursor-pointer rounded-xl border border-l-[3px] border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] px-3 pb-2.5 pt-[11px] shadow-[var(--sh-sm)] md:touch-none md:cursor-grab md:active:cursor-grabbing ${borderSignal} ${
         isDragging ? "opacity-40" : ""
       }`}
@@ -526,7 +543,10 @@ export function PipelineBoard({
       ) : null}
 
       <div className="w-full min-w-0 overflow-x-auto pb-1 [scrollbar-gutter:stable]">
-        <div className="grid w-max min-w-full snap-x snap-mandatory grid-flow-col auto-cols-[calc(100vw-3rem)] gap-3 md:w-full md:grid-flow-row md:auto-cols-auto md:grid-cols-6">
+        <div
+          className="grid w-max min-w-full snap-x snap-mandatory grid-flow-col auto-cols-[calc(100vw-3rem)] gap-3 md:grid-flow-row md:auto-cols-auto md:[grid-template-columns:repeat(var(--pipeline-stage-count),minmax(13rem,1fr))] md:[width:max(100%,calc(var(--pipeline-stage-count)*13.75rem))]"
+          style={{ "--pipeline-stage-count": activeStages.length } as CSSProperties}
+        >
           {activeStages.map((stage) => {
             const items = columns.get(stage.id) ?? [];
             const totalCount = stageTotals[stage.id] ?? items.length;

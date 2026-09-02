@@ -19,6 +19,7 @@ export function LeadPickerInput({
   disabled,
 }: Props) {
   const listId = useId().replace(/:/g, "");
+  const popupId = `${listId}-opcoes`;
   const rootRef = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<LeadPickerOption | null>(null);
@@ -101,8 +102,10 @@ export function LeadPickerInput({
           autoComplete="off"
           placeholder={placeholder}
           disabled={disabled}
+          role="combobox"
           aria-autocomplete="list"
           aria-expanded={showList}
+          aria-controls={showList ? popupId : undefined}
         />
         <datalist id={listId}>
           {suggestions.map((lead) => (
@@ -111,11 +114,12 @@ export function LeadPickerInput({
         </datalist>
         {showList ? (
           <ul
+            id={popupId}
             className="absolute z-20 mt-0.5 max-h-44 w-full overflow-y-auto rounded-md border border-[var(--border)] bg-[var(--vp-paper-pure)] py-1 text-sm shadow-[var(--sh-md)]"
             role="listbox"
           >
             {suggestions.map((lead) => (
-              <li key={lead.id} role="option">
+              <li key={lead.id} role="option" aria-selected={false}>
                 <button
                   type="button"
                   className="w-full px-2 py-1.5 text-left hover:bg-[var(--vp-surface-low)]"
