@@ -10,6 +10,10 @@ describe("pipelineStageForInboxClassification", () => {
     expect(pipelineStageForInboxClassification("CHATBOT")).toBe("CHATBOT");
   });
 
+  it("envia sem retorno para a etapa SEM RETORNO", () => {
+    expect(pipelineStageForInboxClassification("SEM RETORNO")).toBe("SEM RETORNO");
+  });
+
   it("trata os nomes divergentes entre classificação e etapa", () => {
     expect(pipelineStageForInboxClassification("ENCAMINHADO PARA O DISTRIBUIDOR")).toBe(
       "ENCAMINHADO PARA DISTRIBUIDOR",

@@ -15,10 +15,14 @@ export function PipelineFilters({
   totalCount,
   visibleCount,
   teamOptions,
+  mineCount,
+  canViewTeam,
 }: {
   totalCount: number;
   visibleCount: number;
-  teamOptions: { id: string; label: string }[];
+  teamOptions: { id: string; label: string; count: number }[];
+  mineCount: number;
+  canViewTeam: boolean;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -72,11 +76,95 @@ export function PipelineFilters({
     return () => window.clearTimeout(id);
   }, [draftQ, q, commitSearch]);
 
+  const ownerButtonClass = (selected: boolean) =>
+    `flex shrink-0 items-center gap-2 rounded-full border px-3 py-2 text-sm transition-colors ${
+      selected
+        ? "border-[var(--vp-gold)] bg-[var(--vp-wine)] font-semibold text-[var(--vp-gold)] shadow-sm"
+        : "border-[var(--border)] bg-[var(--background)] text-[var(--foreground)] hover:border-[var(--vp-gold)]"
+    }`;
+
   return (
-    <div className="space-y-3 rounded-lg border border-[var(--border)] bg-[var(--card)] p-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs font-medium text-[var(--muted)]">Filtros do funil</p>
-        <p className="text-xs tabular-nums text-[var(--muted)]">
+    <div className="space-y-4">
+      {canViewTeam ? <section
+        aria-label="Funil por vendedor"
+        className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-3"
+      >
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 className="text-sm font-semibold text-[var(--foreground)]">Funil por vendedor</h2>
+            <p className="text-xs text-[var(--muted)]">
+              Selecione um responsável para ver a carteira dele.
+            </p>
+          </div>
+          {pending ? <span className="text-xs text-[var(--muted)]">Atualizando…</span> : null}
+        </div>
+
+        <div className="flex gap-2 overflow-x-auto pb-1" role="group" aria-label="Selecionar vendedor">
+          <button
+            type="button"
+            className={ownerButtonClass(!mine && !owner)}
+            aria-pressed={!mine && !owner}
+            onClick={() => pushParams({ mine: null, owner: null })}
+          >
+            <span>Todos</span>
+            <span className="rounded-full bg-black/10 px-1.5 py-0.5 text-xs tabular-nums">
+              {totalCount}
+            </span>
+          </button>
+          <button
+            type="button"
+            className={ownerButtonClass(mine)}
+            aria-pressed={mine}
+            onClick={() => pushParams({ mine: "1", owner: null })}
+          >
+            <span>Meus</span>
+            <span className="rounded-full bg-black/10 px-1.5 py-0.5 text-xs tabular-nums">
+              {mineCount}
+            </span>
+          </button>
+          {teamOptions.map((option) => {
+            const selected = !mine && owner === option.id;
+            const initials = option.label
+              .split(/\s+/)
+              .filter(Boolean)
+              .slice(0, 2)
+              .map((part) => part[0]?.toUpperCase())
+              .join("");
+            return (
+              <button
+                key={option.id}
+                type="button"
+                className={ownerButtonClass(selected)}
+                aria-pressed={selected}
+                onClick={() => pushParams({ mine: null, owner: option.id })}
+              >
+                <span
+                  aria-hidden="true"
+                  className="grid size-6 place-items-center rounded-full bg-[var(--vp-gold)] text-[10px] font-bold text-[var(--vp-wine)]"
+                >
+                  {initials || "?"}
+                </span>
+                <span>{option.label}</span>
+                <span className="rounded-full bg-black/10 px-1.5 py-0.5 text-xs tabular-nums">
+                  {option.count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </section> : (
+        <section className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-3">
+          <h2 className="text-sm font-semibold text-[var(--foreground)]">Novos leads e minha carteira</h2>
+          <p className="mt-1 text-xs text-[var(--muted)]">
+            Você vê a fila de novos contatos e os leads atribuídos ao seu usuário.
+          </p>
+        </section>
+      )}
+
+      <div className="space-y-3 rounded-lg border border-[var(--border)] bg-[var(--card)] p-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs font-medium text-[var(--muted)]">Filtros do funil</p>
+          <p className="text-xs tabular-nums text-[var(--muted)]">
           {visibleCount === totalCount ? (
             <>{totalCount} oportunidade{totalCount === 1 ? "" : "s"}</>
           ) : (
@@ -85,8 +173,8 @@ export function PipelineFilters({
             </>
           )}
           {pending ? " · …" : null}
-        </p>
-      </div>
+          </p>
+        </div>
 
       <div className="flex flex-wrap gap-2">
         <label className="flex min-w-[12rem] flex-1 flex-col gap-1 text-xs">
@@ -137,28 +225,6 @@ export function PipelineFilters({
         </label>
 
         <label className="flex min-w-[10rem] flex-col gap-1 text-xs">
-          <span className="text-[var(--muted)]">Responsável</span>
-          <select
-            className="rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1.5 text-sm"
-            value={mine ? "__mine__" : owner}
-            onChange={(e) => {
-              const v = e.target.value;
-              if (v === "__mine__") pushParams({ mine: "1", owner: null });
-              else if (v === "") pushParams({ mine: null, owner: null });
-              else pushParams({ mine: null, owner: v });
-            }}
-          >
-            <option value="">Todos</option>
-            <option value="__mine__">Só os meus</option>
-            {teamOptions.map((o) => (
-              <option key={o.id} value={o.id}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label className="flex min-w-[10rem] flex-col gap-1 text-xs">
           <span className="text-[var(--muted)]">Status automático</span>
           <select
             className="rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1.5 text-sm"
@@ -188,11 +254,12 @@ export function PipelineFilters({
         </button>
       ) : null}
 
-      <p className="text-[11px] leading-relaxed text-[var(--muted)]">
-        Sinais: última mensagem do cliente (sem resposta) ou da equipe no WhatsApp/chat (respondido);
-        oportunidade aberta sem movimento há {PIPELINE_STALE_DAYS}+ dias; próxima ação do funil
-        vencida.
-      </p>
+        <p className="text-[11px] leading-relaxed text-[var(--muted)]">
+          Sinais: última mensagem do cliente (sem resposta) ou da equipe no WhatsApp/chat
+          (respondido); oportunidade aberta sem movimento há {PIPELINE_STALE_DAYS}+ dias; próxima
+          ação do funil vencida.
+        </p>
+      </div>
     </div>
   );
 }

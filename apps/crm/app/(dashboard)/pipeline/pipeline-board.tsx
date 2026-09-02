@@ -42,6 +42,7 @@ export type PipelineCardDTO = {
   network_type: string | null;
   phone_e164: string | null;
   ownerId: string | null;
+  ownerName: string | null;
   signals: PipelineSignal[];
 };
 
@@ -165,10 +166,12 @@ function DroppableColumn({
 function DraggableCard({
   card,
   stageId,
+  showOwner,
   onClose,
 }: {
   card: PipelineCardDTO;
   stageId: string;
+  showOwner: boolean;
   onClose: (card: PipelineCardDTO, stageId: string) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
@@ -196,6 +199,12 @@ function DraggableCard({
       layout="stacked"
     />
   );
+  const ownerInitials = card.ownerName
+    ?.split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("");
 
   return (
     <li
@@ -222,6 +231,28 @@ function DraggableCard({
         ) : (
           <div className="block">{body}</div>
         )}
+        {showOwner ? (
+          <div
+            className={`mt-1.5 inline-flex max-w-full items-center gap-1.5 rounded-full border px-1.5 py-0.5 text-[10px] ${
+              card.ownerName
+                ? "border-[var(--vp-gold)]/60 bg-[var(--vp-gold)]/10 text-[var(--vp-wine)]"
+                : "border-[var(--border)] bg-[var(--card)] text-[var(--muted)]"
+            }`}
+            title={card.ownerName ? `Responsável: ${card.ownerName}` : "Sem responsável"}
+          >
+            <span
+              aria-hidden="true"
+              className={`grid size-4 shrink-0 place-items-center rounded-full text-[8px] font-bold ${
+                card.ownerName
+                  ? "bg-[var(--vp-gold)] text-[var(--vp-wine)]"
+                  : "bg-[var(--border)] text-[var(--muted)]"
+              }`}
+            >
+              {ownerInitials || "—"}
+            </span>
+            <span className="truncate">{card.ownerName ?? "Sem responsável"}</span>
+          </div>
+        ) : null}
         <PipelineSignalBadges signals={card.signals} />
         <button
           type="button"
@@ -259,9 +290,11 @@ function CardPreview({ card }: { card: PipelineCardDTO }) {
 export function PipelineBoard({
   stages,
   initialCards,
+  showOwners = false,
 }: {
   stages: PipelineStageDTO[];
   initialCards: PipelineCardDTO[];
+  showOwners?: boolean;
 }) {
   const router = useRouter();
   const activeStages = useMemo(() => stages.filter((stage) => !stage.is_final), [stages]);
@@ -494,6 +527,7 @@ export function PipelineBoard({
                     key={card.id}
                     card={card}
                     stageId={stage.id}
+                    showOwner={showOwners}
                     onClose={(selectedCard, fromStageId) =>
                       setPendingClose({
                         opportunityId: selectedCard.id,
@@ -536,6 +570,20 @@ export function PipelineBoard({
                         }
                       >
                         Ocultar
+                      </button>
+                    ) : null}
+                    {hasMore ? (
+                      <button
+                        type="button"
+                        className="rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1 text-[11px] text-[var(--muted)] hover:border-[var(--accent)] hover:text-[var(--foreground)]"
+                        onClick={() =>
+                          setVisibleCardsByStage((current) => ({
+                            ...current,
+                            [stage.id]: filteredItems.length,
+                          }))
+                        }
+                      >
+                        Ir para o final
                       </button>
                     ) : null}
                     <span className="basis-full text-center text-[10px] tabular-nums text-[var(--muted)]">

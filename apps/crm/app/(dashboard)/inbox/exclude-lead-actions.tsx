@@ -53,7 +53,13 @@ function ActionPanel({
   );
 }
 
-export function ExcludeLeadButton({ leadId }: { leadId: string }) {
+export function ExcludeLeadButton({
+  leadId,
+  redirectTo = "/inbox?tab=archived",
+}: {
+  leadId: string;
+  redirectTo?: string;
+}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState<LeadExclusionReason>("interno");
@@ -91,7 +97,7 @@ export function ExcludeLeadButton({ leadId }: { leadId: string }) {
           return;
         }
         setOpen(false);
-        router.push("/inbox?tab=archived");
+        router.push(redirectTo);
       }}
     >
       <p className="text-xs font-medium text-[var(--foreground)]">Arquivar conversa</p>

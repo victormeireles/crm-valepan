@@ -146,8 +146,12 @@ export async function updateOpportunityStage(input: {
       lost_reason: stage.is_final ? input.lostReason : null,
       updated_at: new Date().toISOString(),
     })
-    .eq("id", input.opportunityId)
+    // Dados historicos podem ter mais de um card para o mesmo lead. Enquanto a
+    // migration de unicidade e aplicada, uma movimentacao deve manter todos na
+    // mesma etapa para o contato nunca aparecer em duas colunas.
+    .eq(oppRow?.lead_id ? "lead_id" : "id", oppRow?.lead_id ?? input.opportunityId)
     .select("id")
+    .limit(1)
     .maybeSingle();
 
   if (error) return { ok: false as const, error: error.message };

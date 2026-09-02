@@ -657,6 +657,13 @@ export async function updateConversationClassification(input: {
 
   if (targetStageId && conversation.lead_id) {
     const nowIso = new Date().toISOString();
+    const { error: claimLeadError } = await crm
+      .from("leads")
+      .update({ owner_id: user.id, updated_at: nowIso })
+      .eq("id", conversation.lead_id)
+      .is("owner_id", null);
+    if (claimLeadError) return { ok: false as const, error: claimLeadError.message };
+
     const { data: opportunity, error: opportunityError } = await crm
       .from("opportunities")
       .select("id, stage_id, owner_id")
@@ -670,7 +677,11 @@ export async function updateConversationClassification(input: {
     if (opportunityId) {
       const { error: moveError } = await crm
         .from("opportunities")
-        .update({ stage_id: targetStageId, updated_at: nowIso })
+        .update({
+          stage_id: targetStageId,
+          owner_id: opportunity?.owner_id ?? user.id,
+          updated_at: nowIso,
+        })
         .eq("lead_id", conversation.lead_id);
       if (moveError) return { ok: false as const, error: moveError.message };
     } else {

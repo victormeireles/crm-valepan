@@ -6,6 +6,7 @@ import {
   updateOpportunityStage,
 } from "@/app/actions/opportunity";
 import { updateLeadClientCategory, updateLeadDistributor } from "@/app/actions/leads";
+import { ExcludeLeadButton } from "../../inbox/exclude-lead-actions";
 import { isClientCategoryValue } from "@/lib/client-categories";
 import { SEND_VIA_OPTIONS } from "@/lib/send-via-options";
 import { useRouter } from "next/navigation";
@@ -316,6 +317,14 @@ export function LeadActions({
       >
         {loading ? "Salvando…" : "Atualizar etapa"}
       </button>
+
+      <div className="rounded-md border border-[var(--border)] bg-[var(--background)] p-2.5">
+        <p className="text-xs font-medium text-[var(--foreground)]">Não é um lead?</p>
+        <p className="mb-2 mt-1 text-[11px] text-[var(--muted)]">
+          Sinalize para retirar este contato do funil e da lista de prospects.
+        </p>
+        <ExcludeLeadButton leadId={leadId} redirectTo="/pipeline" />
+      </div>
 
       <hr className="border-[var(--border)]" />
 

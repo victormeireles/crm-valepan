@@ -14,6 +14,7 @@ import { nestOne } from "@/lib/supabase/nested";
 import { createServerSupabaseClient, crmTables } from "@/lib/supabase/server";
 import { Suspense } from "react";
 import { PipelineBoard, type PipelineCardDTO, type PipelineStageDTO } from "./pipeline-board";
+import { PipelineOwnerSummary } from "./pipeline-owner-summary";
 
 const OPPORTUNITY_BATCH_SIZE = 500;
 const LAST_MESSAGE_LEAD_BATCH_SIZE = 100;
@@ -39,17 +40,9 @@ type LeadN = {
   distributors?: { name: string | null } | { name: string | null }[] | null;
 };
 
-const TEAM_ROLE_LABEL: Record<string, string> = {
-  admin: "Admin",
-  comercial: "Comercial",
-  gestao: "Gestão",
-  operacao: "Operação",
-};
-
 function formatTeamOption(p: { id: string; full_name: string | null; role: string }) {
   const name = (p.full_name ?? "").trim() || "Sem nome";
-  const role = TEAM_ROLE_LABEL[p.role] ?? p.role;
-  return { id: p.id, label: `${name} (${role})` };
+  return { id: p.id, label: name };
 };
 
 function mapRowToCard(
@@ -112,6 +105,7 @@ function mapRowToCard(
     network_type: lead?.network_type ?? null,
     phone_e164: lead?.phone_e164 ?? null,
     ownerId: o.owner_id ?? lead?.owner_id ?? null,
+    ownerName: null,
     signals: computePipelineSignals({
       oppUpdatedAt: o.updated_at,
       nextActionAt: o.next_action_at,
@@ -143,7 +137,17 @@ export default async function PipelinePage({
     data: { user },
   } = await supabase.auth.getUser();
   const crm = crmTables(supabase);
-  const ownerUserId = mineOnly && user?.id ? user.id : ownerParam.length > 0 ? ownerParam : null;
+  const { data: currentProfile } = user?.id
+    ? await crm.from("profiles").select("role").eq("id", user.id).maybeSingle()
+    : { data: null };
+  const canViewTeam = currentProfile?.role === "admin" || currentProfile?.role === "gestao";
+  const ownerUserId = canViewTeam
+    ? mineOnly && user?.id
+      ? user.id
+      : ownerParam.length > 0
+        ? ownerParam
+        : null
+    : null;
   const [
     { data: stageRows },
     { data: teamProfiles },
@@ -167,7 +171,7 @@ export default async function PipelinePage({
       .select(select)
       .is("leads.excluded_from_pipeline_at", null)
       .order("updated_at", { ascending: false });
-      return ownerUserId ? base.eq("owner_id", ownerUserId) : base;
+      return base;
     };
     let result = await buildOpportunitiesQuery(
       networkTypeAvailable ? OPPORTUNITY_SELECT_WITH_NETWORK : OPPORTUNITY_SELECT_BASE,
@@ -249,6 +253,10 @@ export default async function PipelinePage({
     )
     .sort((a, b) => a.sort_order - b.sort_order);
 
+  const ownerNameById = new Map(
+    (teamProfiles ?? []).map((profile) => [profile.id, formatTeamOption(profile).label]),
+  );
+
   const allCards: PipelineCardDTO[] = (rows ?? [])
     .filter((o) => {
       const lead = nestOne((o as { leads: LeadN | LeadN[] | null }).leads);
@@ -259,14 +267,18 @@ export default async function PipelinePage({
         o as unknown as Parameters<typeof mapRowToCard>[0],
         lastDirectionByLead,
       );
+      const cardWithOwner = {
+        ...card,
+        ownerName: card.ownerId ? (ownerNameById.get(card.ownerId) ?? "Responsável desconhecido") : null,
+      };
       return canonicalEntryStage && entryStageIds.has(card.stage_id)
-        ? { ...card, stage_id: canonicalEntryStage.id }
-        : card;
+        ? { ...cardWithOwner, stage_id: canonicalEntryStage.id }
+        : cardWithOwner;
     });
 
-  const filteredCards = allCards.filter((card) =>
+  const cardsMatchingOtherFilters = allCards.filter((card) =>
     cardMatchesPipelineFilters(card, {
-      ownerUserId,
+      ownerUserId: null,
       signal: signalFilter,
       region: regionFilter,
       clientCategory: categoryFilter,
@@ -274,7 +286,39 @@ export default async function PipelinePage({
     }),
   );
 
-  const teamOptions = (teamProfiles ?? []).map(formatTeamOption);
+  const filteredCards = cardsMatchingOtherFilters.filter((card) =>
+    !ownerUserId || card.ownerId === ownerUserId,
+  );
+
+  const summaryCards = ownerUserId
+    ? allCards.filter(
+        (card) =>
+          card.ownerId === ownerUserId &&
+          cardMatchesPipelineFilters(card, {
+            ownerUserId: null,
+            signal: null,
+            region: regionFilter,
+            clientCategory: categoryFilter,
+            query,
+          }),
+      )
+    : [];
+  const finalStageIds = new Set(stages.filter((stage) => stage.is_final).map((stage) => stage.id));
+  const openSummaryCards = summaryCards.filter((card) => !finalStageIds.has(card.stage_id));
+  const selectedOwnerName = ownerUserId
+    ? (ownerNameById.get(ownerUserId) ?? (mineOnly ? "Minha carteira" : "Responsável desconhecido"))
+    : null;
+
+  const countByOwner = new Map<string, number>();
+  for (const card of cardsMatchingOtherFilters) {
+    if (!card.ownerId) continue;
+    countByOwner.set(card.ownerId, (countByOwner.get(card.ownerId) ?? 0) + 1);
+  }
+  const teamOptions = (teamProfiles ?? []).map((profile) => ({
+    ...formatTeamOption(profile),
+    count: countByOwner.get(profile.id) ?? 0,
+  }));
+  const mineCount = user?.id ? (countByOwner.get(user.id) ?? 0) : 0;
 
   return (
     <div className="space-y-4">
@@ -284,11 +328,24 @@ export default async function PipelinePage({
 
       <Suspense fallback={<p className="text-sm text-[var(--muted)]">Carregando filtros…</p>}>
         <PipelineFilters
-          totalCount={allCards.length}
+          totalCount={cardsMatchingOtherFilters.length}
           visibleCount={filteredCards.length}
           teamOptions={teamOptions}
+          mineCount={mineCount}
+          canViewTeam={canViewTeam}
         />
       </Suspense>
+
+      {selectedOwnerName ? (
+        <PipelineOwnerSummary
+          ownerName={selectedOwnerName}
+          isMine={mineOnly}
+          openCount={openSummaryCards.length}
+          awaitingReplyCount={openSummaryCards.filter((card) => card.signals.includes("awaiting_reply")).length}
+          staleCount={openSummaryCards.filter((card) => card.signals.includes("stale")).length}
+          overdueCount={openSummaryCards.filter((card) => card.signals.includes("followup_overdue")).length}
+        />
+      ) : null}
 
       {stages.length === 0 ? (
         <p className="text-sm text-[var(--muted)]">Nenhuma etapa do funil configurada.</p>
@@ -299,7 +356,11 @@ export default async function PipelinePage({
             : "Nenhuma oportunidade corresponde aos filtros selecionados."}
         </p>
       ) : (
-        <PipelineBoard stages={stages} initialCards={filteredCards} />
+        <PipelineBoard
+          stages={stages}
+          initialCards={filteredCards}
+          showOwners={canViewTeam && !mineOnly && !ownerParam}
+        />
       )}
     </div>
   );

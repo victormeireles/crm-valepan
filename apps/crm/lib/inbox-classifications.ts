@@ -8,6 +8,7 @@ export const INBOX_CLASSIFICATION_OPTIONS = [
   "NÃO ATENDEMOS A REGIÃO",
   "NÃO TEMOS O PÃO",
   "NÃO RESPONDE",
+  "SEM RETORNO",
   "JÁ É CLIENTE",
 ] as const;
 

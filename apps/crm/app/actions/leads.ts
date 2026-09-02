@@ -861,6 +861,13 @@ export async function updateConversationLeadQualification(input: {
   if (leadUpdateErr) return { ok: false as const, error: leadUpdateErr.message };
 
   if (stageId) {
+    const { error: claimLeadErr } = await crm
+      .from("leads")
+      .update({ owner_id: user.id, updated_at: new Date().toISOString() })
+      .eq("id", leadId)
+      .is("owner_id", null);
+    if (claimLeadErr) return { ok: false as const, error: claimLeadErr.message };
+
     const { data: stage, error: stageErr } = await crm
       .from("pipeline_stages")
       .select("id")
@@ -885,6 +892,7 @@ export async function updateConversationLeadQualification(input: {
         .from("opportunities")
         .update({
           stage_id: stage.id,
+          owner_id: opportunity.owner_id ?? user.id,
           updated_at: new Date().toISOString(),
         })
         .eq("id", opportunity.id);
