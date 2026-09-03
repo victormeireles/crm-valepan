@@ -197,3 +197,33 @@ describe("parseZapiWebhookPayload status callbacks", () => {
     expect(parsed?.body).toBeNull();
   });
 });
+
+describe("parseZapiWebhookPayload LID identity", () => {
+  it("prefers the real phone when remoteJid is a LID and keeps the LID linked", () => {
+    const parsed = parseZapiWebhookPayload({
+      type: "ReceivedCallback",
+      key: { remoteJid: "118232430158059@lid" },
+      phone: "5521977047367",
+      senderName: "Cliente Exemplo",
+      messageId: "lid-with-phone",
+      text: { message: "Olá" },
+    });
+
+    expect(parsed?.phoneE164).toBe("+5521977047367");
+    expect(parsed?.linkedLidKeys).toContain("lid:118232430158059");
+    expect(parsed?.contactName).toBe("Cliente Exemplo");
+  });
+
+  it("still accepts a LID-only webhook instead of dropping the message", () => {
+    const parsed = parseZapiWebhookPayload({
+      type: "ReceivedCallback",
+      key: { remoteJid: "118232430158059@lid" },
+      senderName: "Cliente Exemplo",
+      messageId: "lid-only",
+      text: { message: "Olá" },
+    });
+
+    expect(parsed?.phoneE164).toBe("lid:118232430158059");
+    expect(parsed?.contactName).toBe("Cliente Exemplo");
+  });
+});

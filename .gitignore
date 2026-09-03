@@ -46,3 +46,4 @@ coverage
 # Artefatos locais
 db-push-output.txt
 env.download
+.codex-publish-media-*/

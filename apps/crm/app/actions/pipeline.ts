@@ -12,6 +12,7 @@ import type { Database } from "@/lib/database.types";
 import { createServerSupabaseClient, crmTables } from "@/lib/supabase/server";
 import type { PipelineCardDTO } from "@/app/(dashboard)/pipeline/pipeline-board";
 import { getWeeklyVolumeKg } from "@/lib/lead-signals";
+import { logPipelinePerformance, timePipelineOperation } from "@/lib/pipeline-performance";
 
 const PAGE_SIZE = 20;
 type PipelineCardRow = Database["crm"]["Functions"]["pipeline_cards"]["Returns"][number];
@@ -31,9 +32,6 @@ function mapRow(row: PipelineCardRow, ownerNames: Map<string, string>): Pipeline
       clientCategory: row.client_category,
     }),
     client_category: row.client_category,
-    distributor_id: row.distributor_id,
-    network_type: row.network_type,
-    phone_e164: row.phone_e164,
     companyCity: row.company_city,
     companyState: row.company_state,
     conversationId: row.conversation_id,
@@ -45,7 +43,6 @@ function mapRow(row: PipelineCardRow, ownerNames: Map<string, string>): Pipeline
     lastSentAt: row.last_sent_at,
     opportunityUpdatedAt: row.opportunity_updated_at,
     nextActionAt: row.next_action_at,
-    ownerId,
     ownerName: ownerId ? (ownerNames.get(ownerId) ?? "Responsável desconhecido") : null,
     signals: computePipelineSignals({
       oppUpdatedAt: row.opportunity_updated_at,
@@ -69,6 +66,7 @@ export type PipelinePageFilters = {
 export type PipelineVolumeFilter = "informado" | "ate_100" | "acima_100" | null;
 
 export async function loadPipelineFilterSnapshot(input: { filters: PipelinePageFilters }) {
+  const startedAt = performance.now();
   const supabase = await createServerSupabaseClient();
   const crm = crmTables(supabase);
   const common = {
@@ -80,21 +78,21 @@ export async function loadPipelineFilterSnapshot(input: { filters: PipelinePageF
     p_stage_id: input.filters.stageId,
     p_volume: input.filters.volume,
   };
-  const [cardsResult, allCountsResult, visibleCountsResult, ownerCountsResult, summaryResult, profilesResult] =
+  const [cardsTimed, allCountsTimed, visibleCountsTimed, ownerCountsTimed, summaryTimed, profilesTimed] =
     await Promise.all([
-      crm.rpc("pipeline_cards_page", {
+      timePipelineOperation("cards", crm.rpc("pipeline_cards_page", {
         ...common,
         p_owner_user_id: input.filters.ownerUserId,
         p_offset: 0,
         p_limit: PAGE_SIZE,
-      }),
-      crm.rpc("pipeline_stage_counts", { ...common, p_owner_user_id: null }),
-      crm.rpc("pipeline_stage_counts", {
+      })),
+      timePipelineOperation("all_stage_counts", crm.rpc("pipeline_stage_counts", { ...common, p_owner_user_id: null })),
+      timePipelineOperation("visible_stage_counts", crm.rpc("pipeline_stage_counts", {
         ...common,
         p_owner_user_id: input.filters.ownerUserId,
-      }),
-      crm.rpc("pipeline_owner_counts", common),
-      crm.rpc("pipeline_owner_summary", {
+      })),
+      timePipelineOperation("owner_counts", crm.rpc("pipeline_owner_counts", common)),
+      timePipelineOperation("owner_summary", crm.rpc("pipeline_owner_summary", {
         p_messages_visible_since: INBOX_MESSAGES_VISIBLE_SINCE,
         p_owner_user_id: input.filters.ownerUserId,
         p_region: input.filters.region,
@@ -102,9 +100,27 @@ export async function loadPipelineFilterSnapshot(input: { filters: PipelinePageF
         p_query: input.filters.query.trim() || null,
         p_stage_id: input.filters.stageId,
         p_volume: input.filters.volume,
-      }),
-      crm.from("profiles").select("id, full_name"),
+      })),
+      timePipelineOperation("profiles", crm.from("profiles").select("id, full_name")),
     ]);
+  const cardsResult = cardsTimed.value;
+  const allCountsResult = allCountsTimed.value;
+  const visibleCountsResult = visibleCountsTimed.value;
+  const ownerCountsResult = ownerCountsTimed.value;
+  const summaryResult = summaryTimed.value;
+  const profilesResult = profilesTimed.value;
+  const timedResults = [cardsTimed, allCountsTimed, visibleCountsTimed, ownerCountsTimed, summaryTimed, profilesTimed];
+  logPipelinePerformance(
+    "filter_snapshot",
+    performance.now() - startedAt,
+    timedResults,
+    {
+      cards: cardsResult.data?.length ?? 0,
+      hasOwner: Boolean(input.filters.ownerUserId),
+      hasQuery: Boolean(input.filters.query.trim()),
+      stageFiltered: Boolean(input.filters.stageId),
+    },
+  );
   const error = cardsResult.error ?? allCountsResult.error ?? visibleCountsResult.error ??
     ownerCountsResult.error ?? summaryResult.error ?? profilesResult.error;
   if (error) return { ok: false as const, error: error.message };
@@ -129,10 +145,11 @@ export async function loadPipelineStagePage(input: {
   offset: number;
   filters: PipelinePageFilters;
 }) {
+  const startedAt = performance.now();
   const supabase = await createServerSupabaseClient();
   const crm = crmTables(supabase);
-  const [{ data, error }, { data: profiles }] = await Promise.all([
-    crm.rpc("pipeline_cards_page", {
+  const [cardsTimed, profilesTimed] = await Promise.all([
+    timePipelineOperation("cards", crm.rpc("pipeline_cards_page", {
       p_messages_visible_since: INBOX_MESSAGES_VISIBLE_SINCE,
       p_owner_user_id: input.filters.ownerUserId,
       p_signal: input.filters.signal,
@@ -143,9 +160,17 @@ export async function loadPipelineStagePage(input: {
       p_offset: Math.max(0, Math.trunc(input.offset)),
       p_limit: PAGE_SIZE,
       p_volume: input.filters.volume,
-    }),
-    crm.from("profiles").select("id, full_name"),
+    })),
+    timePipelineOperation("profiles", crm.from("profiles").select("id, full_name")),
   ]);
+  const { data, error } = cardsTimed.value;
+  const { data: profiles } = profilesTimed.value;
+  const timedResults = [cardsTimed, profilesTimed];
+  logPipelinePerformance("stage_page", performance.now() - startedAt, timedResults, {
+    stageId: input.stageId,
+    offset: input.offset,
+    cards: data?.length ?? 0,
+  });
   if (error) return { ok: false as const, error: error.message };
 
   const ownerNames = new Map(

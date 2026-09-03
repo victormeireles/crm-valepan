@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="apps/crm/app/valepan-tokens.css">
+<style>
+  body { margin: 0; background: var(--vp-paper); color: var(--vp-ink-body); font-family: var(--font-body); line-height: 1.6; }
+  a { color: inherit; text-decoration: none; }
+  a:hover { color: var(--vp-wine-classic); }
+  input, select, button, textarea { font: inherit; color: inherit; }
+</style>
+</helmet>
+<div data-screen-label="Chat (atual)" style="height: 100vh; display: flex; flex-direction: column; background: var(--vp-paper);">
+  <header style="flex-shrink: 0; border-bottom: 1px solid rgba(199,166,77,0.35); background: var(--vp-wine); box-shadow: 0 8px 28px rgba(35,0,4,0.35);">
+    <div style="margin: 0 auto; display: flex; min-height: 80px; max-width: min(100%, 1400px); flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 16px;">
+      <div style="display: flex; min-width: 0; flex: 1; flex-wrap: wrap; align-items: center; gap: 24px;">
+        <a href="#" style="display: inline-flex; min-height: 44px; flex-shrink: 0; align-items: center; gap: 10px; border-radius: 6px; padding: 4px; color: var(--vp-gold);">
+          <img src="brand/valepan-logo.svg" alt="Valepan" style="height: 36px; width: auto; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.25));">
+          <span style="font-family: var(--font-display); font-size: 20px; font-weight: 700; letter-spacing: 0.12em; color: var(--vp-gold);">CRM</span>
+        </a>
+        <nav style="display: flex; flex-wrap: wrap; gap: 8px; font-size: 14px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em;">
+          <a href="#" style="border-radius: 6px; border-bottom: 2px solid transparent; padding: 10px 12px; color: rgba(255,248,247,0.78);">Dashboard</a>
+          <a href="#" style="border-radius: 6px; border-bottom: 2px solid var(--vp-gold); padding: 10px 12px; color: var(--vp-gold);">Chat</a>
+          <a href="#" style="border-radius: 6px; border-bottom: 2px solid transparent; padding: 10px 12px; color: rgba(255,248,247,0.78);">Funil</a>
+          <a href="#" style="border-radius: 6px; border-bottom: 2px solid transparent; padding: 10px 12px; color: rgba(255,248,247,0.78);">Tarefas</a>
+          <a href="#" style="border-radius: 6px; border-bottom: 2px solid transparent; padding: 10px 12px; color: rgba(255,248,247,0.78);">Categorias de cliente</a>
+          <a href="#" style="border-radius: 6px; border-bottom: 2px solid transparent; padding: 10px 12px; color: rgba(255,248,247,0.78);">Amostras</a>
+        </nav>
+      </div>
+      <div style="display: flex; align-items: center; border-left: 1px solid rgba(255,248,247,0.2); padding-left: 20px;">
+        <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px; border-radius: 12px; background: rgba(255,248,247,0.08); padding: 8px 12px; font-size: 14px;">
+          <span style="color: rgba(255,248,247,0.88);">Victor Meireles · Administrador</span>
+          <button type="button" style="border-radius: 8px; border: 1px solid rgba(255,215,115,0.45); background: transparent; padding: 6px 12px; font-size: 12px; font-weight: 600; color: var(--vp-gold); cursor: pointer;">Sair</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div style="margin: 0 auto; display: flex; min-height: 0; width: 100%; max-width: min(100%, 1400px); flex: 1; flex-direction: column; padding: 32px 16px; overflow: hidden;">
+    <div style="display: grid; min-height: 0; flex: 1; gap: 8px; overflow: hidden; grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);">
+
+      <div style="display: flex; height: 100%; min-height: 0; flex-direction: column; overflow: hidden;">
+        <div style="position: relative; display: flex; height: 100%; min-height: 0; flex: 1; flex-direction: column; overflow: hidden; border-radius: 12px; border-top: 1px solid var(--vp-ink-line); border-right: 1px solid var(--vp-ink-line); border-bottom: 1px solid var(--vp-ink-line); border-left: 3px solid var(--vp-gold-classic); background: var(--vp-paper-pure); box-shadow: 0 4px 14px rgba(35,0,4,0.08);">
+          <div style="flex-shrink: 0; border-bottom: 1px solid var(--vp-ink-line); background: var(--vp-paper); padding: 8px;">
+            <div style="margin-bottom: 8px; display: grid; grid-template-columns: 1fr 1fr; gap: 4px; border-radius: 6px; background: rgba(35,0,4,0.06); padding: 4px;">
+              <a href="#" style="border-radius: 4px; background: var(--vp-paper-pure); padding: 4px 8px; text-align: center; font-size: 12px; font-weight: 500; color: var(--vp-ink-body); box-shadow: 0 4px 14px rgba(35,0,4,0.08);">Para qualificar</a>
+              <a href="#" style="border-radius: 4px; padding: 4px 8px; text-align: center; font-size: 12px; font-weight: 500; color: var(--vp-ink-muted);">No funil</a>
+              <a href="#" style="border-radius: 4px; padding: 4px 8px; text-align: center; font-size: 12px; font-weight: 500; color: var(--vp-ink-muted);">Arquivados</a>
+              <a href="#" style="border-radius: 4px; padding: 4px 8px; text-align: center; font-size: 12px; font-weight: 500; color: var(--vp-ink-muted);">Grupos</a>
+            </div>
+            <input type="search" placeholder="Buscar por nome, telefone ou mensagem…" style="width: 100%; box-sizing: border-box; border-radius: 6px; border: 1px solid var(--vp-ink-line); background: var(--vp-paper-pure); padding: 8px 12px; font-size: 14px; color: var(--vp-ink-body); outline: none;">
+          </div>
+          <ul style="margin: 0; padding: 0; list-style: none; min-height: 0; flex: 1; overflow-y: auto; overscroll-behavior: contain;">
+            <sc-for list="{{ conversations }}" as="c" hint-placeholder-count="8">
+              <li style="position: relative; border-top: 1px solid var(--vp-ink-line);">
+                <a href="#" style="display: block; padding: 12px 40px 12px 16px; border-left: 3px solid transparent;">
+                  <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 8px;">
+                    <div style="display: flex; min-width: 0; align-items: flex-start; gap: 8px;">
+                      <div aria-hidden="true" style="margin-top: 2px; display: flex; height: 36px; width: 36px; flex-shrink: 0; align-items: center; justify-content: center; border-radius: 9999px; background: rgba(35,0,4,0.14); font-size: 12px; font-weight: 600; color: var(--vp-wine);">{{ c.initials }}</div>
+                      <div style="min-width: 0; flex: 1;">
+                        <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px;">
+                          <span style="display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 500; color: var(--vp-ink-body);">{{ c.name }}</span>
+                          <span style="display: inline-flex; height: 20px; min-width: 20px; flex-shrink: 0; align-items: center; justify-content: center; border-radius: 6px; border: 1px solid var(--vp-ink-line); background: var(--vp-surface-low); padding: 0 4px; font-size: 10px; font-weight: 600; color: var(--vp-wine);">{{ c.letter }}</span>
+                        </div>
+                        <p style="margin: 2px 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--vp-ink-muted);">{{ c.phone }}</p>
+                        <p style="margin: 2px 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--vp-ink-muted);">{{ c.company }}</p>
+                      </div>
+                    </div>
+                    <span style="display: flex; flex-shrink: 0; align-items: center; gap: 4px;">
+                      <sc-if value="{{ c.unread }}" hint-placeholder-val="{{ false }}">
+                        <span title="Mensagens não lidas" style="width: 8px; height: 8px; flex-shrink: 0; border-radius: 9999px; background: var(--vp-wine);"></span>
+                      </sc-if>
+                      <span style="font-size: 10px; color: var(--vp-ink-muted);">{{ c.time }}</span>
+                    </span>
+                  </div>
+                  <p style="margin: 0; font-size: 12px; color: var(--vp-ink-muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;">{{ c.preview }}</p>
+                  <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; font-size: 10px; color: var(--vp-ink-muted);">
+                    <span>{{ c.leadLine }}</span>
+                    <sc-if value="{{ c.awaiting }}" hint-placeholder-val="{{ true }}">
+                      <span style="display: inline-flex; align-items: center; gap: 4px; font-weight: 500; color: var(--vp-wine);">
+                        <span aria-hidden="true" style="width: 6px; height: 6px; border-radius: 9999px; background: var(--vp-wine);"></span>
+                        Aguarda resposta
+                      </span>
+                    </sc-if>
+                  </div>
+                </a>
+                <div style="position: absolute; right: 8px; top: 8px;">
+                  <button type="button" aria-label="Mais ações da conversa" style="display: flex; height: 24px; width: 24px; align-items: center; justify-content: center; border: 0; border-radius: 6px; background: none; font-size: 12px; color: var(--vp-ink-muted); cursor: pointer;">▾</button>
+                </div>
+              </li>
+            </sc-for>
+          </ul>
+        </div>
+        <nav style="display: flex; flex-shrink: 0; align-items: center; justify-content: center; gap: 8px; padding-top: 8px; font-size: 12px; color: var(--vp-ink-muted);">
+          <span style="border-radius: 4px; border: 1px solid var(--vp-ink-line); padding: 4px 8px; opacity: 0.5;">Anterior</span>
+          <span>1 – 40 de 137</span>
+          <a href="#" style="border-radius: 4px; border: 1px solid var(--vp-ink-line); padding: 4px 8px; color: var(--vp-wine);">Próxima</a>
+        </nav>
+      </div>
+
+      <section style="display: flex; min-height: 0; flex: 1; flex-direction: column; overflow: hidden; border-radius: 12px; border-top: 1px solid var(--vp-ink-line); border-right: 1px solid var(--vp-ink-line); border-bottom: 1px solid var(--vp-ink-line); border-left: 3px solid var(--vp-gold-classic); background: var(--vp-paper-pure); box-shadow: 0 4px 14px rgba(35,0,4,0.08);">
+        <div style="flex-shrink: 0; border-bottom: 1px solid var(--vp-ink-line); background: var(--vp-paper); padding: 12px;">
+          <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;">
+            <div>
+              <div style="display: flex; min-width: 0; align-items: flex-start; gap: 8px;">
+                <div aria-hidden="true" style="margin-top: 2px; display: flex; height: 36px; width: 36px; flex-shrink: 0; align-items: center; justify-content: center; border-radius: 9999px; background: rgba(35,0,4,0.14); font-size: 12px; font-weight: 600; color: var(--vp-wine);">RD</div>
+                <div style="min-width: 0; flex: 1;">
+                  <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px;">
+                    <span style="font-size: 16px; font-weight: 500; color: var(--vp-ink-body);">Rafael Domingues</span>
+                    <span style="display: inline-flex; height: 24px; min-width: 24px; align-items: center; justify-content: center; border-radius: 6px; border: 1px solid var(--vp-ink-line); background: var(--vp-surface-low); padding: 0 6px; font-size: 12px; font-weight: 600; color: var(--vp-wine);">H</span>
+                  </div>
+                  <p style="margin: 2px 0 0; font-size: 14px; font-variant-numeric: tabular-nums; color: var(--vp-ink-muted);">(11) 98876-4412</p>
+                  <p style="margin: 2px 0 0; font-size: 14px; color: var(--vp-ink-muted);">Burger do Beco</p>
+                </div>
+              </div>
+              <p style="margin: 8px 0 0; font-size: 12px; color: var(--vp-ink-muted);">Última atividade na conversa: 02/09/2026, 14:38:12</p>
+              <p style="margin: 4px 0 0; font-size: 12px; font-weight: 500; color: var(--vp-wine);">Aguarda a sua resposta (última mensagem foi do cliente).</p>
+            </div>
+            <div style="display: flex; flex-shrink: 0; flex-wrap: wrap; align-items: center; gap: 8px;">
+              <button type="button" style="border-radius: 8px; border: 1px solid var(--vp-ink-line); background: var(--vp-paper-pure); padding: 6px 12px; font-size: 12px; font-weight: 600; color: var(--vp-ink-body); cursor: pointer;">Tarefas (2)</button>
+              <button type="button" style="border-radius: 8px; border: 1px solid var(--vp-ink-line); background: var(--vp-paper-pure); padding: 6px 12px; font-size: 12px; font-weight: 600; color: var(--vp-ink-body); cursor: pointer;">Qualificar lead</button>
+              <button type="button" style="border-radius: 8px; border: 1px solid var(--vp-ink-line); background: var(--vp-paper-pure); padding: 6px 12px; font-size: 12px; font-weight: 600; color: var(--vp-ink-muted); cursor: pointer;">Arquivar</button>
+            </div>
+          </div>
+        </div>
+
+        <div style="display: flex; min-height: 0; flex: 1; flex-direction: column; overflow: hidden; background: var(--vp-paper); padding: 0 12px;">
+          <div style="min-height: 0; flex: 1; overflow-y: auto; padding: 8px 4px; display: flex; flex-direction: column; gap: 12px;">
+            <div style="display: flex; justify-content: center; padding: 2px 0 4px;">
+              <button type="button" style="border-radius: 12px; border: 1px solid rgba(35,0,4,0.18); background: var(--vp-paper-pure); padding: 8px 16px; font-size: 12px; font-weight: 600; color: var(--vp-wine); box-shadow: 0 1px 2px rgba(35,0,4,0.1); cursor: pointer;">Carregar mensagens anteriores</button>
+            </div>
+            <sc-for list="{{ messages }}" as="m" hint-placeholder-count="6">
+              <div style="width: 100%;">
+                <sc-if value="{{ m.out }}" hint-placeholder-val="{{ false }}">
+                  <div style="display: flex; width: 100%; justify-content: flex-end;">
+                    <div style="position: relative; max-width: min(88%, 440px); border-radius: 16px; border-bottom-right-radius: 2px; background: var(--vp-wine); padding: 8px 12px; font-size: 14px; color: var(--vp-gold); box-shadow: 0 4px 14px rgba(35,0,4,0.08);">
+                      <p style="margin: 0; white-space: pre-wrap; overflow-wrap: break-word;">{{ m.body }}</p>
+                      <div style="margin-top: 6px; display: flex; align-items: center; justify-content: flex-end; gap: 6px; font-size: 10px; line-height: 1; color: rgba(255,223,152,0.9);">
+                        <span style="font-weight: 500; color: var(--vp-gold);">{{ m.status }}</span>
+                        <span style="opacity: 0.7;">·</span>
+                        <time>{{ m.time }}</time>
+                      </div>
+                    </div>
+                  </div>
+                </sc-if>
+                <sc-if value="{{ m.in }}" hint-placeholder-val="{{ true }}">
+                  <div style="display: flex; width: 100%; justify-content: flex-start;">
+                    <div style="position: relative; max-width: min(88%, 440px); border-radius: 16px; border-bottom-left-radius: 2px; border: 1px solid var(--vp-ink-line); background: var(--vp-paper-pure); padding: 8px 12px; font-size: 14px; color: var(--vp-ink-body); box-shadow: 0 4px 14px rgba(35,0,4,0.08);">
+                      <p style="margin: 0; white-space: pre-wrap; overflow-wrap: break-word;">{{ m.body }}</p>
+                      <div style="margin-top: 6px; display: flex; align-items: center; justify-content: flex-end; gap: 6px; font-size: 10px; line-height: 1; color: var(--vp-ink-muted);">
+                        <span style="font-weight: 500; color: var(--vp-ink-body);">Recebida</span>
+                        <span style="opacity: 0.7;">·</span>
+                        <time>{{ m.time }}</time>
+                      </div>
+                    </div>
+                  </div>
+                </sc-if>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+
+        <div style="flex-shrink: 0; border-top: 1px solid var(--vp-ink-line); background: var(--vp-paper); padding: 12px;">
+          <div style="display: flex; align-items: flex-end; gap: 8px;">
+            <div style="display: flex; min-height: 48px; flex: 1; align-items: flex-end; gap: 2px; border-radius: 1.5rem; border: 1px solid var(--vp-ink-line); background: var(--vp-paper-pure); padding: 4px; box-shadow: 0 4px 14px rgba(35,0,4,0.08);">
+              <button type="button" title="Anexos" style="display: flex; height: 40px; width: 40px; flex-shrink: 0; align-items: center; justify-content: center; border: 0; border-radius: 9999px; background: none; color: var(--vp-ink-muted); cursor: pointer;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" style="width: 22px; height: 22px;"><path d="M12 5v14M5 12h14"></path></svg>
+              </button>
+              <button type="button" title="Emojis" style="display: flex; height: 40px; width: 40px; flex-shrink: 0; align-items: center; justify-content: center; border: 0; border-radius: 9999px; background: none; color: var(--vp-ink-muted); cursor: pointer;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="width: 22px; height: 22px;"><circle cx="12" cy="12" r="10"></circle><path d="M8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01"></path></svg>
+              </button>
+              <textarea rows="1" placeholder="Mensagem" style="max-height: 128px; min-height: 42px; flex: 1; resize: none; border: 0; background: transparent; padding: 10px 8px 10px 0; font-size: 14px; line-height: 1.375; color: var(--vp-ink-body); outline: none;"></textarea>
+            </div>
+            <button type="button" aria-label="Enviar mensagem" style="display: flex; height: 48px; width: 48px; flex-shrink: 0; align-items: center; justify-content: center; border: 0; border-radius: 9999px; background: var(--vp-wine); color: var(--vp-gold); box-shadow: 0 10px 30px rgba(35,0,4,0.1); cursor: pointer;">
+              <svg viewBox="0 0 24 24" fill="currentColor" style="width: 22px; height: 22px; transform: translateX(1px);"><path d="M2.01 21 23 12 2.01 3 2 10l15 2-15 2z"></path></svg>
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  renderVals() {
+    const conv = (name, phone, company, letter, preview, time, opts = {}) => ({
+      name, phone, company, letter, preview, time,
+      initials: name.split(/\s+/).slice(0, 2).map((p) => p[0].toUpperCase()).join(""),
+      leadLine: opts.leadLine ?? "Para qualificar",
+      awaiting: opts.awaiting ?? false,
+      unread: opts.unread ?? false,
+    });
+    const msg = (out, body, time, status) => ({ out, in: !out, body, time, status: status ?? "Enviada" });
+    return {
+      conversations: [
+        conv("Rafael Domingues", "(11) 98876-4412", "Burger do Beco", "H", "Bom dia! Consegue me mandar a tabela de preços do brioche 90g?", "14:38", { awaiting: true, unread: true }),
+        conv("Juliana Marques", "(21) 99614-2087", "Casa do Hambúrguer", "H", "Recebemos as amostras, o pessoal aqui gostou muito do pretzel", "13:02", { awaiting: true, unread: true }),
+        conv("Marcos Ferraz", "(11) 97740-1188", "Distribuidora Pão Cheio", "D", "Perfeito, envio o pedido até quinta então.", "11:47"),
+        conv("Camila Nunes", "(21) 98120-6633", "Smash Lab Botafogo", "H", "Qual o mínimo de caixas para entrega em Botafogo?", "ontem", { awaiting: true }),
+        conv("Eduardo Sato", "(11) 99251-4470", "Sem empresa cadastrada", "O", "Sem mensagem ainda", "ontem"),
+        conv("Patrícia Alencar", "(21) 97788-3021", "Rei do Burger Tijuca", "H", "Boa tarde, vi vocês no Instagram. Atendem a Tijuca?", "2 d", { awaiting: true, unread: true }),
+        conv("Thiago Barreto", "(11) 98330-9912", "Barreto Burgers", "H", "Vou conversar com meu sócio e te retorno", "3 d", { leadLine: "No funil" }),
+        conv("Luana Prado", "(21) 99887-1245", "Prado Lanches", "H", "Obrigada! Depois te chamo aqui.", "5 d", { leadLine: "No funil" }),
+      ],
+      messages: [
+        msg(false, "Bom dia! Vi vocês num grupo de hamburguerias aqui de SP. Vocês entregam na Vila Madalena?", "01/09, 09:12"),
+        msg(true, "Bom dia, Rafael! Entregamos sim — atendemos toda a capital com entrega própria 2x por semana. Qual o volume médio de pães por semana na sua casa?", "01/09, 09:31", "Lida"),
+        msg(false, "Hoje giro uns 1.200 pães/semana, quase tudo brioche 90g", "01/09, 09:40"),
+        msg(true, "Show. Nesse volume você já entra na tabela de rede. Posso te enviar uma amostra do Royal Ouro 90g junto com o brioche tradicional para o pessoal testar na chapa?", "01/09, 10:05", "Lida"),
+        msg(false, "Pode mandar sim! Endereço é Rua Aspicuelta, 512", "01/09, 10:18"),
+        msg(true, "Perfeito, amostra sai amanhã pela transportadora. Te aviso o código de rastreio por aqui.", "01/09, 10:22", "Lida"),
+        msg(false, "Bom dia! Consegue me mandar a tabela de preços do brioche 90g?", "02/09, 14:38"),
+      ],
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -18,6 +18,7 @@ import {
   type DragStartEvent,
 } from "@dnd-kit/core";
 import type { PipelineSignal } from "@/lib/pipeline-signals";
+import { recordPipelineBrowserMetric } from "@/lib/pipeline-browser-performance";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
@@ -39,10 +40,6 @@ export type PipelineCardDTO = {
   personName: string;
   companyLine: string | null;
   client_category: string | null;
-  distributor_id: string | null;
-  network_type: string | null;
-  phone_e164: string | null;
-  ownerId: string | null;
   ownerName: string | null;
   signals: PipelineSignal[];
   companyCity: string | null;
@@ -347,6 +344,8 @@ export function PipelineBoard({
   );
 
   const [columns, setColumns] = useState(() => groupByStage(activeStages, initialCards));
+  const [localStageTotals, setLocalStageTotals] = useState(stageTotals);
+  const [localStageVolumes, setLocalStageVolumes] = useState(stageVolumes);
   const [loadingStageId, setLoadingStageId] = useState<string | null>(null);
   const [activeCard, setActiveCard] = useState<PipelineCardDTO | null>(null);
   const [bannerError, setBannerError] = useState<string | null>(null);
@@ -363,6 +362,10 @@ export function PipelineBoard({
   const dialogRef = useRef<HTMLDialogElement>(null);
   const columnsRef = useRef(columns);
   columnsRef.current = columns;
+  const stageTotalsRef = useRef(localStageTotals);
+  stageTotalsRef.current = localStageTotals;
+  const stageVolumesRef = useRef(localStageVolumes);
+  stageVolumesRef.current = localStageVolumes;
   const stagesRef = useRef(stages);
   stagesRef.current = stages;
 
@@ -370,14 +373,25 @@ export function PipelineBoard({
     const next = groupByStage(activeStages, initialCards);
     setColumns(next);
     columnsRef.current = next;
-  }, [fingerprint, activeStages, initialCards]);
+    setLocalStageTotals(stageTotals);
+    stageTotalsRef.current = stageTotals;
+    setLocalStageVolumes(stageVolumes);
+    stageVolumesRef.current = stageVolumes;
+  }, [fingerprint, activeStages, initialCards, stageTotals, stageVolumes]);
 
   const loadMore = useCallback(
     async (stageId: string) => {
+      const metricStartedAt = performance.now();
       setLoadingStageId(stageId);
       setBannerError(null);
       const current = columnsRef.current.get(stageId) ?? [];
       const result = await loadPipelineStagePage({ stageId, offset: current.length, filters });
+      recordPipelineBrowserMetric("page", metricStartedAt, {
+        ok: result.ok,
+        stageId,
+        offset: current.length,
+        cards: result.ok ? result.cards.length : 0,
+      });
       setLoadingStageId(null);
       if (!result.ok) {
         setBannerError(result.error ?? "Não foi possível carregar mais oportunidades.");
@@ -417,10 +431,14 @@ export function PipelineBoard({
       toStageId: string,
       lostReason: string | null,
     ): Promise<boolean> => {
+      const metricStartedAt = performance.now();
       setBannerError(null);
       setBannerSuccess(null);
       setSavingId(opportunityId);
       const prev = cloneColumns(columnsRef.current);
+      const prevTotals = { ...stageTotalsRef.current };
+      const prevVolumes = { ...stageVolumesRef.current };
+      const movedCard = prev.get(fromStageId)?.find((card) => card.id === opportunityId) ?? null;
       const optimistic = moveCard(columnsRef.current, opportunityId, fromStageId, toStageId);
       if (!optimistic) {
         setSavingId(null);
@@ -428,17 +446,42 @@ export function PipelineBoard({
       }
       setColumns(optimistic);
       columnsRef.current = optimistic;
+      if (fromStageId !== toStageId) {
+        const nextTotals = { ...prevTotals };
+        nextTotals[fromStageId] = Math.max(0, (nextTotals[fromStageId] ?? 0) - 1);
+        nextTotals[toStageId] = (nextTotals[toStageId] ?? 0) + 1;
+        setLocalStageTotals(nextTotals);
+        stageTotalsRef.current = nextTotals;
+
+        const volumeKg = movedCard?.weeklyVolumeKg ?? 0;
+        if (volumeKg > 0) {
+          const nextVolumes = { ...prevVolumes };
+          nextVolumes[fromStageId] = Math.max(0, (nextVolumes[fromStageId] ?? 0) - volumeKg);
+          nextVolumes[toStageId] = (nextVolumes[toStageId] ?? 0) + volumeKg;
+          setLocalStageVolumes(nextVolumes);
+          stageVolumesRef.current = nextVolumes;
+        }
+      }
 
       const res = await updateOpportunityStage({
         opportunityId,
         stageId: toStageId,
         lostReason,
       });
+      recordPipelineBrowserMetric("move", metricStartedAt, {
+        ok: res.ok,
+        fromStageId,
+        toStageId,
+      });
 
       setSavingId(null);
       if (!res.ok) {
         setColumns(prev);
         columnsRef.current = prev;
+        setLocalStageTotals(prevTotals);
+        stageTotalsRef.current = prevTotals;
+        setLocalStageVolumes(prevVolumes);
+        stageVolumesRef.current = prevVolumes;
         setBannerError(res.error ?? "Não foi possível atualizar a etapa.");
         return false;
       }
@@ -450,10 +493,9 @@ export function PipelineBoard({
             : `${n} tarefas automáticas criadas para esta etapa.`,
         );
       }
-      router.refresh();
       return true;
     },
-    [router],
+    [],
   );
 
   const handleDragStart = useCallback((event: DragStartEvent) => {
@@ -521,7 +563,7 @@ export function PipelineBoard({
     setClosingReason("");
     setBannerError(null);
   }
-  const maxVolumeKg = Math.max(0, ...activeStages.map((stage) => stageVolumes[stage.id] ?? 0));
+  const maxVolumeKg = Math.max(0, ...activeStages.map((stage) => localStageVolumes[stage.id] ?? 0));
 
   return (
     <DndContext
@@ -549,7 +591,7 @@ export function PipelineBoard({
         >
           {activeStages.map((stage) => {
             const items = columns.get(stage.id) ?? [];
-            const totalCount = stageTotals[stage.id] ?? items.length;
+            const totalCount = localStageTotals[stage.id] ?? items.length;
             const hasMore = items.length < totalCount;
             return (
               <DroppableColumn
@@ -557,7 +599,7 @@ export function PipelineBoard({
                 stageId={stage.id}
                 stageName={stage.name}
                 totalCount={totalCount}
-                volumeKg={stageVolumes[stage.id] ?? 0}
+                volumeKg={localStageVolumes[stage.id] ?? 0}
                 maxVolumeKg={maxVolumeKg}
               >
                 {items.map((card) => (

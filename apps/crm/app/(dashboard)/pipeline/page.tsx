@@ -13,6 +13,7 @@ import type { PipelineCardDTO, PipelineStageDTO } from "./pipeline-board";
 import { PipelineWorkspace } from "./pipeline-workspace";
 import { getWeeklyVolumeKg } from "@/lib/lead-signals";
 import type { PipelineVolumeFilter } from "@/app/actions/pipeline";
+import { logPipelinePerformance } from "@/lib/pipeline-performance";
 
 export const dynamic = "force-dynamic";
 const CARDS_PER_STAGE = 20;
@@ -40,9 +41,6 @@ function mapRowToCard(o: PipelineCardRow): PipelineCardDTO {
       clientCategory: o.client_category,
     }),
     client_category: o.client_category,
-    distributor_id: o.distributor_id,
-    network_type: o.network_type,
-    phone_e164: o.phone_e164,
     companyCity: o.company_city,
     companyState: o.company_state,
     conversationId: o.conversation_id,
@@ -54,7 +52,6 @@ function mapRowToCard(o: PipelineCardRow): PipelineCardDTO {
     lastSentAt: o.last_sent_at,
     opportunityUpdatedAt: o.opportunity_updated_at,
     nextActionAt: o.next_action_at,
-    ownerId: o.opportunity_owner_id ?? o.lead_owner_id,
     ownerName: null,
     signals: computePipelineSignals({
       oppUpdatedAt: o.opportunity_updated_at,
@@ -70,6 +67,7 @@ export default async function PipelinePage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  const pageStartedAt = performance.now();
   const sp = await searchParams;
   const mineOnly = sp.mine === "1";
   const ownerParam = typeof sp.owner === "string" ? sp.owner.trim() : "";
@@ -113,6 +111,7 @@ export default async function PipelinePage({
     p_stage_id: stageFilter,
     p_volume: volumeFilter,
   };
+  const databaseStartedAt = performance.now();
   const [
     { data: stageRows },
     { data: teamProfiles },
@@ -148,6 +147,7 @@ export default async function PipelinePage({
       p_volume: volumeFilter,
     }),
   ]);
+  const databaseDurationMs = performance.now() - databaseStartedAt;
   const pipelineError =
     cardsError ??
     allStageCountsError ??
@@ -185,10 +185,11 @@ export default async function PipelinePage({
 
   const pagedCards: PipelineCardDTO[] = ((rows ?? []) as PipelineCardRow[]).map((o) => {
     const card = mapRowToCard(o);
+    const ownerId = o.opportunity_owner_id ?? o.lead_owner_id;
     const cardWithOwner = {
       ...card,
-      ownerName: card.ownerId
-        ? (ownerNameById.get(card.ownerId) ?? "Responsável desconhecido")
+      ownerName: ownerId
+        ? (ownerNameById.get(ownerId) ?? "Responsável desconhecido")
         : null,
     };
     return canonicalEntryStage && entryStageIds.has(card.stage_id)
@@ -236,6 +237,15 @@ export default async function PipelinePage({
     stale: Number(ownerSummary.stale_count),
     overdue: Number(ownerSummary.overdue_count),
   } : null;
+  logPipelinePerformance("initial_load", performance.now() - pageStartedAt, [
+    { operation: "database_parallel", durationMs: Math.round(databaseDurationMs * 10) / 10 },
+  ], {
+    cards: initialCards.length,
+    totalCount,
+    stageCount: stages.length,
+    hasOwner: Boolean(ownerUserId),
+    hasQuery: Boolean(query.trim()),
+  });
 
   return (
     <div className="min-h-0">

@@ -7,6 +7,7 @@ import {
 } from "@/app/actions/pipeline";
 import { isClientCategoryValue } from "@/lib/client-categories";
 import { isPipelineRegion, isPipelineSignal } from "@/lib/pipeline-signals";
+import { recordPipelineBrowserMetric } from "@/lib/pipeline-browser-performance";
 import { useCallback, useMemo, useState } from "react";
 import { PipelineBoard, type PipelineCardDTO, type PipelineStageDTO } from "./pipeline-board";
 import { PipelineFilters, PipelineHeader } from "./pipeline-filters";
@@ -49,6 +50,7 @@ export function PipelineWorkspace(props: {
   const [activeFilters, setActiveFilters] = useState(props.initialFilters);
 
   const changeFilters = useCallback(async (patch: Record<string, string | null>) => {
+    const metricStartedAt = performance.now();
     const params = new URLSearchParams(window.location.search);
     for (const [key, value] of Object.entries(patch)) {
       if (!value) params.delete(key);
@@ -81,6 +83,12 @@ export function PipelineWorkspace(props: {
     setPending(true);
     const result = await loadPipelineFilterSnapshot({ filters });
     setPending(false);
+    recordPipelineBrowserMetric("filter", metricStartedAt, {
+      ok: result.ok,
+      cards: result.ok ? result.cards.length : 0,
+      hasQuery: Boolean(filters.query),
+      stageFiltered: Boolean(filters.stageId),
+    });
     if (!result.ok) return;
     setActiveFilters(filters);
 

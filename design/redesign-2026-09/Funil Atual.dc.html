@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="apps/crm/app/valepan-tokens.css">
+<style>
+  body { margin: 0; background: var(--vp-paper); color: var(--vp-ink-body); font-family: var(--font-body); line-height: 1.6; }
+  a { color: var(--vp-wine); text-decoration: none; }
+  a:hover { color: var(--vp-wine-classic); }
+  input, select, button, textarea { font: inherit; color: inherit; }
+</style>
+</helmet>
+<div data-screen-label="Funil (atual)" style="min-height: 100vh; display: flex; flex-direction: column; background: var(--vp-paper);">
+  <header style="flex-shrink: 0; border-bottom: 1px solid rgba(199,166,77,0.35); background: var(--vp-wine); box-shadow: 0 8px 28px rgba(35,0,4,0.35);">
+    <div style="margin: 0 auto; display: flex; min-height: 80px; max-width: min(100%, 1400px); flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 16px;">
+      <div style="display: flex; min-width: 0; flex: 1; flex-wrap: wrap; align-items: center; gap: 24px;">
+        <a href="#" style="display: inline-flex; min-height: 44px; flex-shrink: 0; align-items: center; gap: 10px; border-radius: 6px; padding: 4px; color: var(--vp-gold);">
+          <img src="brand/valepan-logo.svg" alt="Valepan" style="height: 36px; width: auto; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.25));">
+          <span style="font-family: var(--font-display); font-size: 20px; font-weight: 700; letter-spacing: 0.12em; color: var(--vp-gold);">CRM</span>
+        </a>
+        <nav style="display: flex; flex-wrap: wrap; gap: 8px; font-size: 14px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em;">
+          <a href="#" style="border-radius: 6px; border-bottom: 2px solid transparent; padding: 10px 12px; color: rgba(255,248,247,0.78);">Dashboard</a>
+          <a href="#" style="border-radius: 6px; border-bottom: 2px solid transparent; padding: 10px 12px; color: rgba(255,248,247,0.78);">Chat</a>
+          <a href="#" style="border-radius: 6px; border-bottom: 2px solid var(--vp-gold); padding: 10px 12px; color: var(--vp-gold);">Funil</a>
+          <a href="#" style="border-radius: 6px; border-bottom: 2px solid transparent; padding: 10px 12px; color: rgba(255,248,247,0.78);">Tarefas</a>
+          <a href="#" style="border-radius: 6px; border-bottom: 2px solid transparent; padding: 10px 12px; color: rgba(255,248,247,0.78);">Categorias de cliente</a>
+          <a href="#" style="border-radius: 6px; border-bottom: 2px solid transparent; padding: 10px 12px; color: rgba(255,248,247,0.78);">Amostras</a>
+        </nav>
+      </div>
+      <div style="display: flex; align-items: center; border-left: 1px solid rgba(255,248,247,0.2); padding-left: 20px;">
+        <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px; border-radius: 12px; background: rgba(255,248,247,0.08); padding: 8px 12px; font-size: 14px; backdrop-filter: blur(4px);">
+          <span style="color: rgba(255,248,247,0.88);">Victor Meireles · Administrador</span>
+          <button type="button" style="border-radius: 8px; border: 1px solid rgba(255,215,115,0.45); background: transparent; padding: 6px 12px; font-size: 12px; font-weight: 600; color: var(--vp-gold); cursor: pointer;">Sair</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div style="margin: 0 auto; display: flex; min-height: 0; width: 100%; max-width: min(100%, 1400px); flex: 1; flex-direction: column; padding: 32px 16px;">
+    <div style="display: flex; flex-direction: column; gap: 16px;">
+      <div style="display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px;">
+        <h1 style="margin: 0; font-size: 18px; font-weight: 600;">Funil</h1>
+      </div>
+
+      <section aria-label="Funil por vendedor" style="border-radius: 8px; border: 1px solid var(--vp-ink-line); background: var(--vp-surface-low); padding: 12px;">
+        <div style="margin-bottom: 12px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px;">
+          <div>
+            <h2 style="margin: 0; font-size: 14px; font-weight: 600; color: var(--vp-ink-body);">Funil por vendedor</h2>
+            <p style="margin: 0; font-size: 12px; color: var(--vp-ink-muted);">Selecione um responsável para ver a carteira dele.</p>
+          </div>
+        </div>
+        <div role="group" aria-label="Selecionar vendedor" style="display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px;">
+          <button type="button" style="display: flex; flex-shrink: 0; align-items: center; gap: 8px; border-radius: 9999px; border: 1px solid var(--vp-gold); background: var(--vp-wine); padding: 8px 12px; font-size: 14px; font-weight: 600; color: var(--vp-gold); box-shadow: 0 1px 2px rgba(35,0,4,0.15); cursor: pointer;">
+            <span>Todos</span>
+            <span style="border-radius: 9999px; background: rgba(0,0,0,0.1); padding: 2px 6px; font-size: 12px; font-variant-numeric: tabular-nums;">63</span>
+          </button>
+          <button type="button" style="display: flex; flex-shrink: 0; align-items: center; gap: 8px; border-radius: 9999px; border: 1px solid var(--vp-ink-line); background: var(--vp-paper); padding: 8px 12px; font-size: 14px; color: var(--vp-ink-body); cursor: pointer;">
+            <span>Meus</span>
+            <span style="border-radius: 9999px; background: rgba(0,0,0,0.1); padding: 2px 6px; font-size: 12px; font-variant-numeric: tabular-nums;">18</span>
+          </button>
+          <sc-for list="{{ sellers }}" as="s" hint-placeholder-count="3">
+            <button type="button" style="display: flex; flex-shrink: 0; align-items: center; gap: 8px; border-radius: 9999px; border: 1px solid var(--vp-ink-line); background: var(--vp-paper); padding: 8px 12px; font-size: 14px; color: var(--vp-ink-body); cursor: pointer;">
+              <span aria-hidden="true" style="display: grid; width: 24px; height: 24px; place-items: center; border-radius: 9999px; background: var(--vp-gold); font-size: 10px; font-weight: 700; color: var(--vp-wine);">{{ s.initials }}</span>
+              <span>{{ s.name }}</span>
+              <span style="border-radius: 9999px; background: rgba(0,0,0,0.1); padding: 2px 6px; font-size: 12px; font-variant-numeric: tabular-nums;">{{ s.count }}</span>
+            </button>
+          </sc-for>
+        </div>
+      </section>
+
+      <div style="display: flex; flex-direction: column; gap: 12px; border-radius: 8px; border: 1px solid var(--vp-ink-line); background: var(--vp-surface-low); padding: 12px;">
+        <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px;">
+          <p style="margin: 0; font-size: 12px; font-weight: 500; color: var(--vp-ink-muted);">Filtros do funil</p>
+          <p style="margin: 0; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--vp-ink-muted);">63 oportunidades</p>
+        </div>
+        <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+          <label style="display: flex; min-width: 12rem; flex: 1; flex-direction: column; gap: 4px; font-size: 12px;">
+            <span style="color: var(--vp-ink-muted);">Buscar por nome ou telefone</span>
+            <input type="search" placeholder="Ex.: Maria, Valepan, 11999998888…" style="border-radius: 4px; border: 1px solid var(--vp-ink-line); background: var(--vp-paper); padding: 6px 8px; font-size: 14px;">
+            <span style="font-size: 10px; color: var(--vp-ink-muted);">Também busca empresa e título da oportunidade. Atualiza ao digitar.</span>
+          </label>
+          <label style="display: flex; min-width: 10rem; flex-direction: column; gap: 4px; font-size: 12px;">
+            <span style="color: var(--vp-ink-muted);">Região</span>
+            <select style="border-radius: 4px; border: 1px solid var(--vp-ink-line); background: var(--vp-paper); padding: 6px 8px; font-size: 14px;">
+              <option>Todas</option>
+              <option>São Paulo (DDD 11)</option>
+              <option>Rio de Janeiro (DDD 21)</option>
+            </select>
+          </label>
+          <label style="display: flex; min-width: 10rem; flex-direction: column; gap: 4px; font-size: 12px;">
+            <span style="color: var(--vp-ink-muted);">Tipo de cliente</span>
+            <select style="border-radius: 4px; border: 1px solid var(--vp-ink-line); background: var(--vp-paper); padding: 6px 8px; font-size: 14px;">
+              <option>Todos</option>
+              <option>Hamburgueria</option>
+              <option>Distribuidor</option>
+              <option>Parceiros</option>
+              <option>Outros</option>
+            </select>
+          </label>
+          <label style="display: flex; min-width: 10rem; flex-direction: column; gap: 4px; font-size: 12px;">
+            <span style="color: var(--vp-ink-muted);">Status automático</span>
+            <select style="border-radius: 4px; border: 1px solid var(--vp-ink-line); background: var(--vp-paper); padding: 6px 8px; font-size: 14px;">
+              <option>Todos</option>
+              <option>Sem resposta</option>
+              <option>Respondido</option>
+              <option>Parado 7+ dias</option>
+              <option>Follow-up atrasado</option>
+            </select>
+          </label>
+        </div>
+        <p style="margin: 0; font-size: 11px; line-height: 1.6; color: var(--vp-ink-muted);">Sinais: última mensagem do cliente (sem resposta) ou da equipe no WhatsApp/chat (respondido); oportunidade aberta sem movimento há 7+ dias; próxima ação do funil vencida.</p>
+      </div>
+
+      <div style="width: 100%; min-width: 0; overflow-x: auto; padding-bottom: 4px;">
+        <div style="display: grid; width: max(100%, 1248px); min-width: 0; gap: 8px; grid-template-columns: repeat(6, minmax(13rem, 1fr));">
+          <sc-for list="{{ stages }}" as="stage" hint-placeholder-count="6">
+            <section style="display: flex; height: min(62vh, 26rem); min-width: 0; flex-direction: column; border-radius: 8px; border: 1px solid var(--vp-ink-line); background: var(--vp-surface-low); padding: 8px;">
+              <h2 style="margin: 0; text-align: center; font-size: 11px; font-weight: 600; line-height: 1.25; color: var(--vp-ink-muted);">
+                <span style="color: var(--vp-ink-body);">{{ stage.name }}</span>
+                <span style="font-weight: 400; font-variant-numeric: tabular-nums; color: var(--vp-ink-muted);">({{ stage.count }})</span>
+              </h2>
+              <label style="margin-top: 6px; display: block;">
+                <input type="search" placeholder="Nome ou telefone" style="width: 100%; min-width: 0; border-radius: 4px; border: 1px solid var(--vp-ink-line); background: var(--vp-paper); padding: 4px 8px; font-size: 12px; color: var(--vp-ink-body);">
+              </label>
+              <ul style="margin: 8px 0 0; padding: 0; list-style: none; display: flex; min-height: 0; flex: 1; flex-direction: column; gap: 6px; overflow-y: auto; overscroll-behavior: contain;">
+                <sc-for list="{{ stage.cards }}" as="c" hint-placeholder-count="4">
+                  <li style="display: flex; gap: 6px; border-radius: 4px; border: 1px solid var(--vp-ink-line); background: var(--vp-paper); padding: 6px;">
+                    <button type="button" aria-label="Arrastar" style="margin-top: 2px; flex-shrink: 0; border: 0; background: none; padding: 0 2px; font-size: 14px; color: var(--vp-ink-muted); cursor: grab;">⠿</button>
+                    <div style="min-width: 0; flex: 1;">
+                      <a href="#" style="display: block;">
+                        <div style="min-width: 0;">
+                          <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px;">
+                            <span style="display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 500; color: var(--vp-ink-body);">{{ c.name }}</span>
+                            <span style="display: inline-flex; height: 20px; min-width: 20px; flex-shrink: 0; align-items: center; justify-content: center; border-radius: 6px; border: 1px solid var(--vp-ink-line); background: var(--vp-surface-low); padding: 0 4px; font-size: 10px; font-weight: 600; color: var(--vp-wine);">{{ c.letter }}</span>
+                          </div>
+                          <p style="margin: 2px 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--vp-ink-muted);">{{ c.phone }}</p>
+                          <p style="margin: 2px 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--vp-ink-muted);">{{ c.company }}</p>
+                        </div>
+                      </a>
+                      <div style="margin-top: 6px; display: inline-flex; max-width: 100%; align-items: center; gap: 6px; border-radius: 9999px; border: 1px solid rgba(255,213,115,0.6); background: rgba(255,213,115,0.1); padding: 2px 6px; font-size: 10px; color: var(--vp-wine);">
+                        <span aria-hidden="true" style="display: grid; width: 16px; height: 16px; flex-shrink: 0; place-items: center; border-radius: 9999px; background: var(--vp-gold); font-size: 8px; font-weight: 700; color: var(--vp-wine);">{{ c.ownerInitials }}</span>
+                        <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ c.owner }}</span>
+                      </div>
+                      <ul style="margin: 4px 0 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 2px;">
+                        <sc-if value="{{ c.awaiting }}" hint-placeholder-val="{{ true }}">
+                          <li style="border-radius: 4px; border: 1px solid rgba(186,26,26,0.4); background: rgba(180,40,40,0.08); padding: 1px 4px; font-size: 9px; font-weight: 600; line-height: 1.25; color: var(--vp-error);">Sem resposta</li>
+                        </sc-if>
+                        <sc-if value="{{ c.replied }}" hint-placeholder-val="{{ false }}">
+                          <li style="border-radius: 4px; border: 1px solid rgba(37,211,102,0.5); background: rgba(37,211,102,0.1); padding: 1px 4px; font-size: 9px; font-weight: 600; line-height: 1.25; color: var(--vp-wine);">Respondido</li>
+                        </sc-if>
+                        <sc-if value="{{ c.stale }}" hint-placeholder-val="{{ false }}">
+                          <li style="border-radius: 4px; border: 1px solid var(--vp-ink-line); background: var(--vp-surface-low); padding: 1px 4px; font-size: 9px; font-weight: 600; line-height: 1.25; color: var(--vp-ink-muted);">Parado 7+ dias</li>
+                        </sc-if>
+                        <sc-if value="{{ c.overdue }}" hint-placeholder-val="{{ false }}">
+                          <li style="border-radius: 4px; border: 1px solid rgba(199,166,77,0.5); background: rgba(199,166,77,0.15); padding: 1px 4px; font-size: 9px; font-weight: 600; line-height: 1.25; color: var(--vp-wine);">Follow-up atrasado</li>
+                        </sc-if>
+                      </ul>
+                      <button type="button" style="margin-top: 8px; border-radius: 4px; border: 1px solid var(--vp-ink-line); background: none; padding: 4px 8px; font-size: 11px; color: var(--vp-ink-muted); cursor: pointer;">Encerrar</button>
+                    </div>
+                  </li>
+                </sc-for>
+              </ul>
+            </section>
+          </sc-for>
+        </div>
+      </div>
+
+      <details style="border-radius: 8px; border: 1px solid var(--vp-ink-line); background: var(--vp-surface-low);">
+        <summary style="cursor: pointer; padding: 8px 12px; font-size: 14px; font-weight: 500;">Encerrados nesta página (4)</summary>
+        <ul style="margin: 0; display: grid; gap: 8px; border-top: 1px solid var(--vp-ink-line); padding: 12px; list-style: none; grid-template-columns: repeat(3, minmax(0, 1fr));">
+          <sc-for list="{{ closed }}" as="k" hint-placeholder-count="4">
+            <li style="border-radius: 4px; border: 1px solid var(--vp-ink-line); background: var(--vp-paper); padding: 8px;">
+              <a href="#" style="font-size: 14px; font-weight: 500;">{{ k.name }}</a>
+              <p style="margin: 4px 0 0; font-size: 12px; color: var(--vp-ink-muted);">{{ k.result }}</p>
+            </li>
+          </sc-for>
+        </ul>
+      </details>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  renderVals() {
+    const S = (name, initials, count) => ({ name, initials, count });
+    const card = (name, phone, company, letter, owner, sig) => ({
+      name, phone, company, letter,
+      owner, ownerInitials: owner.split(/\s+/).slice(0, 2).map((p) => p[0].toUpperCase()).join(""),
+      awaiting: sig.includes("a"), replied: sig.includes("r"), stale: sig.includes("s"), overdue: sig.includes("o"),
+    });
+    const stages = [
+      { name: "LEADS", cards: [
+        card("Rafael Domingues", "(11) 98876-4412", "Burger do Beco", "H", "Ana Prado", "a"),
+        card("Juliana Marques", "(21) 99614-2087", "Casa do Hambúrguer", "H", "Ana Prado", "a"),
+        card("Marcos Ferraz", "(11) 97740-1188", "Distribuidora Pão Cheio", "D", "Bruno Lima", "r"),
+        card("Camila Nunes", "(21) 98120-6633", "Smash Lab Botafogo", "H", "Ana Prado", "a"),
+        card("Eduardo Sato", "(11) 99251-4470", "Sem empresa cadastrada", "O", "Bruno Lima", "as"),
+        card("Patrícia Alencar", "(21) 97788-3021", "Rei do Burger Tijuca", "H", "Carla Reis", "a"),
+      ] },
+      { name: "CONTATO FEITO", cards: [
+        card("Thiago Barreto", "(11) 98330-9912", "Barreto Burgers", "H", "Bruno Lima", "r"),
+        card("Luana Prado", "(21) 99887-1245", "Prado Lanches", "H", "Carla Reis", "as"),
+        card("Igor Menezes", "(11) 96622-8140", "Distribuidora Sul Pães", "D", "Bruno Lima", "r"),
+        card("Sérgio Vidal", "(21) 98455-7702", "Vidal Grill", "H", "Ana Prado", "ao"),
+      ] },
+      { name: "QUALIFICADO", cards: [
+        card("Fernanda Cruz", "(11) 99120-5588", "Cruz Burger House", "H", "Carla Reis", "r"),
+        card("Diego Sampaio", "(21) 98002-4417", "Sampaio Smash", "H", "Ana Prado", "as"),
+        card("Renata Vasques", "(11) 97015-3399", "Rede Vasques (4 lojas)", "H", "Bruno Lima", "r"),
+      ] },
+      { name: "AMOSTRA ENVIADA", cards: [
+        card("Paulo Henrique", "(11) 98811-2277", "PH Burger Moema", "H", "Carla Reis", "ro"),
+        card("Bianca Torres", "(21) 99444-6610", "Torres Food Truck", "H", "Ana Prado", "a"),
+        card("Wesley Aragão", "(11) 96550-8823", "Aragão Distribuidora", "D", "Bruno Lima", "rs"),
+      ] },
+      { name: "NEGOCIAÇÃO", cards: [
+        card("Cláudia Bastos", "(11) 99677-4402", "Bastos Burgers (3 lojas)", "H", "Carla Reis", "r"),
+        card("Otávio Lins", "(21) 98170-9954", "Lins Lanchonete", "H", "Ana Prado", "ao"),
+      ] },
+      { name: "PROPOSTA ENVIADA", cards: [
+        card("Márcia Duarte", "(11) 98244-1130", "Duarte Gastronomia", "P", "Bruno Lima", "r"),
+        card("Henrique Salles", "(21) 97361-2288", "Salles Burger Co.", "H", "Carla Reis", "so"),
+      ] },
+    ].map((s) => ({ ...s, count: s.cards.length }));
+    return {
+      stages,
+      sellers: [S("Ana Prado", "AP", 24), S("Bruno Lima", "BL", 21), S("Carla Reis", "CR", 18)],
+      closed: [
+        { name: "Vitor Camargo", result: "CONVERTIDO" },
+        { name: "Aline Rocha", result: "PERDIDO · Preço" },
+        { name: "Gustavo Pinho", result: "PERDIDO · Não responde" },
+        { name: "Simone Tavares", result: "PERDIDO · Região não atendida" },
+      ],
+    };
+  }
+}
+</script>
+</body>
+</html>

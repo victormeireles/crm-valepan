@@ -40,6 +40,11 @@ function normalizeZapiChatKey(phoneCandidate: string): string | null {
 /** Todos os `lid:…` presentes no payload (phone/chatLid/senderLid…) para gravar em zapi_lid_map quando houver E.164 real. */
 function collectLinkedLidKeysFromMerged(o: Record<string, unknown>): string[] {
   const found: string[] = [];
+  const keyJid = pickJidFromKey(o);
+  if (keyJid) {
+    const key = normalizeZapiChatKey(keyJid);
+    if (key?.startsWith("lid:")) found.push(key);
+  }
   for (const f of ["phone", "chatLid", "senderLid", "participantLid"] as const) {
     const v = o[f];
     if (typeof v !== "string" || !v.trim()) continue;
@@ -231,11 +236,15 @@ function pickPhoneCandidate(
 
   if (isGroup && participant) return { raw: participant, pickSource: "participant_group" };
 
-  if (fromMergedKey) return { raw: fromMergedKey, pickSource: "merged.key.remoteJid" };
+  if (fromMergedKey && !fromMergedKey.toLowerCase().includes("@lid")) {
+    return { raw: fromMergedKey, pickSource: "merged.key.remoteJid" };
+  }
 
   if (root) {
     const fromRootKey = pickJidFromKey(root);
-    if (fromRootKey) return { raw: fromRootKey, pickSource: "root.key.remoteJid" };
+    if (fromRootKey && !fromRootKey.toLowerCase().includes("@lid")) {
+      return { raw: fromRootKey, pickSource: "root.key.remoteJid" };
+    }
   }
 
   /**
@@ -264,6 +273,18 @@ function pickPhoneCandidate(
       const hit = tryScalarPhoneField(root[k], `root.${k}`);
       if (hit) return hit;
     }
+  }
+
+  /**
+   * O `remoteJid` das versões recentes do WhatsApp pode ser apenas um LID. Ele é
+   * útil como chave de associação, mas não deve vencer um telefone real presente
+   * no mesmo webhook. Se nenhum campo trouxer o número, mantemos o LID para não
+   * perder a mensagem.
+   */
+  if (fromMergedKey) return { raw: fromMergedKey, pickSource: "merged.key.remoteJid_lid" };
+  if (root) {
+    const fromRootKey = pickJidFromKey(root);
+    if (fromRootKey) return { raw: fromRootKey, pickSource: "root.key.remoteJid_lid" };
   }
 
   return { raw: "", pickSource: "none" };
@@ -1583,8 +1604,10 @@ export async function ingestZapiMessage(parsed: ZapiInbound) {
     }
   }
 
-  if (parsed.conversationKind === "lead" && !phoneE164ForCrm.startsWith("lid:")) {
-    const avatarUrl = await fetchZapiProfilePictureLink(phoneE164ForCrm);
+  if (parsed.conversationKind === "lead") {
+    const avatarUrl = phoneE164ForCrm.startsWith("lid:")
+      ? null
+      : await fetchZapiProfilePictureLink(phoneE164ForCrm);
     const nowIso = new Date().toISOString();
     const { data: contactRow, error: contactErr } = await crm
       .from("contacts")
