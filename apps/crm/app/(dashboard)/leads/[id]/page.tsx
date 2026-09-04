@@ -13,6 +13,8 @@ import { buildTaskCalendarEvent } from "@/lib/calendar-events";
 import { CalendarEventLinesDisplay } from "../../tasks/calendar-event-display";
 import { ToggleTaskButton } from "../../tasks/toggle-task-button";
 import { LeadActions } from "./ui";
+import { LeadFollowUp } from "@/components/lead-follow-up";
+import { toFollowUpDTO } from "@/lib/follow-ups";
 
 const TEAM_ROLE_LABEL: Record<string, string> = {
   admin: "Admin",
@@ -65,7 +67,7 @@ export default async function LeadDetailPage({
       .limit(120),
     crm
       .from("tasks")
-      .select("id, title, due_at, done, assignee_id")
+      .select("id, title, due_at, done, assignee_id, task_kind")
       .eq("lead_id", id)
       .order("done", { ascending: true })
       .order("due_at", { ascending: true, nullsFirst: false }),
@@ -101,7 +103,11 @@ export default async function LeadDetailPage({
   const leadOwnerId = lead.owner_id ?? null;
 
   const opportunity = opps?.[0] ?? null;
-  const leadTasks = leadTasksRaw;
+  const leadFollowUpRow = leadTasksRaw?.find(
+    (task) => task.task_kind === "follow_up" && !task.done,
+  );
+  const leadFollowUp = leadFollowUpRow ? toFollowUpDTO(leadFollowUpRow) : null;
+  const leadTasks = leadTasksRaw?.filter((task) => task.task_kind !== "follow_up");
   const teamOptions = (teamProfiles ?? []).map(formatTeamOption);
   const assigneeLabel = new Map(teamOptions.map((o) => [o.id, o.label]));
 
@@ -149,7 +155,6 @@ export default async function LeadDetailPage({
                   stage_id: opportunity.stage_id,
                   lost_reason: opportunity.lost_reason,
                   title: opportunity.title,
-                  next_action_at: opportunity.next_action_at,
                   pipeline_stages: opportunity.pipeline_stages as { name: string } | null,
                 }
               : null
@@ -260,10 +265,20 @@ export default async function LeadDetailPage({
             />
           </div>
         </div>
-        <div className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-4">
-          <h2 className="text-sm font-medium">Nota</h2>
-          <div className="mt-3">
-            <LeadNoteForm leadId={id} />
+        <div className="space-y-4">
+          <div id="follow-up" className="scroll-mt-28 rounded-lg border border-[var(--border)] bg-[var(--card)] p-4">
+            <LeadFollowUp
+              leadId={id}
+              initialFollowUp={leadFollowUp}
+              teamOptions={teamOptions}
+              defaultAssigneeId={leadOwnerId}
+            />
+          </div>
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-4">
+            <h2 className="text-sm font-medium">Nota</h2>
+            <div className="mt-3">
+              <LeadNoteForm leadId={id} />
+            </div>
           </div>
         </div>
       </section>

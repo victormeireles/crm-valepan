@@ -4,6 +4,7 @@ import {
   excludeLeadFromPipeline,
   restoreLeadToPipeline,
 } from "@/app/actions/lead-pipeline-exclusion";
+import { CrmIcon } from "@/components/crm-icon";
 import {
   LEAD_EXCLUSION_REASONS,
   LEAD_EXCLUSION_REASON_LABELS,
@@ -78,7 +79,7 @@ export function ExcludeLeadButton({
           : "rounded-md border border-[var(--border)] bg-[var(--vp-paper-pure)] px-3 py-1.5 text-xs font-medium text-[var(--muted)] hover:border-[var(--vp-wine)] hover:text-[var(--vp-wine)]"}
         aria-label={iconOnly ? "Arquivar conversa" : undefined}
       >
-        {iconOnly ? <span className="material-symbols-outlined text-lg" aria-hidden="true">archive</span> : "Não é lead"}
+        {iconOnly ? <CrmIcon name="archive" className="text-lg" /> : "Não é lead"}
       </button>
     );
   }

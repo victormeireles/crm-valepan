@@ -50,6 +50,7 @@ type TaskRow = {
   due_at: string | null;
   done: boolean;
   lead_id: string | null;
+  task_kind: "task" | "follow_up";
   leads: LeadN | LeadN[] | null;
 };
 
@@ -77,6 +78,7 @@ function renderTaskRow(t: TaskRow) {
       title={t.title}
       dueAt={t.due_at}
       done={t.done}
+      taskKind={t.task_kind}
       leadId={t.lead_id}
       leadName={t.lead_id ? personName : null}
       companyName={t.lead_id ? companyLine : null}
@@ -108,8 +110,8 @@ export default async function TasksPage({
 
   const { data: tasks } = await crm
     .from("tasks")
-    .select(
-      "id, title, due_at, done, lead_id, assignee_id, leads(phone_e164, client_category, contacts(full_name), companies(name), distributors(name))",
+      .select(
+        "id, title, due_at, done, lead_id, assignee_id, task_kind, leads(phone_e164, client_category, contacts(full_name), companies(name), distributors(name))",
     )
     .order("due_at", { ascending: true, nullsFirst: false });
 
@@ -119,7 +121,7 @@ export default async function TasksPage({
       const { personName, companyLine } = leadDisplay(nestOne(t.leads as LeadN | LeadN[] | null));
       return {
         id: t.id,
-        kind: "task" as const,
+        kind: t.task_kind === "follow_up" ? "followup" as const : "task" as const,
         at: t.due_at!,
         title: t.title,
         leadName: t.lead_id ? personName : null,

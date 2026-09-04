@@ -5,6 +5,8 @@ import { getCustomerWaitSignal } from "@/lib/lead-signals";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
+import { ContactAvatar } from "@/components/contact-avatar";
+import { CrmIcon } from "@/components/crm-icon";
 
 export type InboxSidebarRow = {
   id: string;
@@ -21,7 +23,7 @@ export type InboxSidebarRow = {
   companyName: string | null;
   clientCategory: string | null;
   stageName: string | null;
-  weeklyVolumeKg: number | null;
+  weeklyBreadCount: number | null;
   lastDirection: string | null;
   unread: boolean;
   callStatus: "ringing" | "missed_voice" | "missed_video" | null;
@@ -32,16 +34,6 @@ function norm(s: string) {
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
-}
-
-function initials(name: string) {
-  const parts = name
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2);
-  if (parts.length === 0) return "?";
-  return parts.map((p) => Array.from(p)[0]?.toUpperCase() ?? "").join("") || "?";
 }
 
 function validAvatarUrl(v: string | null | undefined): string | null {
@@ -62,10 +54,10 @@ export function InboxSidebar({
 }: {
   conversations: InboxSidebarRow[];
   selectedId: string | null;
-  activeTab: "waiting" | "qualify" | "pipeline" | "groups" | "archived";
+  activeTab: "qualify" | "archived" | "groups" | "pipeline";
   page: number;
   renderNowMs: number;
-  tabCounts: { waiting: number; qualify: number; pipeline: number };
+  tabCounts: { qualify: number; archived: number; groups: number; pipeline: number };
 }) {
   const router = useRouter();
   const [nowMs, setNowMs] = useState(renderNowMs);
@@ -127,61 +119,40 @@ export function InboxSidebar({
       className="relative flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-[14px] border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] shadow-[var(--sh-sm)]"
     >
       <div className="shrink-0 border-b border-[var(--vp-ink-line)] p-3">
-        <div className="mb-2.5 flex gap-0.5 rounded-full bg-[rgba(35,0,4,0.06)] p-[3px]">
-          <Link
-            href="/inbox?tab=waiting"
-            className={`min-h-8 flex-1 rounded-full px-2 py-1.5 text-center text-xs font-bold ${
-              activeTab === "waiting" ? "bg-[var(--vp-wine)] text-[var(--vp-gold)]" : "text-[var(--vp-ink-muted)]"
-            }`}
-          >
-            Esperando {tabCounts.waiting.toLocaleString("pt-BR")}
-          </Link>
-          <Link
-            href="/inbox?tab=qualify"
-            className={`min-h-8 flex-1 rounded-full px-2 py-1.5 text-center text-xs font-bold ${
-              activeTab === "qualify"
-                ? "bg-[var(--vp-wine)] text-[var(--vp-gold)]"
-                : "text-[var(--vp-ink-muted)]"
-            }`}
-          >
-            Qualificar {tabCounts.qualify.toLocaleString("pt-BR")}
-          </Link>
-          <Link
-            href="/inbox?tab=pipeline"
-            className={`min-h-8 flex-1 rounded-full px-2 py-1.5 text-center text-xs font-bold ${
-              activeTab === "pipeline"
-                ? "bg-[var(--vp-wine)] text-[var(--vp-gold)]"
-                : "text-[var(--vp-ink-muted)]"
-            }`}
-          >
-            Funil {tabCounts.pipeline.toLocaleString("pt-BR")}
-          </Link>
+        <div className="mb-2.5 grid grid-cols-2 gap-1 rounded-[18px] bg-[rgba(35,0,4,0.06)] p-[3px]">
+          {([
+            ["qualify", "Qualificar", tabCounts.qualify],
+            ["archived", "Arquivados", tabCounts.archived],
+            ["groups", "Grupos", tabCounts.groups],
+            ["pipeline", "No funil", tabCounts.pipeline],
+          ] as const).map(([tab, label, count]) => (
+            <Link
+              key={tab}
+              href={`/inbox?tab=${tab}`}
+              className={`min-h-8 rounded-[14px] px-2 py-1.5 text-center text-xs font-bold ${
+                activeTab === tab
+                  ? "bg-[var(--vp-wine)] text-[var(--vp-gold)]"
+                  : "text-[var(--vp-ink-muted)] hover:bg-[rgba(35,0,4,0.04)]"
+              }`}
+            >
+              {label} {count.toLocaleString("pt-BR")}
+            </Link>
+          ))}
         </div>
-        <div className="flex items-center gap-1.5">
-          <label htmlFor="inbox-search" className="flex min-h-10 flex-1 items-center gap-2 rounded-full border border-[var(--vp-ink-line)] bg-[var(--vp-paper)] px-3">
-            <span className="material-symbols-outlined text-[17px] text-[var(--vp-ink-soft)]" aria-hidden="true">search</span>
-            <span className="sr-only">Buscar conversas</span>
-            <input
-              id="inbox-search"
-              type="search"
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Buscar conversa"
-              className="w-full border-0 bg-transparent text-[13px] outline-none placeholder:text-[var(--vp-ink-soft)]"
-              autoComplete="off"
-              spellCheck={false}
-            />
-          </label>
-          <details className="group relative">
-            <summary className={`grid size-10 cursor-pointer list-none place-items-center rounded-full text-[var(--vp-ink-muted)] marker:content-none hover:bg-[var(--vp-surface)] [&::-webkit-details-marker]:hidden ${activeTab === "groups" || activeTab === "archived" ? "bg-[var(--vp-surface)] text-[var(--vp-wine)]" : ""}`} aria-label="Outras filas">
-              <span className="material-symbols-outlined text-xl" aria-hidden="true">more_horiz</span>
-            </summary>
-            <div className="absolute right-0 z-30 mt-1 min-w-40 overflow-hidden rounded-xl border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] py-1 shadow-[var(--sh-md)]">
-              <Link href="/inbox?tab=archived" className="block min-h-10 px-3 py-2.5 text-xs text-[var(--vp-ink-muted)] hover:bg-[var(--vp-surface)]">Arquivados</Link>
-              <Link href="/inbox?tab=groups" className="block min-h-10 px-3 py-2.5 text-xs text-[var(--vp-ink-muted)] hover:bg-[var(--vp-surface)]">Grupos</Link>
-            </div>
-          </details>
-        </div>
+        <label htmlFor="inbox-search" className="flex min-h-10 items-center gap-2 rounded-full border border-[var(--vp-ink-line)] bg-[var(--vp-paper)] px-3">
+          <CrmIcon name="search" className="text-[17px] text-[var(--vp-ink-soft)]" />
+          <span className="sr-only">Buscar conversas</span>
+          <input
+            id="inbox-search"
+            type="search"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Buscar conversa"
+            className="w-full border-0 bg-transparent text-[13px] outline-none placeholder:text-[var(--vp-ink-soft)]"
+            autoComplete="off"
+            spellCheck={false}
+          />
+        </label>
       </div>
       <ul className="min-h-0 flex-1 divide-y divide-[var(--vp-surface-high)] overflow-y-auto overscroll-contain">
         {filtered.map((c) => {
@@ -211,22 +182,13 @@ export function InboxSidebar({
             >
               <div className="flex items-start gap-2.5">
                 <div className="relative shrink-0">
-                  {validAvatarUrl(c.avatarUrl) ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={validAvatarUrl(c.avatarUrl) as string}
-                      alt={`Foto de ${c.identityName}`}
-                      className="size-10 rounded-full object-cover"
-                    />
-                  ) : (
-                    <div
-                      className="grid size-10 place-items-center rounded-full bg-[rgba(35,0,4,0.1)] text-[13px] font-extrabold text-[var(--vp-wine)]"
-                      aria-label={`Avatar de ${c.identityName}`}
-                      title={c.identityName}
-                    >
-                      {initials(c.identityName)}
-                    </div>
-                  )}
+                  <ContactAvatar
+                    name={c.identityName}
+                    src={validAvatarUrl(c.avatarUrl)}
+                    phone={c.phone_e164}
+                    className="size-10"
+                    textClassName="text-[13px]"
+                  />
                   {c.unread && !readIds.has(c.id) ? <span className="absolute -right-0.5 -top-0.5 size-2.5 rounded-full border-2 border-[var(--vp-paper-pure)] bg-[var(--vp-wine)]" aria-label="Conversa com mensagens não lidas" /> : null}
                 </div>
                 <div className="min-w-0 flex-1">
@@ -250,12 +212,13 @@ export function InboxSidebar({
               <p className="mt-2 line-clamp-2 text-xs leading-relaxed text-[var(--vp-ink-muted)]">{c.preview}</p>
               <div className="mt-2 flex flex-wrap items-center gap-1 text-[10px] font-bold text-[var(--vp-ink-muted)]">
                 <span className="rounded-full bg-[var(--vp-surface)] px-2 py-0.5">{c.stageName ?? c.leadLine}</span>
-                <span className="rounded-full bg-[var(--vp-surface)] px-2 py-0.5">{c.weeklyVolumeKg == null ? "volume não informado" : `${c.weeklyVolumeKg.toLocaleString("pt-BR")} kg/sem`}</span>
+                <span className="rounded-full bg-[var(--vp-surface)] px-2 py-0.5">{c.weeklyBreadCount == null ? "volume não informado" : `${c.weeklyBreadCount.toLocaleString("pt-BR")} pães/sem`}</span>
                 {c.callStatus && c.callStatus !== "ringing" ? (
                   <span className="font-semibold text-[var(--vp-wine)]">
-                    <span className="material-symbols-outlined mr-1 align-middle text-sm" aria-hidden="true">
-                      {c.callStatus === "missed_video" ? "videocam" : "call"}
-                    </span>
+                    <CrmIcon
+                      name={c.callStatus === "missed_video" ? "videocam" : "call"}
+                      className="mr-1 inline-block align-middle text-sm"
+                    />
                     {c.callStatus === "missed_video" ? "Videochamada perdida" : "Ligação perdida"}
                   </span>
                 ) : null}

@@ -30,6 +30,7 @@ async function fetchZapiProfilePictureLink(base, inst, token, clientToken, phone
     try {
       const res = await fetch(url, {
         method: "GET",
+        signal: AbortSignal.timeout(10_000),
         headers: {
           "Content-Type": "application/json",
           ...(clientToken ? { "Client-Token": clientToken } : {}),
@@ -73,13 +74,17 @@ async function main() {
 
   const { data: contacts, error } = await crm
     .from("contacts")
-    .select("id, phone_e164, avatar_url")
+    .select("id, phone_e164, avatar_url, avatar_updated_at")
     .order("updated_at", { ascending: false })
     .limit(3000);
   if (error) throw error;
 
   let checked = 0;
   let updated = 0;
+  let unavailable = 0;
+  let skippedFresh = 0;
+
+  const refreshBefore = Date.now() - 24 * 60 * 60 * 1000;
 
   const hasValidAvatar = (v) => {
     const t = String(v ?? "").trim();
@@ -88,9 +93,19 @@ async function main() {
     return low !== "null" && low !== "undefined";
   };
 
-  for (const c of contacts ?? []) {
+  async function syncContact(c) {
     checked += 1;
-    if (hasValidAvatar(c.avatar_url)) continue;
+    const lastRefresh = Date.parse(String(c.avatar_updated_at ?? ""));
+    const isFresh = Number.isFinite(lastRefresh) && lastRefresh >= refreshBefore;
+    if (hasValidAvatar(c.avatar_url) && isFresh) {
+      skippedFresh += 1;
+      return;
+    }
+
+    if (!/^\+\d{8,15}$/.test(String(c.phone_e164 ?? ""))) {
+      unavailable += 1;
+      return;
+    }
 
     const link = await fetchZapiProfilePictureLink(
       zapiBase,
@@ -99,9 +114,16 @@ async function main() {
       zapiClientToken,
       c.phone_e164,
     );
-    if (!link) continue;
-
     const nowIso = new Date().toISOString();
+    if (!link) {
+      unavailable += 1;
+      await crm
+        .from("contacts")
+        .update({ avatar_updated_at: nowIso })
+        .eq("id", c.id);
+      return;
+    }
+
     const { error: updateErr } = await crm
       .from("contacts")
       .update({
@@ -113,12 +135,27 @@ async function main() {
     if (!updateErr) updated += 1;
   }
 
+  const rows = contacts ?? [];
+  const concurrency = 6;
+  for (let start = 0; start < rows.length; start += concurrency) {
+    await Promise.all(rows.slice(start, start + concurrency).map(syncContact));
+    if (checked % 60 === 0 || checked === rows.length) {
+      console.log(`Progresso: ${checked}/${rows.length} contatos verificados.`);
+    }
+  }
+
   console.log(
-    `Backfill concluído. contatos_lidos=${checked} contatos_atualizados=${updated}`,
+    `Backfill concluído. contatos_lidos=${checked} contatos_atualizados=${updated} fotos_indisponiveis=${unavailable} recentes_ignorados=${skippedFresh}`,
   );
 }
 
 main().catch((e) => {
-  console.error(e instanceof Error ? e.message : String(e));
+  const detail =
+    e instanceof Error
+      ? e.message
+      : e && typeof e === "object"
+        ? [e.code, e.message, e.details, e.hint].filter(Boolean).join(" · ")
+        : String(e);
+  console.error(detail || "Falha desconhecida ao sincronizar avatares.");
   process.exit(1);
 });

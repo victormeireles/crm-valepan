@@ -6,6 +6,7 @@ import {
   sendConversationAttachment,
   sendConversationMessage,
 } from "@/app/actions/inbox";
+import { CrmIcon } from "@/components/crm-icon";
 import { useEffect, useRef, useState } from "react";
 import { EmojiPicker } from "./emoji-picker";
 import { QUICK_REPLIES, renderQuickReply } from "@/lib/inbox/quick-replies";
@@ -201,7 +202,7 @@ export function SendMessageForm({
               aria-haspopup="menu"
               aria-expanded={attachOpen}
             >
-              <span className="material-symbols-outlined text-[22px]" aria-hidden="true">add</span>
+              <CrmIcon name="add" className="text-[22px]" />
             </button>
             {attachOpen ? (
               <div
@@ -257,7 +258,7 @@ export function SendMessageForm({
               aria-haspopup="dialog"
               aria-expanded={emojiOpen}
             >
-              <span className="material-symbols-outlined text-[22px]" aria-hidden="true">mood</span>
+              <CrmIcon name="mood" className="text-[22px]" />
             </button>
             {emojiOpen ? (
               <div className="absolute bottom-12 left-[-2.75rem] z-30" role="dialog" aria-label="Selecionar emoji">
@@ -298,9 +299,9 @@ export function SendMessageForm({
           className="inline-flex h-[50px] shrink-0 items-center gap-2 rounded-full bg-[var(--vp-wine)] px-5 text-sm font-bold text-[var(--vp-gold)] shadow-[var(--sh-md)] transition-[transform,background-color,box-shadow] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] hover:bg-[var(--vp-wine-classic)] hover:shadow-[var(--sh-lg)] disabled:pointer-events-none disabled:opacity-50"
         >
           {loading ? (
-            <span className="material-symbols-outlined animate-spin text-xl" aria-hidden="true">progress_activity</span>
+            <CrmIcon name="progress_activity" className="animate-spin text-xl" />
           ) : (
-            <span className="material-symbols-outlined text-xl" aria-hidden="true">send</span>
+            <CrmIcon name="send" className="text-xl" />
           )}
           <span>{loading ? "Enviando…" : "Enviar"}</span>
         </button>

@@ -12,6 +12,7 @@ import {
   setInboxMessagePinned,
   toggleInboxMessageFavorite,
 } from "@/app/actions/inbox";
+import { CrmIcon } from "@/components/crm-icon";
 import {
   INBOX_MESSAGES_VISIBLE_SINCE,
   type InboxMessageRow,
@@ -866,7 +867,7 @@ export function ChatThread({
           onClick={() => document.getElementById(`message-${pinnedMessage.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" })}
           className="mb-1 flex items-center gap-2 rounded-xl border-l-4 border-[var(--vp-wine)] bg-[rgba(35,0,4,0.05)] px-3 py-2 text-left text-xs hover:bg-[rgba(35,0,4,0.08)]"
         >
-          <span className="material-symbols-outlined text-base" aria-hidden="true">keep</span>
+          <CrmIcon name="keep" className="text-base" />
           <span className="min-w-0 flex-1 truncate"><strong>Mensagem fixada:</strong> {messagePreview(pinnedMessage)}</span>
         </button>
       ) : null}

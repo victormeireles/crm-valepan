@@ -1,6 +1,5 @@
 /* Valepan marketing tokens — alinhado à skill design-system/colors_and_type.css */
 @import url("https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Bebas+Neue&display=swap");
-@import url("https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0");
 
 :root {
   --vp-wine: #230004;

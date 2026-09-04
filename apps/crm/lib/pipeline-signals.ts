@@ -37,7 +37,7 @@ export const PIPELINE_SIGNAL_LABELS: Record<PipelineSignal, string> = {
   awaiting_reply: "Sem resposta",
   replied: "Respondido",
   stale: `Parado ${PIPELINE_STALE_DAYS}+ dias`,
-  followup_overdue: "Follow-up atrasado",
+  followup_overdue: "Follow-up vencido",
 };
 
 export function isPipelineSignal(value: string): value is PipelineSignal {

@@ -33,29 +33,28 @@ export function getCustomerWaitSignal(input: {
   return { state: "sem_interacao", label: `Sem interação há ${elapsed}`, elapsed };
 }
 
-/** Consumo semanal convertido para quilos, com pão de 90 g como padrão. */
-export function getWeeklyVolumeKg(
+/** Quantidade semanal de pães informada no cadastro do lead. */
+export function getWeeklyBreadCount(
   weeklyBreadConsumption: number | null | undefined,
-  breadWeightGrams: number | null | undefined,
 ): number | null {
   if (weeklyBreadConsumption == null) return null;
-  return Math.round((weeklyBreadConsumption * (breadWeightGrams ?? 90)) / 1_000);
+  return Math.round(weeklyBreadConsumption);
 }
 
-export function summarizeWeeklyVolumeByStage<T>(
+export function summarizeWeeklyBreadCountByStage<T>(
   items: readonly T[],
   getStageId: (item: T) => string,
-  getVolumeKg: (item: T) => number | null,
+  getBreadCount: (item: T) => number | null,
 ): { byStage: Record<string, number>; total: number } {
   const byStage: Record<string, number> = {};
   let total = 0;
 
   for (const item of items) {
-    const volume = getVolumeKg(item);
-    if (volume == null) continue;
+    const breadCount = getBreadCount(item);
+    if (breadCount == null) continue;
     const stageId = getStageId(item);
-    byStage[stageId] = (byStage[stageId] ?? 0) + volume;
-    total += volume;
+    byStage[stageId] = (byStage[stageId] ?? 0) + breadCount;
+    total += breadCount;
   }
 
   return { byStage, total };
@@ -87,11 +86,11 @@ export function getNextActionSignal(
   nextActionAt: string | null | undefined,
   nowMs = Date.now(),
 ): NextActionSignal {
-  if (!nextActionAt) return { state: "sem_acao", label: "Sem próxima ação" };
+  if (!nextActionAt) return { state: "sem_acao", label: "Sem follow-up" };
 
   const due = new Date(nextActionAt);
   if (!Number.isFinite(due.getTime())) {
-    return { state: "sem_acao", label: "Sem próxima ação" };
+    return { state: "sem_acao", label: "Sem follow-up" };
   }
 
   const dueParts = dateParts(due);
@@ -101,6 +100,6 @@ export function getNextActionSignal(
   const shortDate = `${dueParts.day}/${dueParts.month}`;
 
   if (dueKey < nowKey) return { state: "vencida", label: `Follow-up vencido ${shortDate}` };
-  if (dueKey === nowKey) return { state: "hoje", label: "Ligar hoje" };
-  return { state: "futura", label: shortDate };
+  if (dueKey === nowKey) return { state: "hoje", label: "Follow-up hoje" };
+  return { state: "futura", label: `Follow-up ${shortDate}` };
 }

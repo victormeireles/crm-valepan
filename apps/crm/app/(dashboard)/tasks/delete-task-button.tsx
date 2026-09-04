@@ -8,17 +8,19 @@ export function DeleteTaskButton({
   taskId,
   title,
   className,
+  itemLabel = "tarefa",
 }: {
   taskId: string;
   title: string;
   className?: string;
+  itemLabel?: "tarefa" | "follow-up";
 }) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   async function onClick() {
-    if (!confirm(`Excluir a tarefa «${title}»? Esta ação não pode ser desfeita.`)) return;
+    if (!confirm(`Excluir o ${itemLabel} «${title}»? Esta ação não pode ser desfeita.`)) return;
     setLoading(true);
     setErr(null);
     const res = await deleteTask(taskId);

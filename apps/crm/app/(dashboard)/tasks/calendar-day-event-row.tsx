@@ -36,7 +36,8 @@ export function CalendarDayEventRow({
     : undefined;
 
   async function onDelete() {
-    if (!confirm(`Excluir a tarefa «${ev.title}»? Esta ação não pode ser desfeita.`)) return;
+    const itemName = ev.kind === "followup" ? "follow-up" : "tarefa";
+    if (!confirm(`Excluir o ${itemName} «${ev.title}»? Esta ação não pode ser desfeita.`)) return;
     setBusy(true);
     setError(null);
     const res = await deleteTask(ev.id);
@@ -61,7 +62,7 @@ export function CalendarDayEventRow({
           type="button"
           disabled={busy || isSaving}
           className="mt-0.5 shrink-0 cursor-grab touch-none px-0.5 text-sm text-[var(--muted)] hover:text-[var(--foreground)] active:cursor-grabbing disabled:opacity-50"
-          aria-label={`Arrastar tarefa: ${ev.title}`}
+          aria-label={`Arrastar ${ev.kind === "followup" ? "follow-up" : "tarefa"}: ${ev.title}`}
           onClick={(e) => e.stopPropagation()}
           {...draggable.listeners}
           {...draggable.attributes}

@@ -227,3 +227,31 @@ describe("parseZapiWebhookPayload LID identity", () => {
     expect(parsed?.contactName).toBe("Cliente Exemplo");
   });
 });
+
+describe("parseZapiWebhookPayload profile photo", () => {
+  it("captures the sender photo included in received-message webhooks", () => {
+    const parsed = parseZapiWebhookPayload({
+      type: "ReceivedCallback",
+      phone: "5511958761204",
+      senderName: "Cliente Exemplo",
+      senderPhoto: "https://example.test/avatar.jpg",
+      messageId: "message-with-avatar",
+      text: { message: "Olá" },
+    });
+
+    expect(parsed?.profilePhotoUrl).toBe("https://example.test/avatar.jpg");
+  });
+
+  it("does not assign the connected account photo to an outbound recipient", () => {
+    const parsed = parseZapiWebhookPayload({
+      type: "DeliveryCallback",
+      phone: "5511958761204",
+      fromMe: true,
+      senderPhoto: "https://example.test/company-avatar.jpg",
+      messageId: "outbound-with-avatar",
+      text: { message: "Olá" },
+    });
+
+    expect(parsed?.profilePhotoUrl).toBeNull();
+  });
+});

@@ -14,6 +14,7 @@ export function TaskListRow({
   title,
   dueAt,
   done,
+  taskKind,
   leadId,
   leadName,
   companyName,
@@ -22,6 +23,7 @@ export function TaskListRow({
   title: string;
   dueAt: string | null;
   done: boolean;
+  taskKind: "task" | "follow_up";
   leadId: string | null;
   leadName: string | null;
   companyName: string | null;
@@ -31,6 +33,7 @@ export function TaskListRow({
     title,
     at: dueAt ?? new Date(0).toISOString(),
     done,
+    kind: taskKind === "follow_up" ? "followup" : "task",
     leadId,
     leadName,
     companyName,
@@ -46,6 +49,11 @@ export function TaskListRow({
     >
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className={`min-w-0 flex-1 ${done ? "opacity-90" : ""}`}>
+          {taskKind === "follow_up" ? (
+            <span className="mb-1 inline-flex rounded-full bg-[rgba(199,166,77,0.2)] px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-[0.08em] text-[var(--vp-wine)]">
+              Follow-up
+            </span>
+          ) : null}
           <CalendarEventLinesDisplay ev={ev} />
         </div>
 
@@ -65,8 +73,18 @@ export function TaskListRow({
                 Lead
               </Link>
             ) : null}
-            <ToggleTaskButton taskId={id} done={done} className={actionBtn} />
-            <DeleteTaskButton taskId={id} title={title} className={actionBtn} />
+            <ToggleTaskButton
+              taskId={id}
+              done={done}
+              itemLabel={taskKind === "follow_up" ? "follow-up" : "tarefa"}
+              className={actionBtn}
+            />
+            <DeleteTaskButton
+              taskId={id}
+              title={title}
+              itemLabel={taskKind === "follow_up" ? "follow-up" : "tarefa"}
+              className={actionBtn}
+            />
           </div>
         </div>
       </div>

@@ -24,6 +24,7 @@ export async function fetchZapiProfilePictureLink(
     try {
       const res = await fetch(url, {
         method: "GET",
+        signal: AbortSignal.timeout(10_000),
         headers: {
           "Content-Type": "application/json",
           ...(clientToken ? { "Client-Token": clientToken } : {}),

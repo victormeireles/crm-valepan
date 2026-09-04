@@ -3,6 +3,7 @@
 import type { PipelinePageFilters, PipelineVolumeFilter } from "@/app/actions/pipeline";
 import type { ClientCategoryValue } from "@/lib/client-categories";
 import { PIPELINE_STALE_DAYS, type PipelineRegion } from "@/lib/pipeline-signals";
+import { CrmIcon } from "@/components/crm-icon";
 import type { PipelineStageDTO } from "./pipeline-board";
 
 type TeamOption = { id: string; label: string; count: number };
@@ -17,7 +18,7 @@ function firstName(name: string) {
 
 export function PipelineHeader({
   visibleCount,
-  volumeKg,
+  weeklyBreadCount,
   totalCount,
   teamOptions,
   mineCount,
@@ -28,7 +29,7 @@ export function PipelineHeader({
   onFilterChange,
 }: {
   visibleCount: number;
-  volumeKg: number;
+  weeklyBreadCount: number;
   totalCount: number;
   teamOptions: TeamOption[];
   mineCount: number;
@@ -50,7 +51,7 @@ export function PipelineHeader({
           Funil comercial
         </h1>
         <p className="mt-1.5 text-[13px] text-[var(--vp-ink-muted)]" aria-live="polite">
-          {number.format(visibleCount)} oportunidades abertas · {number.format(volumeKg)} kg/semana em jogo · {pending ? "atualizando…" : "atualizado agora"}
+          {number.format(visibleCount)} oportunidades abertas · {number.format(weeklyBreadCount)} pães/semana em jogo · {pending ? "atualizando…" : "atualizado agora"}
         </p>
       </div>
 
@@ -130,7 +131,7 @@ function FilterMenu({
     <details className="group relative shrink-0">
       <summary className="inline-flex min-h-9 cursor-pointer list-none items-center gap-1.5 rounded-full border border-dotted border-[rgba(35,0,4,0.35)] px-3 text-xs font-semibold text-[var(--vp-ink-muted)] marker:content-none [&::-webkit-details-marker]:hidden">
         {label}
-        <span className="material-symbols-outlined text-[14px] transition-transform group-open:rotate-180" aria-hidden="true">expand_more</span>
+        <CrmIcon name="expand_more" className="text-[14px] transition-transform group-open:rotate-180" />
       </summary>
       <div className="absolute left-0 z-40 mt-1 min-w-52 overflow-hidden rounded-xl border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] py-1 shadow-[var(--sh-md)]">
         {options.map((option) => (
@@ -144,7 +145,7 @@ function FilterMenu({
             }}
           >
             {option.label}
-            {value === option.value ? <span className="material-symbols-outlined text-base" aria-hidden="true">check</span> : null}
+            {value === option.value ? <CrmIcon name="check" className="text-base" /> : null}
           </button>
         ))}
       </div>
@@ -173,8 +174,8 @@ export function PipelineFilters({
   };
   const volumeLabels: Record<Exclude<PipelineVolumeFilter, null>, string> = {
     informado: "informado",
-    ate_100: "até 100 kg/sem",
-    acima_100: "acima de 100 kg/sem",
+    ate_100: "até 100 pães/sem",
+    acima_100: "acima de 100 pães/sem",
   };
 
   return (
@@ -201,7 +202,7 @@ export function PipelineFilters({
       <FilterMenu
         label={`Volume: ${filters.volume ? volumeLabels[filters.volume] : "qualquer"}`}
         value={filters.volume ?? ""}
-        options={[{ value: "", label: "Qualquer volume" }, { value: "informado", label: "Volume informado" }, { value: "ate_100", label: "Até 100 kg/sem" }, { value: "acima_100", label: "Acima de 100 kg/sem" }]}
+        options={[{ value: "", label: "Qualquer volume" }, { value: "informado", label: "Volume informado" }, { value: "ate_100", label: "Até 100 pães/sem" }, { value: "acima_100", label: "Acima de 100 pães/sem" }]}
         onChange={(value) => onFilterChange({ volume: value || null })}
       />
       {hasAnyFilter ? (

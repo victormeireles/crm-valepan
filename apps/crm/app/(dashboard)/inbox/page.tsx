@@ -10,6 +10,8 @@ import { ChatThread } from "./chat-thread";
 import { InboxLiveRefresh } from "./inbox-live-refresh";
 import { InboxSidebar, type InboxSidebarRow } from "./inbox-sidebar";
 import { PaginationNav } from "@/components/pagination-nav";
+import { ContactAvatar } from "@/components/contact-avatar";
+import { CrmIcon } from "@/components/crm-icon";
 import { MarkConversationRead } from "./mark-conversation-read";
 import type { InboxTaskRow } from "./inbox-tasks-panel";
 import { SendMessageForm } from "./send-message-form";
@@ -19,9 +21,10 @@ import {
   isLeadExcludedFromPipeline,
   leadExclusionReasonLabel,
 } from "@/lib/lead-pipeline-exclusion";
-import { getCustomerWaitSignal, getWeeklyVolumeKg } from "@/lib/lead-signals";
+import { getCustomerWaitSignal, getWeeklyBreadCount } from "@/lib/lead-signals";
 import { timelineActivityLabel } from "@/lib/timeline-labels";
 import type { Json } from "@/lib/database.types";
+import { toFollowUpDTO } from "@/lib/follow-ups";
 
 const TEAM_ROLE_LABEL: Record<string, string> = {
   admin: "Admin",
@@ -42,7 +45,7 @@ export const revalidate = 0;
 
 const PREVIEW_MAX = 80;
 const PAGE_SIZE = 40;
-type InboxTab = "waiting" | "qualify" | "pipeline" | "groups" | "archived";
+type InboxTab = "qualify" | "archived" | "groups" | "pipeline";
 type ConversationRow = {
   id: string;
   phone_e164: string;
@@ -72,16 +75,6 @@ function isConversationUnread(
   return maxInboundSentAt > lr;
 }
 
-function initials(name: string) {
-  const parts = name
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2);
-  if (parts.length === 0) return "?";
-  return parts.map((p) => Array.from(p)[0]?.toUpperCase() ?? "").join("") || "?";
-}
-
 function validAvatarUrl(v: string | null | undefined): string | null {
   const t = (v ?? "").trim();
   if (!t) return null;
@@ -100,7 +93,8 @@ function compactHistoryItem(row: { kind: string; event_id: string; at: string; d
     return { id: row.event_id, at: row.at, icon: action === "stage_changed" ? "conversion_path" : "history", label: timelineActivityLabel(action) };
   }
   if (row.kind === "task") {
-    return { id: row.event_id, at: row.at, icon: "task_alt", label: `Tarefa · ${String(data.title ?? "criada")}` };
+    const itemName = data.task_kind === "follow_up" ? "Follow-up" : "Tarefa";
+    return { id: row.event_id, at: row.at, icon: "task_alt", label: `${itemName} · ${String(data.title ?? "criado")}` };
   }
   return { id: row.event_id, at: row.at, icon: row.kind === "message" ? "chat" : "history", label: row.kind === "message" ? "Interação no WhatsApp" : "Lead atualizado" };
 }
@@ -122,9 +116,7 @@ export default async function InboxPage({
         ? "archived"
         : tab === "pipeline"
           ? "pipeline"
-          : tab === "qualify"
-            ? "qualify"
-            : "waiting";
+          : "qualify";
   const conversationKind = activeTab === "groups" ? "group" : "lead";
   const supabase = await createServerSupabaseClient();
   const crm = crmTables(supabase);
@@ -151,17 +143,6 @@ export default async function InboxPage({
       : `leads!inner(id, phone_e164, status, owner_id, client_category, zip_code, weekly_bread_consumption, bread_type, bread_weight_grams, excluded_from_pipeline_at, excluded_reason, contacts(full_name, avatar_url), companies(id, name, document, city, state), distributors(name), ${opportunityRelation})`;
   const conversationSelect: string =
     `id, phone_e164, conversation_kind, group_display_name, classification, last_message_at, created_at, updated_at, last_read_at, ${leadRelation}`;
-  const waitingTailResult = activeTab === "waiting"
-    ? await crm
-        .from("v_conversation_last_message")
-        .select("conversation_id, last_sent_at", { count: "exact" })
-        .not("lead_id", "is", null)
-        .eq("last_direction", "in")
-        .gte("last_sent_at", INBOX_MESSAGES_VISIBLE_SINCE)
-        .order("last_sent_at", { ascending: true })
-        .range((page - 1) * PAGE_SIZE, page * PAGE_SIZE - 1)
-    : null;
-  const waitingConversationIds = (waitingTailResult?.data ?? []).map((row) => row.conversation_id);
   let conversationsQuery = crm
     .from("conversations")
     .select(conversationSelect, { count: "exact" })
@@ -181,11 +162,6 @@ export default async function InboxPage({
         `(${entryStageIds.join(",")})`,
       );
     }
-  } else if (activeTab === "waiting") {
-    conversationsQuery = conversationsQuery.in(
-      "id",
-      waitingConversationIds.length > 0 ? waitingConversationIds : ["00000000-0000-0000-0000-000000000000"],
-    );
   } else if (activeTab === "archived") {
     conversationsQuery = conversationsQuery.not("leads.excluded_from_pipeline_at", "is", null);
   }
@@ -193,10 +169,10 @@ export default async function InboxPage({
   const conversationsResult = await conversationsQuery
     .order("last_message_at", { ascending: false, nullsFirst: false })
     .order("created_at", { ascending: false })
-    .range(activeTab === "waiting" ? 0 : (page - 1) * PAGE_SIZE, activeTab === "waiting" ? PAGE_SIZE - 1 : page * PAGE_SIZE - 1);
+    .range((page - 1) * PAGE_SIZE, page * PAGE_SIZE - 1);
   const conversations = (conversationsResult.data ?? []) as unknown as ConversationRow[];
   const conversationsError = conversationsResult.error;
-  const conversationsCount = activeTab === "waiting" ? waitingTailResult?.count ?? 0 : conversationsResult.count;
+  const conversationsCount = conversationsResult.count;
 
   let qualifyCountQuery = crm
     .from("conversations")
@@ -214,21 +190,25 @@ export default async function InboxPage({
     qualifyCountQuery = qualifyCountQuery.in("leads.opportunities.stage_id", entryStageIds);
     pipelineCountQuery = pipelineCountQuery.not("leads.opportunities.stage_id", "in", `(${entryStageIds.join(",")})`);
   }
-  const [waitingCountResult, qualifyCountResult, pipelineCountResult] = await Promise.all([
-    activeTab === "waiting"
-      ? Promise.resolve(waitingTailResult)
-      : crm
-          .from("v_conversation_last_message")
-          .select("conversation_id", { count: "exact", head: true })
-          .not("lead_id", "is", null)
-          .eq("last_direction", "in")
-          .gte("last_sent_at", INBOX_MESSAGES_VISIBLE_SINCE),
+  const [qualifyCountResult, archivedCountResult, groupsCountResult, pipelineCountResult] = await Promise.all([
     qualifyCountQuery,
+    crm
+      .from("conversations")
+      .select("id, leads!inner(excluded_from_pipeline_at)", { count: "exact", head: true })
+      .eq("conversation_kind", "lead")
+      .gte("last_message_at", INBOX_MESSAGES_VISIBLE_SINCE)
+      .not("leads.excluded_from_pipeline_at", "is", null),
+    crm
+      .from("conversations")
+      .select("id", { count: "exact", head: true })
+      .eq("conversation_kind", "group")
+      .gte("last_message_at", INBOX_MESSAGES_VISIBLE_SINCE),
     pipelineCountQuery,
   ]);
   const tabCounts = {
-    waiting: waitingCountResult?.count ?? 0,
     qualify: qualifyCountResult.count ?? 0,
+    archived: archivedCountResult.count ?? 0,
+    groups: groupsCountResult.count ?? 0,
     pipeline: pipelineCountResult.count ?? 0,
   };
 
@@ -283,7 +263,6 @@ export default async function InboxPage({
   const conversationsSorted = [...(conversations ?? [])]
     .filter((c) => {
       if (activeTab === "groups") return true;
-      if (activeTab === "waiting") return tailById.get(c.id)?.last_direction === "in";
       const lead = nestOne(
         c.leads as { excluded_from_pipeline_at?: string | null } | { excluded_from_pipeline_at?: string | null }[] | null,
       );
@@ -294,7 +273,7 @@ export default async function InboxPage({
     .sort((a, b) => {
       const ta = tailById.get(a.id)?.last_sent_at ?? a.last_message_at ?? a.created_at;
       const tb = tailById.get(b.id)?.last_sent_at ?? b.last_message_at ?? b.created_at;
-      return activeTab === "waiting" ? ta.localeCompare(tb) : tb.localeCompare(ta);
+      return tb.localeCompare(ta);
     });
 
   const selected = cid
@@ -459,7 +438,7 @@ export default async function InboxPage({
     const [leadTasksResult, teamProfilesResult, latestOppResult, historyResult] = await Promise.all([
       crm
         .from("tasks")
-        .select("id, title, due_at, done, assignee_id")
+        .select("id, title, due_at, done, assignee_id, task_kind")
         .eq("lead_id", leadId)
         .order("done", { ascending: true })
         .order("due_at", { ascending: true, nullsFirst: false }),
@@ -486,6 +465,9 @@ export default async function InboxPage({
   }
 
   const inboxAssigneeLabels = Object.fromEntries(inboxTeamOptions.map((o) => [o.id, o.label]));
+  const inboxFollowUpRow = inboxLeadTasks.find(
+    (task) => task.task_kind === "follow_up" && !task.done,
+  );
 
   const sidebarRows: InboxSidebarRow[] = conversationsSorted.map((c) => {
     const lead = nestOne(
@@ -600,10 +582,7 @@ export default async function InboxPage({
       companyName: companyLine,
       clientCategory: lead?.client_category ?? null,
       stageName,
-      weeklyVolumeKg: getWeeklyVolumeKg(
-        lead?.weekly_bread_consumption,
-        lead?.bread_weight_grams,
-      ),
+      weeklyBreadCount: getWeeklyBreadCount(lead?.weekly_bread_consumption),
       lastDirection: tail?.last_direction ?? null,
       unread: isConversationUnread(
         (c as { last_read_at?: string | null }).last_read_at,
@@ -668,8 +647,7 @@ export default async function InboxPage({
         })),
         teamOptions: inboxTeamOptions,
         opportunityId: inboxOpportunityId,
-        opportunityTitle: inboxOpportunity?.title ?? null,
-        nextActionAt: inboxOpportunity?.next_action_at ?? null,
+        followUp: inboxFollowUpRow ? toFollowUpDTO(inboxFollowUpRow) : null,
         tasks: inboxLeadTasks,
         assigneeLabels: inboxAssigneeLabels,
         history: inboxHistory,
@@ -721,14 +699,12 @@ export default async function InboxPage({
               <div className="shrink-0 border-b border-[var(--vp-ink-line)] bg-[var(--vp-paper)] px-[18px] py-3.5">
                 <div className="flex items-center justify-between gap-4">
                   <div className="flex min-w-0 items-center gap-3">
-                    {selectedAvatarUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={selectedAvatarUrl} alt={`Foto de ${selectedHeaderName}`} className="size-11 shrink-0 rounded-full object-cover" />
-                    ) : (
-                      <span className="grid size-11 shrink-0 place-items-center rounded-full bg-[rgba(35,0,4,0.1)] text-sm font-extrabold text-[var(--vp-wine)]" aria-label={`Avatar de ${selectedHeaderName}`}>
-                        {initials(selectedHeaderName)}
-                      </span>
-                    )}
+                    <ContactAvatar
+                      name={selectedHeaderName}
+                      src={selectedAvatarUrl}
+                      phone={selected?.phone_e164}
+                      className="size-11 shrink-0"
+                    />
                     <div className="min-w-0">
                       <h1 className="truncate text-[17px] font-bold text-[var(--vp-ink-body)]">{selectedHeaderName}</h1>
                       <p className="truncate text-xs text-[var(--vp-ink-muted)]">
@@ -745,7 +721,7 @@ export default async function InboxPage({
                     ) : null}
                     {leadPanelProps ? <InboxLeadPanelDrawer {...leadPanelProps} /> : null}
                     <a href={`tel:${selected.phone_e164}`} className="grid size-[34px] place-items-center rounded-full border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] text-[var(--vp-wine)]" aria-label={`Ligar para ${selectedHeaderName}`}>
-                      <span className="material-symbols-outlined text-lg" aria-hidden="true">call</span>
+                      <CrmIcon name="call" className="text-lg" />
                     </a>
                     {selectedLeadExcluded && selectedLead?.id ? (
                       <RestoreLeadButton leadId={selectedLead.id} />

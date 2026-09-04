@@ -1,9 +1,11 @@
 "use client";
 
 import { updateConversationLeadQualification, updateLeadOwner } from "@/app/actions/leads";
-import { updateOpportunityDetails, updateOpportunityStage } from "@/app/actions/opportunity";
+import { updateOpportunityStage } from "@/app/actions/opportunity";
 import { CityAutocompleteInput } from "@/components/city-autocomplete-input";
-import { getWeeklyVolumeKg } from "@/lib/lead-signals";
+import { CrmIcon, type CrmIconName } from "@/components/crm-icon";
+import { LeadFollowUp } from "@/components/lead-follow-up";
+import type { LeadFollowUpDTO } from "@/lib/follow-ups";
 import { useMemo, useState } from "react";
 import { InboxTasksPanel, type InboxTaskRow } from "./inbox-tasks-panel";
 
@@ -29,8 +31,7 @@ export type InboxLeadPanelProps = {
   stages: StageOption[];
   teamOptions: TeamOption[];
   opportunityId: string | null;
-  opportunityTitle: string | null;
-  nextActionAt: string | null;
+  followUp: LeadFollowUpDTO | null;
   tasks: InboxTaskRow[];
   assigneeLabels: Record<string, string>;
   history: HistoryItem[];
@@ -49,13 +50,6 @@ type QualificationState = {
   companyName: string;
 };
 
-function toDatetimeLocal(iso: string | null) {
-  if (!iso) return "";
-  const date = new Date(iso);
-  const pad = (value: number) => String(value).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
-
 export function InboxLeadPanel(props: InboxLeadPanelProps) {
   const [qualification, setQualification] = useState<QualificationState>({
     category: props.initialCategory ?? "",
@@ -72,15 +66,8 @@ export function InboxLeadPanel(props: InboxLeadPanelProps) {
   const [ownerId, setOwnerId] = useState(props.initialOwnerId ?? "");
   const [savingField, setSavingField] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [nextActionAt, setNextActionAt] = useState(props.nextActionAt);
-  const [dateDraft, setDateDraft] = useState(toDatetimeLocal(props.nextActionAt));
-  const [dateOpen, setDateOpen] = useState(false);
 
-  const volumeKg = getWeeklyVolumeKg(
-    qualification.weeklyBreadConsumption ? Number(qualification.weeklyBreadConsumption) : null,
-    qualification.breadWeightGrams ? Number(qualification.breadWeightGrams) : null,
-  );
-  const [volumeDraft, setVolumeDraft] = useState(volumeKg == null ? "" : String(volumeKg));
+  const [volumeDraft, setVolumeDraft] = useState(qualification.weeklyBreadConsumption);
 
   async function saveQualification(patch: Partial<QualificationState>, field: string) {
     const next = { ...qualification, ...patch };
@@ -111,30 +98,6 @@ export function InboxLeadPanel(props: InboxLeadPanelProps) {
     const result = await updateLeadOwner({ leadId: props.leadId, ownerId: nextOwnerId || null });
     setSavingField(null);
     if (!result.ok) setError(result.error ?? "Não foi possível salvar o responsável.");
-  }
-
-  async function saveNextAction(nextIso: string | null) {
-    if (!props.opportunityId) {
-      setError("Defina uma etapa do funil antes de agendar a próxima ação.");
-      return;
-    }
-    setSavingField("nextAction");
-    setError(null);
-    const result = await updateOpportunityDetails({
-      opportunityId: props.opportunityId,
-      title: props.opportunityTitle?.trim() || `Oportunidade ${props.contactName}`,
-      nextActionAt: nextIso,
-      contactId: null,
-      contactName: props.contactName,
-    });
-    setSavingField(null);
-    if (!result.ok) {
-      setError(result.error ?? "Não foi possível atualizar a próxima ação.");
-      return;
-    }
-    setNextActionAt(nextIso);
-    setDateDraft(toDatetimeLocal(nextIso));
-    setDateOpen(false);
   }
 
   const orderedStages = useMemo(
@@ -212,14 +175,9 @@ export function InboxLeadPanel(props: InboxLeadPanelProps) {
                   inputMode="numeric"
                   placeholder="Não informado"
                   onChange={(event) => setVolumeDraft(event.target.value.replace(/\D/g, ""))}
-                  onBlur={() => {
-                    const kg = Number(volumeDraft);
-                    const grams = Number(qualification.breadWeightGrams) || 90;
-                    const breads = volumeDraft ? String(Math.round((kg * 1_000) / grams)) : "";
-                    void saveQualification({ weeklyBreadConsumption: breads }, "volume");
-                  }}
+                  onBlur={() => void saveQualification({ weeklyBreadConsumption: volumeDraft }, "volume")}
                 />
-                {volumeDraft ? <span className="text-[11px] font-bold text-[var(--vp-ink-soft)]">kg/sem</span> : null}
+                {volumeDraft ? <span className="text-[11px] font-bold text-[var(--vp-ink-soft)]">pães/sem</span> : null}
               </span>
             </label>
             <label className="flex min-h-11 items-center justify-between gap-2.5 rounded-[10px] border border-[var(--vp-ink-line)] bg-[var(--vp-paper)] px-3">
@@ -231,50 +189,18 @@ export function InboxLeadPanel(props: InboxLeadPanelProps) {
             </label>
           </div>
           <p className="mt-1.5 min-h-4 text-[11px] text-[var(--vp-ink-soft)]" aria-live="polite">
-            {savingField && !["nextAction", "nextStage"].includes(savingField) ? "salvando…" : ""}
+            {savingField && savingField !== "nextStage" ? "salvando…" : ""}
           </p>
           {error ? <p className="text-[11px] text-[var(--vp-error)]" role="alert">{error}</p> : null}
         </section>
 
-        <section>
-          <p className="mb-2 text-[10px] font-extrabold uppercase tracking-[0.14em] text-[var(--vp-ink-soft)]">Próxima ação</p>
-          {!nextActionAt ? (
-            <div className="rounded-xl border border-[rgba(199,166,77,0.5)] bg-[rgba(199,166,77,0.12)] p-3">
-              <p className="text-[13px] font-bold text-[var(--vp-wine)]">Nenhuma ação agendada</p>
-              <p className="mt-0.5 text-xs text-[var(--vp-ink-muted)]">Marque o próximo passo para este lead.</p>
-              <div className="mt-2.5 flex gap-1.5">
-                <button
-                  type="button"
-                  className="min-h-9 flex-1 rounded-full bg-[var(--vp-wine)] px-2 text-xs font-bold text-[var(--vp-gold)] disabled:opacity-50"
-                  disabled={savingField === "nextAction"}
-                  onClick={() => {
-                    const due = new Date();
-                    due.setHours(Math.max(due.getHours() + 1, 17), 0, 0, 0);
-                    void saveNextAction(due.toISOString());
-                  }}
-                >
-                  Agendar hoje
-                </button>
-                <button type="button" className="min-h-9 flex-1 rounded-full border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] px-2 text-xs font-bold text-[var(--vp-ink-body)]" onClick={() => setDateOpen(true)}>Escolher data</button>
-              </div>
-            </div>
-          ) : (
-            <div className="rounded-xl border border-[var(--vp-ink-line)] bg-[var(--vp-paper)] p-3">
-              <p className="text-[13px] font-bold text-[var(--vp-wine)]">{new Date(nextActionAt).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}</p>
-              <p className="mt-0.5 text-[11px] text-[var(--vp-ink-muted)]">Agendada para {props.teamOptions.find((option) => option.id === ownerId)?.label ?? "a equipe"}</p>
-              <div className="mt-2 flex gap-1.5">
-                <button type="button" className="min-h-9 flex-1 rounded-full bg-[var(--vp-wine)] text-xs font-bold text-[var(--vp-gold)]" onClick={() => void saveNextAction(null)}>Concluir</button>
-                <button type="button" className="min-h-9 flex-1 rounded-full border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] text-xs font-bold" onClick={() => setDateOpen(true)}>Reagendar</button>
-              </div>
-            </div>
-          )}
-          {dateOpen ? (
-            <div className="mt-2 flex gap-1.5">
-              <input type="datetime-local" value={dateDraft} onChange={(event) => setDateDraft(event.target.value)} className="min-w-0 flex-1 rounded-lg border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] px-2 text-xs" />
-              <button type="button" className="rounded-lg bg-[var(--vp-wine)] px-3 text-xs font-bold text-[var(--vp-gold)]" onClick={() => dateDraft && void saveNextAction(new Date(dateDraft).toISOString())}>Salvar</button>
-            </div>
-          ) : null}
-        </section>
+        <LeadFollowUp
+          leadId={props.leadId}
+          initialFollowUp={props.followUp}
+          teamOptions={props.teamOptions}
+          defaultAssigneeId={ownerId || null}
+          compact
+        />
 
         <InboxTasksPanel
           leadId={props.leadId}
@@ -291,7 +217,7 @@ export function InboxLeadPanel(props: InboxLeadPanelProps) {
           <ul className="space-y-2.5">
             {props.history.length === 0 ? <li className="text-xs text-[var(--vp-ink-muted)]">Ainda não há eventos recentes.</li> : props.history.map((item) => (
               <li key={item.id} className="flex gap-2.5 text-xs">
-                <span className="material-symbols-outlined text-[17px] text-[var(--vp-gold-classic)]" aria-hidden="true">{item.icon}</span>
+                <CrmIcon name={item.icon as CrmIconName} className="text-[17px] text-[var(--vp-gold-classic)]" />
                 <span className="min-w-0">
                   <span className="block text-[var(--vp-ink-body)]">{item.label}</span>
                   <time dateTime={item.at} className="block text-[11px] text-[var(--vp-ink-soft)]">{new Date(item.at).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}</time>
@@ -321,14 +247,14 @@ export function InboxLeadPanelDrawer(props: InboxLeadPanelProps) {
   return (
     <>
       <button type="button" className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] px-3 text-xs font-bold text-[var(--vp-wine)] xl:hidden" onClick={() => setOpen(true)}>
-        <span className="material-symbols-outlined text-base" aria-hidden="true">contact_page</span>
+        <CrmIcon name="contact_page" className="text-base" />
         Ficha
       </button>
       {open ? (
         <div className="fixed inset-0 z-50 bg-[rgba(35,0,4,0.35)] xl:hidden" role="dialog" aria-modal="true" aria-label="Ficha do lead">
           <div className="absolute inset-y-0 right-0 w-[min(92vw,348px)] p-2">
             <button type="button" className="absolute right-5 top-5 z-10 grid size-9 place-items-center rounded-full bg-[var(--vp-surface)] text-[var(--vp-wine)]" onClick={() => setOpen(false)} aria-label="Fechar ficha">
-              <span className="material-symbols-outlined text-xl" aria-hidden="true">close</span>
+              <CrmIcon name="close" className="text-xl" />
             </button>
             <InboxLeadPanel {...props} />
           </div>

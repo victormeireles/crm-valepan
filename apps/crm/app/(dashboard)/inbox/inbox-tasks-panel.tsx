@@ -2,6 +2,7 @@
 
 import { LeadTaskForm } from "@/app/(dashboard)/leads/[id]/lead-task-form";
 import { ToggleTaskButton } from "@/app/(dashboard)/tasks/toggle-task-button";
+import { CrmIcon } from "@/components/crm-icon";
 import { useState } from "react";
 
 export type InboxTaskRow = {
@@ -10,6 +11,7 @@ export type InboxTaskRow = {
   due_at: string | null;
   done: boolean;
   assignee_id: string | null;
+  task_kind: "task" | "follow_up";
 };
 
 export function InboxTasksPanel({
@@ -29,7 +31,7 @@ export function InboxTasksPanel({
   defaultAssigneeId: string | null;
 }) {
   const [createdTitle, setCreatedTitle] = useState<string | null>(null);
-  const pending = tasks.filter((task) => !task.done);
+  const pending = tasks.filter((task) => !task.done && task.task_kind !== "follow_up");
 
   return (
     <section>
@@ -57,7 +59,7 @@ export function InboxTasksPanel({
       </ul>
       <details className="mt-2 rounded-[10px] border border-dashed border-[var(--vp-ink-line)]">
         <summary className="flex min-h-10 cursor-pointer list-none items-center gap-1.5 px-3 text-xs font-bold text-[var(--vp-wine)] marker:content-none [&::-webkit-details-marker]:hidden">
-          <span className="material-symbols-outlined text-base" aria-hidden="true">add_task</span>
+          <CrmIcon name="add_task" className="text-base" />
           Nova tarefa
         </summary>
         <div className="border-t border-[var(--vp-ink-line)] p-3">

@@ -65,6 +65,8 @@ export type ZapiInbound = {
   linkedLidKeys?: string[];
   /** Nome do contato quando disponível no webhook (chatName/senderName). */
   contactName?: string | null;
+  /** URL temporária da foto do remetente quando a Z-API já a inclui no webhook. */
+  profilePhotoUrl?: string | null;
   /** Nome do grupo quando o webhook trouxer subject/chatName. */
   groupDisplayName?: string | null;
   /** Status simplificado para mensagens de saída. */
@@ -1099,6 +1101,7 @@ export function parseZapiWebhookPayload(body: unknown): ZapiInbound | null {
         pickSource: "status_callback",
         linkedLidKeys: [],
         contactName: null,
+        profilePhotoUrl: null,
         groupDisplayName: null,
         messageStatus: fallbackStatus,
         messageId: fallbackMessageId,
@@ -1135,6 +1138,9 @@ export function parseZapiWebhookPayload(body: unknown): ZapiInbound | null {
   const ev = eventType?.toLowerCase() ?? "";
   const fromMe = parseFromMeFlag(o, ev);
   const contactName = extractContactName(o, root, fromMe);
+  const profilePhotoUrl = fromMe
+    ? null
+    : normalizeMaybeMediaSrc(o.senderPhoto) ?? normalizeMaybeMediaSrc(root?.senderPhoto);
   const messageStatus = extractMessageStatus(o, root);
   const conversationKind = isGroup ? "group" : "lead";
   const groupDisplayName =
@@ -1146,6 +1152,7 @@ export function parseZapiWebhookPayload(body: unknown): ZapiInbound | null {
     pickSource: phonePick.pickSource,
     linkedLidKeys: collectLinkedLidKeysFromMerged(o),
     contactName,
+    profilePhotoUrl,
     messageId,
     body: text,
     fromMe,
@@ -1607,7 +1614,7 @@ export async function ingestZapiMessage(parsed: ZapiInbound) {
   if (parsed.conversationKind === "lead") {
     const avatarUrl = phoneE164ForCrm.startsWith("lid:")
       ? null
-      : await fetchZapiProfilePictureLink(phoneE164ForCrm);
+      : parsed.profilePhotoUrl ?? await fetchZapiProfilePictureLink(phoneE164ForCrm);
     const nowIso = new Date().toISOString();
     const { data: contactRow, error: contactErr } = await crm
       .from("contacts")

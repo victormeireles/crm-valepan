@@ -1,11 +1,12 @@
 "use client";
 
 import type { PipelineSignal } from "@/lib/pipeline-signals";
+import { CrmIcon, type CrmIconName } from "@/components/crm-icon";
 
 const KPI_CARDS: Array<{
   signal: PipelineSignal | null;
   label: string;
-  icon: string;
+  icon: CrmIconName;
   border: string;
   iconColor: string;
 }> = [
@@ -19,18 +20,18 @@ export function PipelineKpiStrip({
   awaiting,
   overdue,
   stale,
-  volumeKg,
+  weeklyBreadCount,
   activeSignal,
   onSignalChange,
 }: {
   awaiting: number;
   overdue: number;
   stale: number;
-  volumeKg: number;
+  weeklyBreadCount: number;
   activeSignal: PipelineSignal | null;
   onSignalChange: (signal: PipelineSignal | null) => void;
 }) {
-  const values = [awaiting, overdue, stale, volumeKg];
+  const values = [awaiting, overdue, stale, weeklyBreadCount];
   const number = new Intl.NumberFormat("pt-BR");
 
   return (
@@ -46,10 +47,10 @@ export function PipelineKpiStrip({
             aria-pressed={interactive ? selected : undefined}
             onClick={() => interactive && onSignalChange(selected ? null : card.signal)}
           >
-            <span className={`material-symbols-outlined text-[26px] ${card.iconColor}`} aria-hidden="true">{card.icon}</span>
+            <CrmIcon name={card.icon} className={`text-[26px] ${card.iconColor}`} />
             <span className="min-w-0">
               <span className="block text-[28px] font-extrabold leading-[1.1] tabular-nums text-[var(--vp-wine)]">
-                {number.format(values[index] ?? 0)}{index === 3 ? <span className="ml-1 text-[15px] font-bold">kg/sem</span> : null}
+                {number.format(values[index] ?? 0)}{index === 3 ? <span className="ml-1 text-[15px] font-bold">pães/sem</span> : null}
               </span>
               <span className="block text-xs font-bold uppercase tracking-[0.08em] text-[var(--vp-ink-muted)]">{card.label}</span>
             </span>

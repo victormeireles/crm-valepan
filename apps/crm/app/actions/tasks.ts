@@ -70,16 +70,6 @@ export async function createTask(formData: FormData) {
 
   if (error) return { ok: false as const, error: error.message };
 
-  if (opportunityId && dueAt) {
-    await crm
-      .from("opportunities")
-      .update({
-        next_action_at: dueAt,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", opportunityId);
-  }
-
   revalidatePath("/tasks");
   revalidatePath("/dashboard");
   revalidatePath("/inbox");
@@ -97,13 +87,14 @@ export async function toggleTaskDone(taskId: string, done: boolean) {
   const crm = crmTables(supabase);
   const { data: taskRow } = await crm
     .from("tasks")
-    .select("lead_id, title")
+    .select("lead_id, title, task_kind")
     .eq("id", taskId)
     .maybeSingle();
 
+  const nowIso = new Date().toISOString();
   const { error } = await crm
     .from("tasks")
-    .update({ done, updated_at: new Date().toISOString() })
+    .update({ done, completed_at: done ? nowIso : null, updated_at: nowIso })
     .eq("id", taskId);
   if (error) return { ok: false as const, error: error.message };
 
@@ -111,7 +102,9 @@ export async function toggleTaskDone(taskId: string, done: boolean) {
     await crm.from("activity_logs").insert({
       entity_type: "lead",
       entity_id: taskRow.lead_id,
-      action: done ? "task_completed" : "task_reopened",
+      action: taskRow.task_kind === "follow_up"
+        ? done ? "follow_up_completed" : "follow_up_reopened"
+        : done ? "task_completed" : "task_reopened",
       actor_id: user.id,
       payload: { task_id: taskId, title: taskRow.title },
     });
@@ -165,23 +158,6 @@ function revalidateTaskSurfaces(leadId: string | null | undefined) {
   if (leadId) revalidatePath(`/leads/${leadId}`);
 }
 
-async function syncOpportunityNextAction(crm: Crm, opportunityId: string) {
-  const { data: tasks } = await crm
-    .from("tasks")
-    .select("due_at")
-    .eq("opportunity_id", opportunityId)
-    .eq("done", false)
-    .not("due_at", "is", null)
-    .order("due_at", { ascending: true })
-    .limit(1);
-
-  const nextAt = tasks?.[0]?.due_at ?? null;
-  await crm
-    .from("opportunities")
-    .update({ next_action_at: nextAt, updated_at: new Date().toISOString() })
-    .eq("id", opportunityId);
-}
-
 export async function deleteTask(taskId: string) {
   const supabase = await createServerSupabaseClient();
   const {
@@ -192,7 +168,7 @@ export async function deleteTask(taskId: string) {
   const crm = crmTables(supabase);
   const { data: taskRow } = await crm
     .from("tasks")
-    .select("lead_id, title, opportunity_id")
+    .select("lead_id, title, opportunity_id, task_kind")
     .eq("id", taskId)
     .maybeSingle();
 
@@ -201,15 +177,11 @@ export async function deleteTask(taskId: string) {
   const { error } = await crm.from("tasks").delete().eq("id", taskId);
   if (error) return { ok: false as const, error: error.message };
 
-  if (taskRow.opportunity_id) {
-    await syncOpportunityNextAction(crm, taskRow.opportunity_id);
-  }
-
   if (taskRow.lead_id) {
     await crm.from("activity_logs").insert({
       entity_type: "lead",
       entity_id: taskRow.lead_id,
-      action: "task_deleted",
+      action: taskRow.task_kind === "follow_up" ? "follow_up_deleted" : "task_deleted",
       actor_id: user.id,
       payload: { task_id: taskId, title: taskRow.title },
     });
@@ -234,7 +206,7 @@ export async function updateTaskDueAt(taskId: string, newDueAtIso: string) {
   const crm = crmTables(supabase);
   const { data: taskRow } = await crm
     .from("tasks")
-    .select("lead_id, title, opportunity_id, due_at")
+    .select("lead_id, title, opportunity_id, due_at, task_kind")
     .eq("id", taskId)
     .maybeSingle();
 
@@ -247,21 +219,11 @@ export async function updateTaskDueAt(taskId: string, newDueAtIso: string) {
 
   if (error) return { ok: false as const, error: error.message };
 
-  if (taskRow.opportunity_id) {
-    await crm
-      .from("opportunities")
-      .update({
-        next_action_at: dueAtIso,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", taskRow.opportunity_id);
-  }
-
   if (taskRow.lead_id) {
     await crm.from("activity_logs").insert({
       entity_type: "lead",
       entity_id: taskRow.lead_id,
-      action: "task_rescheduled",
+      action: taskRow.task_kind === "follow_up" ? "follow_up_rescheduled" : "task_rescheduled",
       actor_id: user.id,
       payload: {
         task_id: taskId,

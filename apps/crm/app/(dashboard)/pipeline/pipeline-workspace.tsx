@@ -8,7 +8,7 @@ import {
 import { isClientCategoryValue } from "@/lib/client-categories";
 import { isPipelineRegion, isPipelineSignal } from "@/lib/pipeline-signals";
 import { recordPipelineBrowserMetric } from "@/lib/pipeline-browser-performance";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { PipelineBoard, type PipelineCardDTO, type PipelineStageDTO } from "./pipeline-board";
 import { PipelineFilters, PipelineHeader } from "./pipeline-filters";
 import { PipelineKpiStrip } from "./pipeline-kpi-strip";
@@ -24,10 +24,10 @@ export function PipelineWorkspace(props: {
   stages: PipelineStageDTO[];
   initialCards: PipelineCardDTO[];
   initialStageTotals: Record<string, number>;
-  initialStageVolumes: Record<string, number>;
+  initialStageBreadCounts: Record<string, number>;
   initialTotalCount: number;
   initialVisibleCount: number;
-  initialVisibleVolumeKg: number;
+  initialVisibleBreadCount: number;
   initialTeamOptions: TeamOption[];
   initialMineCount: number;
   initialSummary: Summary | null;
@@ -36,18 +36,26 @@ export function PipelineWorkspace(props: {
   initialFilters: PipelinePageFilters;
   canViewTeam: boolean;
   currentUserId: string | null;
+  renderNowMs: number;
 }) {
   const [cards, setCards] = useState(props.initialCards);
   const [stageTotals, setStageTotals] = useState(props.initialStageTotals);
-  const [stageVolumes, setStageVolumes] = useState(props.initialStageVolumes);
+  const [stageBreadCounts, setStageBreadCounts] = useState(props.initialStageBreadCounts);
   const [totalCount, setTotalCount] = useState(props.initialTotalCount);
   const [visibleCount, setVisibleCount] = useState(props.initialVisibleCount);
-  const [visibleVolumeKg, setVisibleVolumeKg] = useState(props.initialVisibleVolumeKg);
+  const [visibleBreadCount, setVisibleBreadCount] = useState(props.initialVisibleBreadCount);
   const [teamOptions, setTeamOptions] = useState(props.initialTeamOptions);
   const [mineCount, setMineCount] = useState(props.initialMineCount);
   const [summary, setSummary] = useState<Summary>(props.initialSummary ?? { open: 0, awaiting: 0, stale: 0, overdue: 0 });
   const [pending, setPending] = useState(false);
   const [activeFilters, setActiveFilters] = useState(props.initialFilters);
+  const [nowMs, setNowMs] = useState(props.renderNowMs);
+
+  useEffect(() => {
+    setNowMs(Date.now());
+    const interval = window.setInterval(() => setNowMs(Date.now()), 60_000);
+    return () => window.clearInterval(interval);
+  }, []);
 
   const changeFilters = useCallback(async (patch: Record<string, string | null>) => {
     const metricStartedAt = performance.now();
@@ -101,16 +109,17 @@ export function PipelineWorkspace(props: {
     setCards(result.cards.map((card) => ({ ...card, stage_id: normalizeStage(card.stage_id) })));
 
     const totals: Record<string, number> = Object.fromEntries(props.stages.map((stage) => [stage.id, 0]));
-    const volumes: Record<string, number> = Object.fromEntries(props.stages.map((stage) => [stage.id, 0]));
+    const breadCounts: Record<string, number> = Object.fromEntries(props.stages.map((stage) => [stage.id, 0]));
     for (const row of result.visibleStageCounts as { stage_id: string; card_count: number; volume_kg: number }[]) {
       const id = normalizeStage(row.stage_id);
       totals[id] = (totals[id] ?? 0) + Number(row.card_count);
-      volumes[id] = (volumes[id] ?? 0) + Number(row.volume_kg);
+      // `volume_kg` é mantido pela RPC por compatibilidade, mas contém pães/semana.
+      breadCounts[id] = (breadCounts[id] ?? 0) + Number(row.volume_kg);
     }
     setStageTotals(totals);
-    setStageVolumes(volumes);
+    setStageBreadCounts(breadCounts);
     setVisibleCount(Object.values(totals).reduce((sum, value) => sum + value, 0));
-    setVisibleVolumeKg(Object.values(volumes).reduce((sum, value) => sum + value, 0));
+    setVisibleBreadCount(Object.values(breadCounts).reduce((sum, value) => sum + value, 0));
 
     const allStageCounts = result.allStageCounts as { stage_id: string; card_count: number }[];
     const rawOwnerCounts = result.ownerCounts as { owner_id: string; card_count: number }[];
@@ -144,7 +153,7 @@ export function PipelineWorkspace(props: {
     <div className="flex min-h-0 flex-col gap-4">
       <PipelineHeader
         visibleCount={visibleCount}
-        volumeKg={visibleVolumeKg}
+        weeklyBreadCount={visibleBreadCount}
         totalCount={totalCount}
         teamOptions={teamOptions}
         mineCount={mineCount}
@@ -158,7 +167,7 @@ export function PipelineWorkspace(props: {
         awaiting={summary.awaiting}
         overdue={summary.overdue}
         stale={summary.stale}
-        volumeKg={visibleVolumeKg}
+        weeklyBreadCount={visibleBreadCount}
         activeSignal={activeFilters.signal}
         onSignalChange={(signal) => void changeFilters({ signal })}
       />
@@ -177,8 +186,11 @@ export function PipelineWorkspace(props: {
           stages={props.stages}
           initialCards={cards}
           stageTotals={stageTotals}
-          stageVolumes={stageVolumes}
+          stageBreadCounts={stageBreadCounts}
           filters={activeFilters}
+          nowMs={nowMs}
+          teamOptions={teamOptions.map(({ id, label }) => ({ id, label }))}
+          currentUserId={props.currentUserId}
         />
       )}
     </div>

@@ -19,6 +19,10 @@ import {
 } from "@dnd-kit/core";
 import type { PipelineSignal } from "@/lib/pipeline-signals";
 import { recordPipelineBrowserMetric } from "@/lib/pipeline-browser-performance";
+import { CrmIcon } from "@/components/crm-icon";
+import { formatBrazilPhoneForDisplay } from "@/lib/lead-identity";
+import { LeadFollowUp } from "@/components/lead-follow-up";
+import type { LeadFollowUpDTO } from "@/lib/follow-ups";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
@@ -39,17 +43,20 @@ export type PipelineCardDTO = {
   lead_id: string | null;
   personName: string;
   companyLine: string | null;
+  phone_e164: string | null;
   client_category: string | null;
   ownerName: string | null;
   signals: PipelineSignal[];
   companyCity: string | null;
   companyState: string | null;
   conversationId: string | null;
-  weeklyVolumeKg: number | null;
+  weeklyBreadCount: number | null;
   lastDirection: string | null;
   lastSentAt: string | null;
   opportunityUpdatedAt: string;
   nextActionAt: string | null;
+  followUp: LeadFollowUpDTO | null;
+  ownerId: string | null;
 };
 
 function groupByStage(
@@ -112,15 +119,15 @@ function DroppableColumn({
   stageId,
   stageName,
   totalCount,
-  volumeKg,
-  maxVolumeKg,
+  weeklyBreadCount,
+  maxWeeklyBreadCount,
   children,
 }: {
   stageId: string;
   stageName: string;
   totalCount: number;
-  volumeKg: number;
-  maxVolumeKg: number;
+  weeklyBreadCount: number;
+  maxWeeklyBreadCount: number;
   children: React.ReactNode;
 }) {
   const { setNodeRef, isOver } = useDroppable({
@@ -141,11 +148,11 @@ function DroppableColumn({
           <h2 className="truncate text-[11px] font-extrabold uppercase tracking-[0.1em] text-[var(--vp-wine)]">{stageName}</h2>
           <span className="text-[13px] font-extrabold tabular-nums text-[var(--vp-ink-body)]">{totalCount.toLocaleString("pt-BR")}</span>
         </div>
-        <p className="mb-1.5 mt-0.5 text-[11px] tabular-nums text-[var(--vp-ink-muted)]">{volumeKg.toLocaleString("pt-BR")} kg/sem</p>
+        <p className="mb-1.5 mt-0.5 text-[11px] tabular-nums text-[var(--vp-ink-muted)]">{weeklyBreadCount.toLocaleString("pt-BR")} pães/sem</p>
         <div className="h-[3px] overflow-hidden rounded-full bg-[rgba(35,0,4,0.1)]">
           <div
             className="h-full rounded-full bg-[var(--vp-gold-classic)]"
-            style={{ width: `${maxVolumeKg > 0 ? Math.max(3, (volumeKg / maxVolumeKg) * 100) : 0}%` }}
+            style={{ width: `${maxWeeklyBreadCount > 0 ? Math.max(3, (weeklyBreadCount / maxWeeklyBreadCount) * 100) : 0}%` }}
           />
         </div>
       </header>
@@ -161,15 +168,19 @@ function DraggableCard({
   stageId,
   stages,
   onOpen,
+  onOpenFollowUp,
   onMove,
   onClose,
+  nowMs,
 }: {
   card: PipelineCardDTO;
   stageId: string;
   stages: PipelineStageDTO[];
   onOpen: () => void;
+  onOpenFollowUp: (card: PipelineCardDTO) => void;
   onMove: (opportunityId: string, fromStageId: string, toStageId: string) => void;
   onClose: (card: PipelineCardDTO, stageId: string) => void;
+  nowMs: number;
 }) {
   const dragEnabled = useDesktopDrag();
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
@@ -194,8 +205,9 @@ function DraggableCard({
     .slice(0, 2)
     .map((part) => part[0]?.toUpperCase())
     .join("");
-  const categoryLetter = (card.client_category?.trim()[0] ?? "?").toLocaleUpperCase("pt-BR");
-  const regionLabel = [card.companyState, card.companyCity].filter(Boolean).join(" · ") || "Região não informada";
+  const categoryLetter = card.client_category?.trim()[0]?.toLocaleUpperCase("pt-BR") ?? null;
+  const formattedPhone = formatBrazilPhoneForDisplay(card.phone_e164);
+  const regionLabel = [card.companyState, card.companyCity].filter(Boolean).join(" · ") || null;
   const borderSignal = card.signals.includes("awaiting_reply")
     ? "border-l-[var(--vp-error)]"
     : card.signals.includes("followup_overdue")
@@ -217,8 +229,10 @@ function DraggableCard({
       }`}
       tabIndex={0}
       aria-label={`${card.personName}. Abrir oportunidade`}
+      title={[card.personName, formattedPhone, card.companyLine].filter(Boolean).join(" · ")}
       onClick={onOpen}
       onKeyDown={(event) => {
+        if (event.currentTarget !== event.target) return;
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
           onOpen();
@@ -228,23 +242,38 @@ function DraggableCard({
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-bold leading-tight text-[var(--vp-ink-body)]">{card.personName}</p>
-          <p className="mt-0.5 truncate text-xs text-[var(--vp-ink-muted)]">{card.companyLine ?? "Empresa não informada"}</p>
+          {formattedPhone ? (
+            <p className="mt-0.5 truncate text-xs tabular-nums text-[var(--vp-ink-muted)]">{formattedPhone}</p>
+          ) : null}
+          {card.companyLine ? (
+            <p className="mt-0.5 truncate text-xs text-[var(--vp-ink-muted)]">{card.companyLine}</p>
+          ) : null}
         </div>
-        <span className="grid size-[22px] shrink-0 place-items-center rounded-[7px] border border-[var(--vp-ink-line)] bg-[var(--vp-surface)] text-[10px] font-extrabold text-[var(--vp-wine)]" aria-label={card.client_category ? `Categoria: ${card.client_category}` : "Categoria não informada"}>
-          {categoryLetter}
-        </span>
+        {categoryLetter ? (
+          <span className="grid size-[22px] shrink-0 place-items-center rounded-[7px] border border-[var(--vp-ink-line)] bg-[var(--vp-surface)] text-[10px] font-extrabold text-[var(--vp-wine)]" aria-label={`Categoria: ${card.client_category}`}>
+            {categoryLetter}
+          </span>
+        ) : null}
       </div>
-      <div className="mt-2 flex flex-wrap gap-1">
-        <span className="rounded-full bg-[var(--vp-surface)] px-2 py-0.5 text-[10px] font-bold tracking-[0.04em] text-[var(--vp-ink-muted)]">{regionLabel}</span>
-        <span className="rounded-full bg-[var(--vp-surface)] px-2 py-0.5 text-[10px] font-bold tracking-[0.04em] text-[var(--vp-ink-muted)]">
-          {card.weeklyVolumeKg == null ? "volume não informado" : `${card.weeklyVolumeKg.toLocaleString("pt-BR")} kg/sem`}
-        </span>
-      </div>
+      {regionLabel || card.weeklyBreadCount != null ? (
+        <div className="mt-2 flex flex-wrap gap-1">
+          {regionLabel ? (
+            <span className="rounded-full bg-[var(--vp-surface)] px-2 py-0.5 text-[10px] font-bold tracking-[0.04em] text-[var(--vp-ink-muted)]">{regionLabel}</span>
+          ) : null}
+          {card.weeklyBreadCount != null ? (
+            <span className="rounded-full bg-[var(--vp-surface)] px-2 py-0.5 text-[10px] font-bold tracking-[0.04em] text-[var(--vp-ink-muted)]">
+              {card.weeklyBreadCount.toLocaleString("pt-BR")} pães/sem
+            </span>
+          ) : null}
+        </div>
+      ) : null}
       <PipelineSignalBadges
         lastDirection={card.lastDirection}
         lastSentAt={card.lastSentAt}
         opportunityUpdatedAt={card.opportunityUpdatedAt}
         nextActionAt={card.nextActionAt}
+        followUpTitle={card.followUp?.title ?? null}
+        nowMs={nowMs}
       />
       <div className="mt-2.5 flex items-center justify-between gap-1.5 border-t border-[var(--vp-surface-high)] pt-2">
         <span className="inline-flex min-w-0 items-center gap-1.5">
@@ -261,24 +290,27 @@ function DraggableCard({
               onPointerDown={stopPointer}
               onClick={stopPointer}
             >
-              <span className="material-symbols-outlined text-[17px]" aria-hidden="true">chat</span>
+              <CrmIcon name="chat" className="text-[17px]" />
             </Link>
           ) : null}
           {card.lead_id ? (
-            <Link
-              href={`/leads/${card.lead_id}#proxima-acao`}
-              title="Agendar follow-up"
-              aria-label={`Agendar follow-up para ${card.personName}`}
+            <button
+              type="button"
+              title="Follow-up"
+              aria-label={`Follow-up de ${card.personName}`}
               className="grid size-11 place-items-center rounded-lg bg-[var(--vp-surface)] text-[var(--vp-wine)] md:size-7"
               onPointerDown={stopPointer}
-              onClick={stopPointer}
+              onClick={(event) => {
+                stopPointer(event);
+                onOpenFollowUp(card);
+              }}
             >
-              <span className="material-symbols-outlined text-[17px]" aria-hidden="true">event</span>
-            </Link>
+              <CrmIcon name="event" className="text-[17px]" />
+            </button>
           ) : null}
           <details className="group relative" onPointerDown={stopPointer} onClick={stopPointer}>
             <summary className="grid size-11 cursor-pointer list-none place-items-center rounded-lg bg-[var(--vp-surface)] text-[var(--vp-wine)] marker:content-none md:size-7 [&::-webkit-details-marker]:hidden" aria-label="Mais ações">
-              <span className="material-symbols-outlined text-[17px]" aria-hidden="true">more_horiz</span>
+              <CrmIcon name="more_horiz" className="text-[17px]" />
             </summary>
             <div className="absolute bottom-full right-0 z-30 mb-1 min-w-52 overflow-hidden rounded-xl border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] py-1 shadow-[var(--sh-md)]">
               <p className="px-3 py-1 text-[10px] font-extrabold uppercase tracking-[0.1em] text-[var(--vp-ink-soft)] md:hidden">Mover para</p>
@@ -297,7 +329,7 @@ function DraggableCard({
                 className="flex min-h-11 w-full items-center gap-2 px-3 text-left text-xs font-semibold text-[var(--vp-error)] hover:bg-[var(--vp-surface)]"
                 onClick={() => onClose(card, stageId)}
               >
-                <span className="material-symbols-outlined text-base" aria-hidden="true">block</span>
+                <CrmIcon name="block" className="text-base" />
                 Encerrar oportunidade
               </button>
             </div>
@@ -309,10 +341,17 @@ function DraggableCard({
 }
 
 function CardPreview({ card }: { card: PipelineCardDTO }) {
+  const formattedPhone = formatBrazilPhoneForDisplay(card.phone_e164);
+
   return (
     <div className="pointer-events-none w-56 rounded-xl border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] px-3 py-2.5 shadow-[var(--sh-lg)]">
       <p className="truncate text-sm font-bold text-[var(--vp-ink-body)]">{card.personName}</p>
-      <p className="mt-0.5 truncate text-xs text-[var(--vp-ink-muted)]">{card.companyLine ?? "Empresa não informada"}</p>
+      {formattedPhone ? (
+        <p className="mt-0.5 truncate text-xs tabular-nums text-[var(--vp-ink-muted)]">{formattedPhone}</p>
+      ) : null}
+      {card.companyLine ? (
+        <p className="mt-0.5 truncate text-xs text-[var(--vp-ink-muted)]">{card.companyLine}</p>
+      ) : null}
     </div>
   );
 }
@@ -321,14 +360,20 @@ export function PipelineBoard({
   stages,
   initialCards,
   stageTotals,
-  stageVolumes,
+  stageBreadCounts,
   filters,
+  nowMs,
+  teamOptions,
+  currentUserId,
 }: {
   stages: PipelineStageDTO[];
   initialCards: PipelineCardDTO[];
   stageTotals: Record<string, number>;
-  stageVolumes: Record<string, number>;
+  stageBreadCounts: Record<string, number>;
   filters: PipelinePageFilters;
+  nowMs: number;
+  teamOptions: { id: string; label: string }[];
+  currentUserId: string | null;
 }) {
   const router = useRouter();
   const activeStages = useMemo(() => stages.filter((stage) => !stage.is_final), [stages]);
@@ -339,13 +384,20 @@ export function PipelineBoard({
   );
 
   const fingerprint = useMemo(
-    () => initialCards.map((c) => `${c.id}:${c.stage_id}`).join("|"),
+    () => initialCards.map((c) => [
+      c.id,
+      c.stage_id,
+      c.followUp?.id ?? "",
+      c.followUp?.title ?? "",
+      c.followUp?.due_at ?? "",
+      c.followUp?.assignee_id ?? "",
+    ].join(":")).join("|"),
     [initialCards],
   );
 
   const [columns, setColumns] = useState(() => groupByStage(activeStages, initialCards));
   const [localStageTotals, setLocalStageTotals] = useState(stageTotals);
-  const [localStageVolumes, setLocalStageVolumes] = useState(stageVolumes);
+  const [localStageBreadCounts, setLocalStageBreadCounts] = useState(stageBreadCounts);
   const [loadingStageId, setLoadingStageId] = useState<string | null>(null);
   const [activeCard, setActiveCard] = useState<PipelineCardDTO | null>(null);
   const [bannerError, setBannerError] = useState<string | null>(null);
@@ -359,13 +411,15 @@ export function PipelineBoard({
   const [closingStageId, setClosingStageId] = useState("");
   const [closingReason, setClosingReason] = useState("");
   const [closingBusy, setClosingBusy] = useState(false);
+  const [followUpCardId, setFollowUpCardId] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const followUpDialogRef = useRef<HTMLDialogElement>(null);
   const columnsRef = useRef(columns);
   columnsRef.current = columns;
   const stageTotalsRef = useRef(localStageTotals);
   stageTotalsRef.current = localStageTotals;
-  const stageVolumesRef = useRef(localStageVolumes);
-  stageVolumesRef.current = localStageVolumes;
+  const stageBreadCountsRef = useRef(localStageBreadCounts);
+  stageBreadCountsRef.current = localStageBreadCounts;
   const stagesRef = useRef(stages);
   stagesRef.current = stages;
 
@@ -375,9 +429,9 @@ export function PipelineBoard({
     columnsRef.current = next;
     setLocalStageTotals(stageTotals);
     stageTotalsRef.current = stageTotals;
-    setLocalStageVolumes(stageVolumes);
-    stageVolumesRef.current = stageVolumes;
-  }, [fingerprint, activeStages, initialCards, stageTotals, stageVolumes]);
+    setLocalStageBreadCounts(stageBreadCounts);
+    stageBreadCountsRef.current = stageBreadCounts;
+  }, [fingerprint, activeStages, initialCards, stageTotals, stageBreadCounts]);
 
   const loadMore = useCallback(
     async (stageId: string) => {
@@ -418,6 +472,20 @@ export function PipelineBoard({
     }
   }, [finalStages, pendingClose]);
 
+  const followUpCard = followUpCardId
+    ? Array.from(columns.values()).flat().find((card) => card.id === followUpCardId) ?? null
+    : null;
+
+  useEffect(() => {
+    const dialog = followUpDialogRef.current;
+    if (!dialog) return;
+    if (followUpCard) {
+      if (!dialog.open) dialog.showModal();
+    } else if (dialog.open) {
+      dialog.close();
+    }
+  }, [followUpCard]);
+
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: { distance: 8 },
@@ -437,7 +505,7 @@ export function PipelineBoard({
       setSavingId(opportunityId);
       const prev = cloneColumns(columnsRef.current);
       const prevTotals = { ...stageTotalsRef.current };
-      const prevVolumes = { ...stageVolumesRef.current };
+      const prevBreadCounts = { ...stageBreadCountsRef.current };
       const movedCard = prev.get(fromStageId)?.find((card) => card.id === opportunityId) ?? null;
       const optimistic = moveCard(columnsRef.current, opportunityId, fromStageId, toStageId);
       if (!optimistic) {
@@ -453,13 +521,13 @@ export function PipelineBoard({
         setLocalStageTotals(nextTotals);
         stageTotalsRef.current = nextTotals;
 
-        const volumeKg = movedCard?.weeklyVolumeKg ?? 0;
-        if (volumeKg > 0) {
-          const nextVolumes = { ...prevVolumes };
-          nextVolumes[fromStageId] = Math.max(0, (nextVolumes[fromStageId] ?? 0) - volumeKg);
-          nextVolumes[toStageId] = (nextVolumes[toStageId] ?? 0) + volumeKg;
-          setLocalStageVolumes(nextVolumes);
-          stageVolumesRef.current = nextVolumes;
+        const weeklyBreadCount = movedCard?.weeklyBreadCount ?? 0;
+        if (weeklyBreadCount > 0) {
+          const nextBreadCounts = { ...prevBreadCounts };
+          nextBreadCounts[fromStageId] = Math.max(0, (nextBreadCounts[fromStageId] ?? 0) - weeklyBreadCount);
+          nextBreadCounts[toStageId] = (nextBreadCounts[toStageId] ?? 0) + weeklyBreadCount;
+          setLocalStageBreadCounts(nextBreadCounts);
+          stageBreadCountsRef.current = nextBreadCounts;
         }
       }
 
@@ -480,8 +548,8 @@ export function PipelineBoard({
         columnsRef.current = prev;
         setLocalStageTotals(prevTotals);
         stageTotalsRef.current = prevTotals;
-        setLocalStageVolumes(prevVolumes);
-        stageVolumesRef.current = prevVolumes;
+        setLocalStageBreadCounts(prevBreadCounts);
+        stageBreadCountsRef.current = prevBreadCounts;
         setBannerError(res.error ?? "Não foi possível atualizar a etapa.");
         return false;
       }
@@ -497,6 +565,29 @@ export function PipelineBoard({
     },
     [],
   );
+
+  const updateCardFollowUp = useCallback((cardId: string, followUp: LeadFollowUpDTO | null) => {
+    const next = cloneColumns(columnsRef.current);
+    for (const [stageId, cards] of next) {
+      const cardIndex = cards.findIndex((card) => card.id === cardId);
+      if (cardIndex < 0) continue;
+      const card = cards[cardIndex];
+      const signals: PipelineSignal[] = card.signals.filter((signal) => signal !== "followup_overdue");
+      if (followUp && new Date(followUp.due_at).getTime() < Date.now()) {
+        signals.push("followup_overdue");
+      }
+      cards[cardIndex] = {
+        ...card,
+        followUp,
+        nextActionAt: followUp?.due_at ?? null,
+        signals,
+      };
+      next.set(stageId, cards);
+      break;
+    }
+    columnsRef.current = next;
+    setColumns(next);
+  }, []);
 
   const handleDragStart = useCallback((event: DragStartEvent) => {
     const data = event.active.data.current as
@@ -563,7 +654,7 @@ export function PipelineBoard({
     setClosingReason("");
     setBannerError(null);
   }
-  const maxVolumeKg = Math.max(0, ...activeStages.map((stage) => localStageVolumes[stage.id] ?? 0));
+  const maxWeeklyBreadCount = Math.max(0, ...activeStages.map((stage) => localStageBreadCounts[stage.id] ?? 0));
 
   return (
     <DndContext
@@ -599,8 +690,8 @@ export function PipelineBoard({
                 stageId={stage.id}
                 stageName={stage.name}
                 totalCount={totalCount}
-                volumeKg={localStageVolumes[stage.id] ?? 0}
-                maxVolumeKg={maxVolumeKg}
+                weeklyBreadCount={localStageBreadCounts[stage.id] ?? 0}
+                maxWeeklyBreadCount={maxWeeklyBreadCount}
               >
                 {items.map((card) => (
                   <DraggableCard
@@ -608,7 +699,9 @@ export function PipelineBoard({
                     card={card}
                     stageId={stage.id}
                     stages={activeStages}
+                    nowMs={nowMs}
                     onOpen={() => card.lead_id && router.push(`/leads/${card.lead_id}`)}
+                    onOpenFollowUp={(selectedCard) => setFollowUpCardId(selectedCard.id)}
                     onMove={(opportunityId, fromStageId, toStageId) => {
                       void commitMove(opportunityId, fromStageId, toStageId, null);
                     }}
@@ -648,6 +741,44 @@ export function PipelineBoard({
       </div>
 
       <DragOverlay>{activeCard ? <CardPreview card={activeCard} /> : null}</DragOverlay>
+
+      <dialog
+        ref={followUpDialogRef}
+        className="w-[min(24rem,calc(100%_-_2rem))] rounded-2xl border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] p-0 text-[var(--vp-ink-body)] shadow-[var(--sh-lg)] backdrop:bg-black/40"
+        onCancel={(event) => {
+          event.preventDefault();
+          setFollowUpCardId(null);
+        }}
+        onClose={() => setFollowUpCardId(null)}
+      >
+        {followUpCard?.lead_id ? (
+          <div className="p-4">
+            <div className="mb-3 flex items-start justify-between gap-3 border-b border-[var(--vp-ink-line)] pb-3">
+              <div className="min-w-0">
+                <h3 className="truncate text-sm font-extrabold text-[var(--vp-wine)]">{followUpCard.personName}</h3>
+                <p className="mt-0.5 text-xs text-[var(--vp-ink-muted)]">Agendamento deste lead</p>
+              </div>
+              <button
+                type="button"
+                aria-label="Fechar follow-up"
+                className="grid size-9 shrink-0 place-items-center rounded-full border border-[var(--vp-ink-line)] bg-[var(--vp-surface)] text-[var(--vp-wine)]"
+                onClick={() => setFollowUpCardId(null)}
+              >
+                <CrmIcon name="close" className="text-lg" />
+              </button>
+            </div>
+            <LeadFollowUp
+              key={followUpCard.id}
+              leadId={followUpCard.lead_id}
+              initialFollowUp={followUpCard.followUp}
+              teamOptions={teamOptions}
+              defaultAssigneeId={followUpCard.ownerId ?? currentUserId}
+              compact
+              onChange={(followUp) => updateCardFollowUp(followUpCard.id, followUp)}
+            />
+          </div>
+        ) : null}
+      </dialog>
 
       <dialog
         ref={dialogRef}

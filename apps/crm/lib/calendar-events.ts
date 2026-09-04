@@ -47,7 +47,7 @@ export function calendarEventLines(ev: CalendarEventDTO): CalendarEventLines {
   }
 
   const raw = ev.title.trim();
-  const taskTitle = isPhoneLikeCalendarTitle(raw) ? "Próxima ação do funil" : raw;
+  const taskTitle = isPhoneLikeCalendarTitle(raw) ? "Follow-up" : raw;
   return { taskTitle, lead, company };
 }
 
@@ -60,6 +60,7 @@ export function buildTaskCalendarEvent(input: {
   id: string;
   title: string;
   at: string;
+  kind?: CalendarEventDTO["kind"];
   done?: boolean;
   leadId: string | null;
   leadName: string | null;
@@ -67,7 +68,7 @@ export function buildTaskCalendarEvent(input: {
 }): CalendarEventDTO {
   return {
     id: input.id,
-    kind: "task",
+    kind: input.kind ?? "task",
     at: input.at,
     title: input.title,
     leadName: input.leadName,

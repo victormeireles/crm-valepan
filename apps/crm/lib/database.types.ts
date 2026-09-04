@@ -308,7 +308,9 @@ export interface Database {
           due_at: string | null;
           assignee_id: string | null;
           source_key: string | null;
+          task_kind: "task" | "follow_up";
           done: boolean;
+          completed_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -320,7 +322,9 @@ export interface Database {
           due_at?: string | null;
           assignee_id?: string | null;
           source_key?: string | null;
+          task_kind?: "task" | "follow_up";
           done?: boolean;
+          completed_at?: string | null;
         };
         Update: Partial<Database["crm"]["Tables"]["tasks"]["Insert"]>;
       };

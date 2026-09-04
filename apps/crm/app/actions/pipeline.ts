@@ -11,13 +11,33 @@ import type { ClientCategoryValue } from "@/lib/client-categories";
 import type { Database } from "@/lib/database.types";
 import { createServerSupabaseClient, crmTables } from "@/lib/supabase/server";
 import type { PipelineCardDTO } from "@/app/(dashboard)/pipeline/pipeline-board";
-import { getWeeklyVolumeKg } from "@/lib/lead-signals";
+import { getWeeklyBreadCount } from "@/lib/lead-signals";
 import { logPipelinePerformance, timePipelineOperation } from "@/lib/pipeline-performance";
+import { indexFollowUpsByLead, type LeadFollowUpDTO } from "@/lib/follow-ups";
 
 const PAGE_SIZE = 20;
 type PipelineCardRow = Database["crm"]["Functions"]["pipeline_cards"]["Returns"][number];
+type Crm = ReturnType<typeof crmTables>;
 
-function mapRow(row: PipelineCardRow, ownerNames: Map<string, string>): PipelineCardDTO {
+async function loadFollowUps(crm: Crm, rows: PipelineCardRow[]) {
+  const leadIds = [...new Set(rows.map((row) => row.lead_id).filter(Boolean))];
+  if (leadIds.length === 0) return new Map<string, LeadFollowUpDTO>();
+  const { data, error } = await crm
+    .from("tasks")
+    .select("id, lead_id, title, due_at, assignee_id")
+    .in("lead_id", leadIds)
+    .eq("task_kind", "follow_up")
+    .eq("done", false)
+    .order("due_at", { ascending: true });
+  if (error) throw error;
+  return indexFollowUpsByLead(data ?? []);
+}
+
+function mapRow(
+  row: PipelineCardRow,
+  ownerNames: Map<string, string>,
+  followUps: Map<string, LeadFollowUpDTO>,
+): PipelineCardDTO {
   const ownerId = row.opportunity_owner_id ?? row.lead_owner_id;
   return {
     id: row.opportunity_id,
@@ -31,18 +51,18 @@ function mapRow(row: PipelineCardRow, ownerNames: Map<string, string>): Pipeline
       distributorName: row.distributor_name,
       clientCategory: row.client_category,
     }),
+    phone_e164: row.phone_e164,
     client_category: row.client_category,
     companyCity: row.company_city,
     companyState: row.company_state,
     conversationId: row.conversation_id,
-    weeklyVolumeKg: getWeeklyVolumeKg(
-      row.weekly_bread_consumption,
-      row.bread_weight_grams,
-    ),
+    weeklyBreadCount: getWeeklyBreadCount(row.weekly_bread_consumption),
     lastDirection: row.last_direction,
     lastSentAt: row.last_sent_at,
     opportunityUpdatedAt: row.opportunity_updated_at,
     nextActionAt: row.next_action_at,
+    followUp: followUps.get(row.lead_id) ?? null,
+    ownerId,
     ownerName: ownerId ? (ownerNames.get(ownerId) ?? "Responsável desconhecido") : null,
     signals: computePipelineSignals({
       oppUpdatedAt: row.opportunity_updated_at,
@@ -130,9 +150,11 @@ export async function loadPipelineFilterSnapshot(input: { filters: PipelinePageF
       (profile.full_name ?? "").trim() || "Sem nome",
     ]),
   );
+  const cardRows = (cardsResult.data ?? []) as PipelineCardRow[];
+  const followUps = await loadFollowUps(crm, cardRows);
   return {
     ok: true as const,
-    cards: ((cardsResult.data ?? []) as PipelineCardRow[]).map((row) => mapRow(row, ownerNames)),
+    cards: cardRows.map((row) => mapRow(row, ownerNames, followUps)),
     allStageCounts: allCountsResult.data ?? [],
     visibleStageCounts: visibleCountsResult.data ?? [],
     ownerCounts: ownerCountsResult.data ?? [],
@@ -179,7 +201,9 @@ export async function loadPipelineStagePage(input: {
       (profile.full_name ?? "").trim() || "Sem nome",
     ]),
   );
-  const cards = ((data ?? []) as PipelineCardRow[]).map((row) => mapRow(row, ownerNames));
+  const cardRows = (data ?? []) as PipelineCardRow[];
+  const followUps = await loadFollowUps(crm, cardRows);
+  const cards = cardRows.map((row) => mapRow(row, ownerNames, followUps));
 
   return {
     ok: true as const,

@@ -18,16 +18,8 @@ type Opp = {
   stage_id: string;
   lost_reason: string | null;
   title: string | null;
-  next_action_at: string | null;
   pipeline_stages: { name: string } | null;
 } | null;
-
-function toDatetimeLocalValue(iso: string | null) {
-  if (!iso) return "";
-  const d = new Date(iso);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
 
 export function LeadActions({
   leadId,
@@ -49,7 +41,6 @@ export function LeadActions({
   const [lost, setLost] = useState(opportunity?.lost_reason ?? "");
   const [title, setTitle] = useState(opportunity?.title ?? "");
   const [contactName, setContactName] = useState(contact?.full_name ?? "");
-  const [nextAt, setNextAt] = useState(toDatetimeLocalValue(opportunity?.next_action_at ?? null));
   const [loading, setLoading] = useState(false);
   const [loadingCreate, setLoadingCreate] = useState(false);
   const [loadingMeta, setLoadingMeta] = useState(false);
@@ -92,21 +83,9 @@ export function LeadActions({
     if (!opportunity?.id) return;
     setLoadingMeta(true);
     setErr(null);
-    const trimmedNextAt = nextAt.trim();
-    let nextActionAt: string | null = null;
-    if (trimmedNextAt.length > 0) {
-      const parsed = new Date(trimmedNextAt);
-      if (Number.isNaN(parsed.getTime())) {
-        setLoadingMeta(false);
-        setErr("Data da próxima ação inválida.");
-        return;
-      }
-      nextActionAt = parsed.toISOString();
-    }
     const res = await updateOpportunityDetails({
       opportunityId: opportunity.id,
       title,
-      nextActionAt,
       contactId: contact?.id ?? null,
       contactName,
     });
@@ -261,15 +240,6 @@ export function LeadActions({
           className="rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-        />
-      </label>
-      <label id="proxima-acao" className="flex scroll-mt-28 flex-col gap-1">
-        Próxima ação
-        <input
-          type="datetime-local"
-          className="rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1"
-          value={nextAt}
-          onChange={(e) => setNextAt(e.target.value)}
         />
       </label>
       <button

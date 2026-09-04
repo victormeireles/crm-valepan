@@ -56,11 +56,15 @@ export function TimelineEntry({ row }: { row: TimelineRow }) {
   if (row.kind === "task") {
     const title = typeof data.title === "string" ? data.title : "Tarefa";
     const done = data.done === true;
+    const isFollowUp = data.task_kind === "follow_up";
     const due = data.due_at ? new Date(String(data.due_at)).toLocaleString("pt-BR") : null;
     return (
       <li className="border-b border-[var(--border)] pb-3 last:border-0">
         <div className="flex flex-wrap justify-between gap-2 text-xs text-[var(--muted)]">
-          <span>Tarefa criada{done ? " (já concluída)" : ""}</span>
+          <span>
+            {isFollowUp ? "Follow-up agendado" : "Tarefa criada"}
+            {done ? (isFollowUp ? " (já concluído)" : " (já concluída)") : ""}
+          </span>
           <time dateTime={row.at}>{new Date(row.at).toLocaleString("pt-BR")}</time>
         </div>
         <p className="mt-1 text-sm font-medium">{title}</p>
@@ -111,12 +115,19 @@ export function TimelineEntry({ row }: { row: TimelineRow }) {
     if (
       action === "task_completed" ||
       action === "task_reopened" ||
-      action === "task_deleted"
+      action === "task_deleted" ||
+      action === "follow_up_completed" ||
+      action === "follow_up_reopened" ||
+      action === "follow_up_deleted"
     ) {
       const title = typeof payload.title === "string" ? payload.title : null;
       if (title) detail = title;
     }
-    if (action === "task_rescheduled") {
+    if (action === "follow_up_updated") {
+      const title = typeof payload.title === "string" ? payload.title : null;
+      if (title) detail = title;
+    }
+    if (action === "task_rescheduled" || action === "follow_up_rescheduled" || action === "follow_up_scheduled") {
       const title = typeof payload.title === "string" ? payload.title : null;
       const fromDue = typeof payload.from_due_at === "string" ? payload.from_due_at : null;
       const toDue = typeof payload.to_due_at === "string" ? payload.to_due_at : null;

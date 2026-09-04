@@ -1,5 +1,6 @@
 "use client";
 
+import { CrmIcon } from "@/components/crm-icon";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
@@ -33,7 +34,7 @@ export function DashboardContextSearch() {
 
   return (
     <label className="flex min-h-10 min-w-[17.5rem] items-center gap-2 rounded-full border border-[rgba(255,215,115,0.35)] bg-[rgba(255,248,247,0.08)] px-3.5">
-      <span className="material-symbols-outlined text-lg text-[var(--vp-gold)]" aria-hidden="true">search</span>
+      <CrmIcon name="search" className="text-lg text-[var(--vp-gold)]" />
       <span className="sr-only">Buscar no funil</span>
       <input
         type="search"

@@ -281,7 +281,6 @@ export async function createOpportunityForLead(leadId: string) {
 export async function updateOpportunityDetails(input: {
   opportunityId: string;
   title: string;
-  nextActionAt: string | null;
   contactId: string | null;
   contactName: string;
 }) {
@@ -309,7 +308,6 @@ export async function updateOpportunityDetails(input: {
     .from("opportunities")
     .update({
       title,
-      next_action_at: input.nextActionAt,
       updated_at: new Date().toISOString(),
     })
     .eq("id", input.opportunityId)

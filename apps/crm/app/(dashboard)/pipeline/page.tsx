@@ -11,9 +11,10 @@ import { INBOX_MESSAGES_VISIBLE_SINCE } from "@/lib/inbox/load-messages";
 import { createServerSupabaseClient, crmTables } from "@/lib/supabase/server";
 import type { PipelineCardDTO, PipelineStageDTO } from "./pipeline-board";
 import { PipelineWorkspace } from "./pipeline-workspace";
-import { getWeeklyVolumeKg } from "@/lib/lead-signals";
+import { getWeeklyBreadCount } from "@/lib/lead-signals";
 import type { PipelineVolumeFilter } from "@/app/actions/pipeline";
 import { logPipelinePerformance } from "@/lib/pipeline-performance";
+import { indexFollowUpsByLead, type LeadFollowUpDTO } from "@/lib/follow-ups";
 
 export const dynamic = "force-dynamic";
 const CARDS_PER_STAGE = 20;
@@ -27,7 +28,8 @@ type PipelineCardRow = Database["crm"]["Functions"]["pipeline_cards"]["Returns"]
 type PipelineStageCountRow = Database["crm"]["Functions"]["pipeline_stage_counts"]["Returns"][number];
 type PipelineOwnerCountRow = Database["crm"]["Functions"]["pipeline_owner_counts"]["Returns"][number];
 
-function mapRowToCard(o: PipelineCardRow): PipelineCardDTO {
+function mapRowToCard(o: PipelineCardRow, followUps: Map<string, LeadFollowUpDTO>): PipelineCardDTO {
+  const ownerId = o.opportunity_owner_id ?? o.lead_owner_id;
   return {
     id: o.opportunity_id,
     stage_id: o.stage_id,
@@ -40,18 +42,18 @@ function mapRowToCard(o: PipelineCardRow): PipelineCardDTO {
       distributorName: o.distributor_name,
       clientCategory: o.client_category,
     }),
+    phone_e164: o.phone_e164,
     client_category: o.client_category,
     companyCity: o.company_city,
     companyState: o.company_state,
     conversationId: o.conversation_id,
-    weeklyVolumeKg: getWeeklyVolumeKg(
-      o.weekly_bread_consumption,
-      o.bread_weight_grams,
-    ),
+    weeklyBreadCount: getWeeklyBreadCount(o.weekly_bread_consumption),
     lastDirection: o.last_direction,
     lastSentAt: o.last_sent_at,
     opportunityUpdatedAt: o.opportunity_updated_at,
     nextActionAt: o.next_action_at,
+    followUp: followUps.get(o.lead_id) ?? null,
+    ownerId,
     ownerName: null,
     signals: computePipelineSignals({
       oppUpdatedAt: o.opportunity_updated_at,
@@ -68,6 +70,7 @@ export default async function PipelinePage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const pageStartedAt = performance.now();
+  const renderNowMs = Date.now();
   const sp = await searchParams;
   const mineOnly = sp.mine === "1";
   const ownerParam = typeof sp.owner === "string" ? sp.owner.trim() : "";
@@ -156,6 +159,20 @@ export default async function PipelinePage({
     ownerSummaryError;
   if (pipelineError) throw pipelineError;
 
+  const pipelineRows = (rows ?? []) as PipelineCardRow[];
+  const pipelineLeadIds = [...new Set(pipelineRows.map((row) => row.lead_id).filter(Boolean))];
+  const { data: followUpRows, error: followUpsError } = pipelineLeadIds.length > 0
+    ? await crm
+        .from("tasks")
+        .select("id, lead_id, title, due_at, assignee_id")
+        .in("lead_id", pipelineLeadIds)
+        .eq("task_kind", "follow_up")
+        .eq("done", false)
+        .order("due_at", { ascending: true })
+    : { data: [], error: null };
+  if (followUpsError) throw followUpsError;
+  const followUpsByLead = indexFollowUpsByLead(followUpRows ?? []);
+
   const rawStages: PipelineStageDTO[] = (stageRows ?? []).map((s) => ({
     id: s.id,
     name: s.name,
@@ -183,8 +200,8 @@ export default async function PipelinePage({
     (teamProfiles ?? []).map((profile) => [profile.id, formatTeamOption(profile).label]),
   );
 
-  const pagedCards: PipelineCardDTO[] = ((rows ?? []) as PipelineCardRow[]).map((o) => {
-    const card = mapRowToCard(o);
+  const pagedCards: PipelineCardDTO[] = pipelineRows.map((o) => {
+    const card = mapRowToCard(o, followUpsByLead);
     const ownerId = o.opportunity_owner_id ?? o.lead_owner_id;
     const cardWithOwner = {
       ...card,
@@ -198,13 +215,14 @@ export default async function PipelinePage({
   });
 
   const stageTotals = Object.fromEntries(stages.map((stage) => [stage.id, 0]));
-  const stageVolumes = Object.fromEntries(stages.map((stage) => [stage.id, 0]));
+  const stageBreadCounts = Object.fromEntries(stages.map((stage) => [stage.id, 0]));
   for (const row of (selectedStageCountRows ?? []) as PipelineStageCountRow[]) {
     const stageId = canonicalEntryStage && entryStageIds.has(row.stage_id)
       ? canonicalEntryStage.id
       : row.stage_id;
     stageTotals[stageId] = (stageTotals[stageId] ?? 0) + Number(row.card_count);
-    stageVolumes[stageId] = (stageVolumes[stageId] ?? 0) + Number(row.volume_kg);
+    // `volume_kg` é o nome legado do campo retornado pela RPC; o valor agora é pães/semana.
+    stageBreadCounts[stageId] = (stageBreadCounts[stageId] ?? 0) + Number(row.volume_kg);
   }
   const initialCards = stages.flatMap((stage) =>
     pagedCards.filter((card) => card.stage_id === stage.id).slice(0, CARDS_PER_STAGE),
@@ -214,7 +232,7 @@ export default async function PipelinePage({
     0,
   );
   const visibleCount = Object.values(stageTotals).reduce((total, count) => total + count, 0);
-  const visibleVolumeKg = Object.values(stageVolumes).reduce((total, volume) => total + volume, 0);
+  const visibleBreadCount = Object.values(stageBreadCounts).reduce((total, count) => total + count, 0);
   const ownerSummary = ownerSummaryRows?.[0] ?? null;
   const selectedOwnerName = ownerUserId
     ? (ownerNameById.get(ownerUserId) ?? (mineOnly ? "Minha carteira" : "Responsável desconhecido"))
@@ -265,10 +283,10 @@ export default async function PipelinePage({
           stages={stages}
           initialCards={initialCards}
           initialStageTotals={stageTotals}
-          initialStageVolumes={stageVolumes}
+          initialStageBreadCounts={stageBreadCounts}
           initialTotalCount={totalCount}
           initialVisibleCount={visibleCount}
-          initialVisibleVolumeKg={visibleVolumeKg}
+          initialVisibleBreadCount={visibleBreadCount}
           initialTeamOptions={teamOptions}
           initialMineCount={mineCount}
           initialSummary={initialSummary}
@@ -285,6 +303,7 @@ export default async function PipelinePage({
           }}
           canViewTeam={canViewTeam}
           currentUserId={user?.id ?? null}
+          renderNowMs={renderNowMs}
         />
       )}
     </div>
