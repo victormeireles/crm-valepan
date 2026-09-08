@@ -101,6 +101,15 @@ export function TimelineEntry({ row }: { row: TimelineRow }) {
     const label = timelineActivityLabel(action);
 
     let detail: string | null = null;
+    if (action === "registered_from_public_form") {
+      detail = [
+        payload.campaign,
+        payload.name,
+        payload.client_category === "distribuidor" ? "Distribuidor" : "Hamburgueria",
+        typeof payload.zip_code === "string" ? `CEP: ${payload.zip_code.replace(/^(\d{5})(\d{3})$/, "$1-$2")}` : null,
+        payload.phone,
+      ].filter((value): value is string => typeof value === "string" && !!value).join(" · ");
+    }
     if (action === "stage_changed") {
       const stageName =
         typeof payload.stage_name === "string"

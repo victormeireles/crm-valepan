@@ -104,17 +104,22 @@ export function LeadActions({
     }
     setLoading(true);
     setErr(null);
-    const res = await updateOpportunityStage({
-      opportunityId: opportunity.id,
-      stageId,
-      lostReason: closingStage ? lost : null,
-    });
-    setLoading(false);
-    if (!res.ok) {
-      setErr(res.error ?? "Erro");
-      return;
+    try {
+      const res = await updateOpportunityStage({
+        opportunityId: opportunity.id,
+        stageId,
+        lostReason: closingStage ? lost : null,
+      });
+      if (!res.ok) {
+        setErr(res.error ?? "Erro");
+        return;
+      }
+      router.refresh();
+    } catch {
+      setErr("Não foi possível atualizar a etapa. Tente novamente.");
+    } finally {
+      setLoading(false);
     }
-    router.refresh();
   }
 
   async function saveCategory() {
@@ -127,20 +132,25 @@ export function LeadActions({
       setErr("Categoria inválida.");
       return;
     }
-    const res = await updateLeadClientCategory({
-      leadId,
-      category: nextCategory,
-    });
-    setLoadingCategory(false);
-    if (!res.ok) {
-      setErr(res.error ?? "Erro");
-      return;
+    try {
+      const res = await updateLeadClientCategory({
+        leadId,
+        category: nextCategory,
+      });
+      if (!res.ok) {
+        setErr(res.error ?? "Erro");
+        return;
+      }
+      if (nextCategory) {
+        router.push(`/leads?client_category=${encodeURIComponent(nextCategory)}`);
+        return;
+      }
+      router.push("/leads");
+    } catch {
+      setErr("Não foi possível salvar a categoria. Tente novamente.");
+    } finally {
+      setLoadingCategory(false);
     }
-    if (nextCategory) {
-      router.push(`/leads?client_category=${encodeURIComponent(nextCategory)}`);
-      return;
-    }
-    router.push("/leads");
   }
 
   if (!opportunity) {

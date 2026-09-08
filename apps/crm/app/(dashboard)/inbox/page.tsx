@@ -25,6 +25,7 @@ import { getCustomerWaitSignal, getWeeklyBreadCount } from "@/lib/lead-signals";
 import { timelineActivityLabel } from "@/lib/timeline-labels";
 import type { Json } from "@/lib/database.types";
 import { toFollowUpDTO } from "@/lib/follow-ups";
+import { brazilPhoneSearchVariants } from "@crm/shared/phone";
 
 const TEAM_ROLE_LABEL: Record<string, string> = {
   admin: "Admin",
@@ -102,11 +103,16 @@ function compactHistoryItem(row: { kind: string; event_id: string; at: string; d
 export default async function InboxPage({
   searchParams,
 }: {
-  searchParams: Promise<{ cid?: string; tab?: string; page?: string }>;
+  searchParams: Promise<{ cid?: string; tab?: string; page?: string; q?: string }>;
 }) {
   const renderNowMs = Date.now();
   const params = await searchParams;
   const { cid, tab } = params;
+  const inboxQuery = typeof params.q === "string" ? params.q.trim() : "";
+  const inboxQueryDigits = inboxQuery.replace(/\D/g, "");
+  const phoneSearchVariants =
+    inboxQueryDigits.length >= 4 ? brazilPhoneSearchVariants(inboxQuery) : [];
+  const isPhoneSearch = phoneSearchVariants.length > 0;
   const requestedPage = params.page ? Number.parseInt(params.page, 10) : 1;
   const page = Number.isFinite(requestedPage) && requestedPage > 0 ? requestedPage : 1;
   const activeTab: InboxTab =
@@ -117,7 +123,7 @@ export default async function InboxPage({
         : tab === "pipeline"
           ? "pipeline"
           : "qualify";
-  const conversationKind = activeTab === "groups" ? "group" : "lead";
+  const conversationKind = isPhoneSearch || activeTab !== "groups" ? "lead" : "group";
   const supabase = await createServerSupabaseClient();
   const crm = crmTables(supabase);
   // A conversa solicitada já vem na URL; carregue suas mensagens enquanto a
@@ -134,11 +140,11 @@ export default async function InboxPage({
     .filter((stage) => ["LEADS", "ENTRADA"].includes(stage.name.trim().toUpperCase()))
     .map((stage) => stage.id);
   const opportunityRelation: string =
-    activeTab === "pipeline" || activeTab === "qualify"
+    !isPhoneSearch && (activeTab === "pipeline" || activeTab === "qualify")
       ? "opportunities!inner(id, stage_id, title, next_action_at, owner_id, updated_at)"
       : "opportunities(id, stage_id, title, next_action_at, owner_id, updated_at)";
   const leadRelation: string =
-    activeTab === "groups"
+    activeTab === "groups" && !isPhoneSearch
       ? "leads(id, phone_e164, status, owner_id, client_category, zip_code, weekly_bread_consumption, bread_type, bread_weight_grams, excluded_from_pipeline_at, excluded_reason, contacts(full_name, avatar_url), companies(id, name, document, city, state), distributors(name), opportunities(id, stage_id, updated_at))"
       : `leads!inner(id, phone_e164, status, owner_id, client_category, zip_code, weekly_bread_consumption, bread_type, bread_weight_grams, excluded_from_pipeline_at, excluded_reason, contacts(full_name, avatar_url), companies(id, name, document, city, state), distributors(name), ${opportunityRelation})`;
   const conversationSelect: string =
@@ -148,12 +154,17 @@ export default async function InboxPage({
     .select(conversationSelect, { count: "exact" })
     .eq("conversation_kind", conversationKind)
     .gte("last_message_at", INBOX_MESSAGES_VISIBLE_SINCE);
-  if (activeTab === "qualify") {
+  if (phoneSearchVariants.length > 0) {
+    conversationsQuery = conversationsQuery.or(
+      phoneSearchVariants.map((digits) => `phone_e164.ilike.%${digits}%`).join(","),
+    );
+  }
+  if (!isPhoneSearch && activeTab === "qualify") {
     conversationsQuery = conversationsQuery.is("leads.excluded_from_pipeline_at", null);
     if (entryStageIds.length > 0) {
       conversationsQuery = conversationsQuery.in("leads.opportunities.stage_id", entryStageIds);
     }
-  } else if (activeTab === "pipeline") {
+  } else if (!isPhoneSearch && activeTab === "pipeline") {
     conversationsQuery = conversationsQuery.is("leads.excluded_from_pipeline_at", null);
     if (entryStageIds.length > 0) {
       conversationsQuery = conversationsQuery.not(
@@ -162,7 +173,7 @@ export default async function InboxPage({
         `(${entryStageIds.join(",")})`,
       );
     }
-  } else if (activeTab === "archived") {
+  } else if (!isPhoneSearch && activeTab === "archived") {
     conversationsQuery = conversationsQuery.not("leads.excluded_from_pipeline_at", "is", null);
   }
 
@@ -223,12 +234,12 @@ export default async function InboxPage({
       .eq("id", cid)
       .eq("conversation_kind", conversationKind)
       .gte("last_message_at", INBOX_MESSAGES_VISIBLE_SINCE);
-    if (activeTab === "qualify") {
+    if (!isPhoneSearch && activeTab === "qualify") {
       selectedQuery = selectedQuery.is("leads.excluded_from_pipeline_at", null);
       if (entryStageIds.length > 0) {
         selectedQuery = selectedQuery.in("leads.opportunities.stage_id", entryStageIds);
       }
-    } else if (activeTab === "pipeline") {
+    } else if (!isPhoneSearch && activeTab === "pipeline") {
       selectedQuery = selectedQuery.is("leads.excluded_from_pipeline_at", null);
       if (entryStageIds.length > 0) {
         selectedQuery = selectedQuery.not(
@@ -237,7 +248,7 @@ export default async function InboxPage({
           `(${entryStageIds.join(",")})`,
         );
       }
-    } else if (activeTab === "archived") {
+    } else if (!isPhoneSearch && activeTab === "archived") {
       selectedQuery = selectedQuery.not("leads.excluded_from_pipeline_at", "is", null);
     }
     const selectedResult = await selectedQuery.maybeSingle();
@@ -656,7 +667,10 @@ export default async function InboxPage({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden">
-      <InboxLiveRefresh selectedConversationId={selectedId} />
+      <InboxLiveRefresh
+        selectedConversationId={selectedId}
+        selectedLeadId={selectedLead?.id ?? null}
+      />
       {dbError ? (
         <div
           className="shrink-0 rounded-lg border border-[color:var(--border-strong)] bg-[var(--vp-surface)] px-3 py-2 text-sm text-[var(--vp-wine-classic)]"
@@ -675,6 +689,7 @@ export default async function InboxPage({
               selectedId={selectedId}
               activeTab={activeTab}
               page={page}
+              initialQuery={inboxQuery}
               renderNowMs={renderNowMs}
               tabCounts={tabCounts}
             />
@@ -719,7 +734,12 @@ export default async function InboxPage({
                         {selectedWait.label.replace("Cliente esperando ", "Esperando ")}
                       </span>
                     ) : null}
-                    {leadPanelProps ? <InboxLeadPanelDrawer {...leadPanelProps} /> : null}
+                    {leadPanelProps ? (
+                      <InboxLeadPanelDrawer
+                        key={leadPanelProps.conversationId}
+                        {...leadPanelProps}
+                      />
+                    ) : null}
                     <a href={`tel:${selected.phone_e164}`} className="grid size-[34px] place-items-center rounded-full border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] text-[var(--vp-wine)]" aria-label={`Ligar para ${selectedHeaderName}`}>
                       <CrmIcon name="call" className="text-lg" />
                     </a>
@@ -759,7 +779,7 @@ export default async function InboxPage({
         </section>
         {leadPanelProps ? (
           <div className="hidden min-h-0 xl:block">
-            <InboxLeadPanel {...leadPanelProps} />
+            <InboxLeadPanel key={leadPanelProps.conversationId} {...leadPanelProps} />
           </div>
         ) : (
           <aside className="hidden min-h-0 items-center justify-center rounded-[14px] border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] px-5 text-center text-xs text-[var(--vp-ink-muted)] xl:flex">

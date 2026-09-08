@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { ContactAvatar } from "@/components/contact-avatar";
 import { CrmIcon } from "@/components/crm-icon";
+import { brazilPhoneSearchVariants } from "@crm/shared/phone";
 
 export type InboxSidebarRow = {
   id: string;
@@ -49,6 +50,7 @@ export function InboxSidebar({
   selectedId,
   activeTab,
   page,
+  initialQuery,
   renderNowMs,
   tabCounts,
 }: {
@@ -56,13 +58,15 @@ export function InboxSidebar({
   selectedId: string | null;
   activeTab: "qualify" | "archived" | "groups" | "pipeline";
   page: number;
+  initialQuery: string;
   renderNowMs: number;
   tabCounts: { qualify: number; archived: number; groups: number; pipeline: number };
 }) {
   const router = useRouter();
   const [nowMs, setNowMs] = useState(renderNowMs);
   const [navigationPending, startNavigation] = useTransition();
-  const [q, setQ] = useState("");
+  const [searchPending, startSearch] = useTransition();
+  const [q, setQ] = useState(initialQuery);
   const [optimisticSelectedId, setOptimisticSelectedId] = useState(selectedId);
   const [readIds, setReadIds] = useState<Set<string>>(() => new Set());
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
@@ -71,12 +75,14 @@ export function InboxSidebar({
   const conversationHref = (conversationId: string) => {
     const params = new URLSearchParams({ tab: activeTab, cid: conversationId });
     if (page > 1) params.set("page", String(page));
+    if (initialQuery) params.set("q", initialQuery);
     return `/inbox?${params.toString()}`;
   };
 
   const filtered = useMemo(() => {
     const needle = norm(q.trim());
     if (!needle) return conversations;
+    const queryVariants = new Set(brazilPhoneSearchVariants(q));
     return conversations.filter((c) => {
       const hay = norm(
         [
@@ -88,9 +94,30 @@ export function InboxSidebar({
           c.leadLine,
         ].join(" "),
       );
-      return hay.includes(needle);
+      if (hay.includes(needle)) return true;
+      return brazilPhoneSearchVariants(c.phone_e164).some((variant) =>
+        queryVariants.has(variant),
+      );
     });
   }, [conversations, q]);
+
+  useEffect(() => {
+    setQ(initialQuery);
+  }, [initialQuery]);
+
+  useEffect(() => {
+    const trimmed = q.trim();
+    const digits = trimmed.replace(/\D/g, "");
+    const nextServerQuery = digits.length >= 4 ? trimmed : "";
+    if (nextServerQuery === initialQuery) return;
+
+    const timeout = window.setTimeout(() => {
+      const params = new URLSearchParams({ tab: activeTab });
+      if (nextServerQuery) params.set("q", nextServerQuery);
+      startSearch(() => router.replace(`/inbox?${params.toString()}`, { scroll: false }));
+    }, 300);
+    return () => window.clearTimeout(timeout);
+  }, [activeTab, initialQuery, q, router]);
 
   useEffect(() => {
     setOptimisticSelectedId(selectedId);
@@ -115,7 +142,7 @@ export function InboxSidebar({
 
   return (
     <div
-      aria-busy={navigationPending}
+      aria-busy={navigationPending || searchPending}
       className="relative flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-[14px] border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] shadow-[var(--sh-sm)]"
     >
       <div className="shrink-0 border-b border-[var(--vp-ink-line)] p-3">
@@ -153,6 +180,11 @@ export function InboxSidebar({
             spellCheck={false}
           />
         </label>
+        {initialQuery.replace(/\D/g, "").length >= 4 ? (
+          <p className="mt-1.5 px-2 text-[10px] text-[var(--vp-ink-muted)]">
+            Buscando o telefone em todas as listas.
+          </p>
+        ) : null}
       </div>
       <ul className="min-h-0 flex-1 divide-y divide-[var(--vp-surface-high)] overflow-y-auto overscroll-contain">
         {filtered.map((c) => {
@@ -294,9 +326,9 @@ export function InboxSidebar({
           <li className="px-4 py-8 text-center text-sm text-[var(--muted)]">Nenhum resultado.</li>
         )}
       </ul>
-      {navigationPending ? (
+      {navigationPending || searchPending ? (
         <div className="pointer-events-none absolute bottom-2 left-1/2 z-20 -translate-x-1/2 rounded-full bg-[var(--vp-wine)] px-3 py-1 text-[10px] font-medium text-[var(--vp-gold)] shadow-[var(--sh-md)]">
-          Abrindo conversa…
+          {searchPending ? "Buscando…" : "Abrindo conversa…"}
         </div>
       ) : null}
     </div>

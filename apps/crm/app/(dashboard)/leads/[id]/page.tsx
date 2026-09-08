@@ -15,6 +15,8 @@ import { ToggleTaskButton } from "../../tasks/toggle-task-button";
 import { LeadActions } from "./ui";
 import { LeadFollowUp } from "@/components/lead-follow-up";
 import { toFollowUpDTO } from "@/lib/follow-ups";
+import { formatCaptureZip, formatLeadSource } from "@/lib/lead-capture";
+import { formatCpfCnpj } from "@/lib/cpf-cnpj";
 
 const TEAM_ROLE_LABEL: Record<string, string> = {
   admin: "Admin",
@@ -45,6 +47,7 @@ export default async function LeadDetailPage({
     { data: timeline },
     { data: leadTasksRaw },
     { data: teamProfiles },
+    { data: registrations },
   ] = await Promise.all([
     crm
       .from("leads")
@@ -72,6 +75,8 @@ export default async function LeadDetailPage({
       .order("done", { ascending: true })
       .order("due_at", { ascending: true, nullsFirst: false }),
     crm.from("profiles").select("id, full_name, role").order("full_name", { ascending: true }),
+    crm.from("lead_registrations").select("id, source, cpf_cnpj")
+      .eq("lead_id", id).not("cpf_cnpj", "is", null).order("created_at", { ascending: false }).limit(5),
   ]);
 
   if (!lead) notFound();
@@ -129,8 +134,14 @@ export default async function LeadDetailPage({
             />
           </div>
           <p className="text-sm text-[var(--muted)]">
-            Status: {lead.status} · Origem: {lead.source}
+            Status: {lead.status} · Origem: {formatLeadSource(lead.source)}
           </p>
+          {lead.zip_code ? <p className="text-sm text-[var(--muted)]">CEP: {formatCaptureZip(lead.zip_code)}</p> : null}
+          {registrations?.map((registration) => registration.cpf_cnpj ? (
+            <p key={registration.id} className="text-sm text-[var(--muted)]">
+              CPF/CNPJ: {formatCpfCnpj(registration.cpf_cnpj)} · Informado no {formatLeadSource(registration.source)}
+            </p>
+          ) : null)}
           <div className="mt-3 max-w-md">
             <LeadOwnerForm leadId={id} ownerId={leadOwnerId} teamOptions={teamOptions} />
           </div>

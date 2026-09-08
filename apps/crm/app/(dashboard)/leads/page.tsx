@@ -11,6 +11,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { LeadCategoryRowEdit } from "./lead-category-row-edit";
 import { LeadsFilters } from "./leads-filters";
+import { formatLeadSource, IFOOD_CAMPAIGN } from "@/lib/lead-capture";
 
 /** Evita cache da lista após salvar (router.refresh + dados atualizados do Supabase). */
 export const dynamic = "force-dynamic";
@@ -35,13 +36,6 @@ function formatPhoneForDisplay(input: string): string {
     return `(${normalized.slice(0, 2)}) ${normalized.slice(2, 6)}-${normalized.slice(6, 10)}`;
   }
   return `(${normalized.slice(0, 2)}) ${normalized.slice(2, 7)}-${normalized.slice(7, 11)}`;
-}
-
-function formatLeadSource(source: string): string {
-  const s = source.trim().toLowerCase();
-  if (s === "whatsapp") return "WhatsApp";
-  if (s === "manual") return "Manual";
-  return source;
 }
 
 function formatLeadStatus(status: string): string {
@@ -84,6 +78,7 @@ export default async function LeadsPage({
   const clientCategory =
     typeof rawCat === "string" && isClientCategoryValue(rawCat) ? rawCat : null;
   const query = typeof sp.q === "string" ? sp.q : "";
+  const campaign = sp.campaign === IFOOD_CAMPAIGN.source ? IFOOD_CAMPAIGN.source : null;
   const requestedPage = typeof sp.page === "string" ? Number.parseInt(sp.page, 10) : 1;
   const page = Number.isFinite(requestedPage) && requestedPage > 0 ? requestedPage : 1;
 
@@ -94,7 +89,7 @@ export default async function LeadsPage({
     rows: leadRows,
     error: leadsError,
     totalCount: databaseTotalCount,
-  } = await fetchLeadListRows(crm, clientCategory, page, PAGE_SIZE);
+  } = await fetchLeadListRows(crm, clientCategory, page, PAGE_SIZE, campaign);
 
   const matchesQuery = (l: LeadListRow) =>
     query.trim().length === 0 || leadListRowMatchesQuery(leadRowSearchFields(l), query);
@@ -142,7 +137,7 @@ export default async function LeadsPage({
               lead: mapped,
               distributorLocked: true,
             };
-          });
+          }).filter((row) => !campaign || row.lead !== null);
 
           const all = [...pendingRows, ...fixedRows];
           if (query.trim().length === 0) return all;
@@ -185,7 +180,13 @@ export default async function LeadsPage({
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-lg font-semibold">{pageTitle}</h1>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h1 className="text-lg font-semibold">{pageTitle}</h1>
+          <Link href={IFOOD_CAMPAIGN.path} target="_blank" rel="noopener noreferrer"
+            className="rounded-lg border border-[var(--border)] px-3 py-2 text-xs font-semibold text-[var(--vp-wine)] hover:bg-[var(--vp-surface)]">
+            Página do evento iFood ↗
+          </Link>
+        </div>
         <p className="mt-1 text-sm text-[var(--muted)]">
           {clientCategory
             ? "Edite rede, classificação e contato na tabela. Novos contatos entram pelo "

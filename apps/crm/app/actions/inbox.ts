@@ -642,6 +642,19 @@ export async function updateConversationClassification(input: {
     targetStageId = stage.id;
   }
 
+  // A mudanca de classificacao aciona um trigger que tira o lead da etapa de
+  // entrada. O responsavel precisa ser definido antes disso; caso contrario,
+  // um usuario comercial perde a permissao de ler o proprio lead no meio da
+  // Server Action e a renderizacao seguinte falha.
+  if (targetStageId && conversation.lead_id) {
+    const { error: claimLeadError } = await crm
+      .from("leads")
+      .update({ owner_id: user.id, updated_at: new Date().toISOString() })
+      .eq("id", conversation.lead_id)
+      .is("owner_id", null);
+    if (claimLeadError) return { ok: false as const, error: claimLeadError.message };
+  }
+
   const { data: updated, error } = await crm
     .from("conversations")
     .update({
@@ -657,13 +670,6 @@ export async function updateConversationClassification(input: {
 
   if (targetStageId && conversation.lead_id) {
     const nowIso = new Date().toISOString();
-    const { error: claimLeadError } = await crm
-      .from("leads")
-      .update({ owner_id: user.id, updated_at: nowIso })
-      .eq("id", conversation.lead_id)
-      .is("owner_id", null);
-    if (claimLeadError) return { ok: false as const, error: claimLeadError.message };
-
     const { data: opportunity, error: opportunityError } = await crm
       .from("opportunities")
       .select("id, stage_id, owner_id")

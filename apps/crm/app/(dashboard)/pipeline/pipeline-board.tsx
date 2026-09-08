@@ -531,37 +531,53 @@ export function PipelineBoard({
         }
       }
 
-      const res = await updateOpportunityStage({
-        opportunityId,
-        stageId: toStageId,
-        lostReason,
-      });
-      recordPipelineBrowserMetric("move", metricStartedAt, {
-        ok: res.ok,
-        fromStageId,
-        toStageId,
-      });
-
-      setSavingId(null);
-      if (!res.ok) {
+      const rollback = () => {
         setColumns(prev);
         columnsRef.current = prev;
         setLocalStageTotals(prevTotals);
         stageTotalsRef.current = prevTotals;
         setLocalStageBreadCounts(prevBreadCounts);
         stageBreadCountsRef.current = prevBreadCounts;
-        setBannerError(res.error ?? "Não foi possível atualizar a etapa.");
+      };
+
+      try {
+        const res = await updateOpportunityStage({
+          opportunityId,
+          stageId: toStageId,
+          lostReason,
+        });
+        recordPipelineBrowserMetric("move", metricStartedAt, {
+          ok: res.ok,
+          fromStageId,
+          toStageId,
+        });
+
+        setSavingId(null);
+        if (!res.ok) {
+          rollback();
+          setBannerError(res.error ?? "Não foi possível atualizar a etapa.");
+          return false;
+        }
+        if (res.tasksCreated > 0) {
+          const n = res.tasksCreated;
+          setBannerSuccess(
+            n === 1
+              ? "1 tarefa automática criada para esta etapa."
+              : `${n} tarefas automáticas criadas para esta etapa.`,
+          );
+        }
+        return true;
+      } catch {
+        recordPipelineBrowserMetric("move", metricStartedAt, {
+          ok: false,
+          fromStageId,
+          toStageId,
+        });
+        setSavingId(null);
+        rollback();
+        setBannerError("Não foi possível atualizar a etapa. Tente novamente.");
         return false;
       }
-      if (res.tasksCreated > 0) {
-        const n = res.tasksCreated;
-        setBannerSuccess(
-          n === 1
-            ? "1 tarefa automática criada para esta etapa."
-            : `${n} tarefas automáticas criadas para esta etapa.`,
-        );
-      }
-      return true;
     },
     [],
   );

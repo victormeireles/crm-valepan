@@ -1,6 +1,7 @@
 /** Rótulos em português para `activity_logs.action` na timeline do lead. */
 export const TIMELINE_ACTIVITY_LABELS: Record<string, string> = {
   created_manual: "Lead criado manualmente",
+  registered_from_public_form: "Cadastro recebido pelo formulário público",
   created_from_whatsapp: "Lead criado via WhatsApp",
   created: "Oportunidade criada",
   stage_changed: "Etapa do funil alterada",

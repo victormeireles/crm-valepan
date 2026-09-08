@@ -26,6 +26,7 @@ export async function updateOpportunityStage(input: {
   const {
     data: { user },
   } = await serverSupabase.auth.getUser();
+  if (!user) return { ok: false as const, error: "Não autenticado" };
   const crm = (() => {
     try {
       const admin = createAdminSupabaseClient();
@@ -59,6 +60,30 @@ export async function updateOpportunityStage(input: {
     .maybeSingle();
 
   const previousStageId = oppRow?.stage_id ?? null;
+
+  // Ao sair de LEADS/ENTRADA, a politica de acesso deixa de liberar registros
+  // sem responsavel. Vincule o lead ao usuario antes de mover a oportunidade
+  // para que a propria alteracao nao torne a pagina inacessivel.
+  if (oppRow?.lead_id) {
+    const nowIso = new Date().toISOString();
+    const { error: claimLeadError } = await crm
+      .from("leads")
+      .update({ owner_id: user.id, updated_at: nowIso })
+      .eq("id", oppRow.lead_id)
+      .is("owner_id", null);
+    if (claimLeadError) return { ok: false as const, error: claimLeadError.message };
+
+    if (!oppRow.owner_id) {
+      const { error: claimOpportunityError } = await crm
+        .from("opportunities")
+        .update({ owner_id: user.id, updated_at: nowIso })
+        .eq("id", input.opportunityId)
+        .is("owner_id", null);
+      if (claimOpportunityError) {
+        return { ok: false as const, error: claimOpportunityError.message };
+      }
+    }
+  }
 
   const enteringSampleStage = isSampleStageName(stage.name);
   if (enteringSampleStage && !oppRow?.lead_id) {
@@ -162,10 +187,6 @@ export async function updateOpportunityStage(input: {
     };
   }
 
-  if (oppRow?.lead_id) {
-    revalidatePath(`/leads/${oppRow.lead_id}`);
-  }
-
   await crm.from("activity_logs").insert({
     entity_type: "opportunity",
     entity_id: input.opportunityId,
@@ -175,7 +196,7 @@ export async function updateOpportunityStage(input: {
       stage_name: stage.name,
       lost_reason: input.lostReason,
     },
-    actor_id: user?.id ?? null,
+    actor_id: user.id,
   });
 
   const leadNested = oppRow?.leads as
@@ -190,7 +211,7 @@ export async function updateOpportunityStage(input: {
     stageId: input.stageId,
     previousStageId,
     assigneeId: oppRow?.owner_id ?? leadOwner ?? null,
-    actorId: user?.id ?? null,
+    actorId: user.id,
   });
 
   if (automation.created > 0) {
@@ -204,14 +225,11 @@ export async function updateOpportunityStage(input: {
         task_titles: automation.taskTitles,
         created: automation.created,
       },
-      actor_id: user?.id ?? null,
+      actor_id: user.id,
     });
     revalidatePath("/tasks");
   }
 
-  revalidatePath("/pipeline");
-  revalidatePath("/leads");
-  revalidatePath("/inbox");
   if (enteringSampleStage) {
     revalidatePath("/samples");
     revalidatePath("/dashboard");

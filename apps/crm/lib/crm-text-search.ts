@@ -1,4 +1,4 @@
-import { normalizeBrazilPhoneToE164 } from "@crm/shared/phone";
+import { brazilPhoneSearchVariants } from "@crm/shared/phone";
 
 function normSearchText(value: string): string {
   return value
@@ -37,19 +37,11 @@ export function crmRecordMatchesQuery(
 
   if (phoneHay.includes(qDigits)) return true;
 
-  const normalizedQuery = normalizeBrazilPhoneToE164(q);
-  if (normalizedQuery) {
-    const fromQuery = phoneDigits(normalizedQuery);
-    for (const phone of fields.phones ?? []) {
-      if (!phone?.trim()) continue;
-      const stored = phoneDigits(phone);
-      if (
-        stored.length > 0 &&
-        (stored === fromQuery || stored.endsWith(fromQuery) || fromQuery.endsWith(stored))
-      ) {
-        return true;
-      }
-    }
+  const queryVariants = new Set(brazilPhoneSearchVariants(q));
+  for (const phone of fields.phones ?? []) {
+    if (!phone?.trim()) continue;
+    const storedVariants = brazilPhoneSearchVariants(phone);
+    if (storedVariants.some((variant) => queryVariants.has(variant))) return true;
   }
 
   return false;

@@ -20,6 +20,30 @@ export interface Database {
   };
   crm: {
     Tables: {
+      lead_registrations: {
+        Row: {
+          id: string;
+          lead_id: string;
+          source: string;
+          full_name: string;
+          phone_e164: string;
+          client_category: string;
+          zip_code: string;
+          notice_version: string;
+          cpf_cnpj: string | null;
+          created_at: string;
+        };
+        Insert: {
+          lead_id: string;
+          source: string;
+          full_name: string;
+          phone_e164: string;
+          client_category: string;
+          zip_code: string;
+          notice_version: string;
+          cpf_cnpj?: string | null;
+        };
+      };
       profiles: {
         Row: {
           id: string;
@@ -522,6 +546,19 @@ export interface Database {
       };
     };
     Functions: {
+      register_public_lead: {
+        Args: {
+          p_source: string;
+          p_name: string;
+          p_phone: string;
+          p_client_category: string;
+          p_zip_code: string;
+          p_request_key: string;
+          p_notice_version: string;
+          p_document?: string | null;
+        };
+        Returns: Json;
+      };
       pipeline_cards_page: {
         Args: {
           p_messages_visible_since: string;
@@ -605,9 +642,9 @@ export interface Database {
           company_state: string | null;
           weekly_bread_consumption: number | null;
           bread_weight_grams: number | null;
-          conversation_id: string;
-          last_direction: string;
-          last_sent_at: string;
+          conversation_id: string | null;
+          last_direction: string | null;
+          last_sent_at: string | null;
         }[];
       };
       dashboard_pipeline_stage_counts: {

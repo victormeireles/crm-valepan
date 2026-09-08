@@ -6,7 +6,7 @@ import { CityAutocompleteInput } from "@/components/city-autocomplete-input";
 import { CrmIcon, type CrmIconName } from "@/components/crm-icon";
 import { LeadFollowUp } from "@/components/lead-follow-up";
 import type { LeadFollowUpDTO } from "@/lib/follow-ups";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { InboxTasksPanel, type InboxTaskRow } from "./inbox-tasks-panel";
 
 type StageOption = { id: string; name: string; sortOrder: number; isFinal?: boolean };
@@ -66,38 +66,70 @@ export function InboxLeadPanel(props: InboxLeadPanelProps) {
   const [ownerId, setOwnerId] = useState(props.initialOwnerId ?? "");
   const [savingField, setSavingField] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const qualificationRef = useRef(qualification);
+  const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const saveVersionRef = useRef(0);
 
   const [volumeDraft, setVolumeDraft] = useState(qualification.weeklyBreadConsumption);
 
-  async function saveQualification(patch: Partial<QualificationState>, field: string) {
-    const next = { ...qualification, ...patch };
+  function updateQualificationDraft(patch: Partial<QualificationState>) {
+    const next = { ...qualificationRef.current, ...patch };
+    qualificationRef.current = next;
     setQualification(next);
+    return next;
+  }
+
+  function saveQualification(patch: Partial<QualificationState>, field: string) {
+    const next = updateQualificationDraft(patch);
+    const saveVersion = ++saveVersionRef.current;
     setSavingField(field);
     setError(null);
-    const result = await updateConversationLeadQualification({
-      conversationId: props.conversationId,
-      category: next.category || null,
-      stageId: next.stageId || null,
-      state: next.state || null,
-      city: next.city || null,
-      zipCode: next.zipCode || null,
-      weeklyBreadConsumption: next.weeklyBreadConsumption || null,
-      companyName: next.companyName || null,
-      cnpj: next.cnpj || null,
-      breadType: next.breadType || null,
-      breadWeightGrams: next.breadWeightGrams || null,
-    });
-    setSavingField(null);
-    if (!result.ok) setError(result.error ?? "Não foi possível salvar.");
+    const persist = async () => {
+      try {
+        const result = await updateConversationLeadQualification({
+          conversationId: props.conversationId,
+          category: next.category || null,
+          stageId: next.stageId || null,
+          state: next.state || null,
+          city: next.city || null,
+          zipCode: next.zipCode || null,
+          weeklyBreadConsumption: next.weeklyBreadConsumption || null,
+          companyName: next.companyName || null,
+          cnpj: next.cnpj || null,
+          breadType: next.breadType || null,
+          breadWeightGrams: next.breadWeightGrams || null,
+        });
+        if (!result.ok && saveVersion === saveVersionRef.current) {
+          setError(result.error ?? "Não foi possível salvar.");
+        }
+      } catch {
+        if (saveVersion === saveVersionRef.current) {
+          setError("Não foi possível salvar. Tente novamente.");
+        }
+      } finally {
+        if (saveVersion === saveVersionRef.current) setSavingField(null);
+      }
+    };
+
+    // Impede que dois onBlur concorrentes terminem fora de ordem e que uma
+    // resposta antiga sobrescreva dados digitados logo em seguida.
+    const queued = saveQueueRef.current.then(persist, persist);
+    saveQueueRef.current = queued;
+    return queued;
   }
 
   async function saveOwner(nextOwnerId: string) {
     setOwnerId(nextOwnerId);
     setSavingField("owner");
     setError(null);
-    const result = await updateLeadOwner({ leadId: props.leadId, ownerId: nextOwnerId || null });
-    setSavingField(null);
-    if (!result.ok) setError(result.error ?? "Não foi possível salvar o responsável.");
+    try {
+      const result = await updateLeadOwner({ leadId: props.leadId, ownerId: nextOwnerId || null });
+      if (!result.ok) setError(result.error ?? "Não foi possível salvar o responsável.");
+    } catch {
+      setError("Não foi possível salvar o responsável. Tente novamente.");
+    } finally {
+      setSavingField(null);
+    }
   }
 
   const orderedStages = useMemo(
@@ -111,17 +143,22 @@ export function InboxLeadPanel(props: InboxLeadPanelProps) {
     if (!props.opportunityId || !nextStage) return;
     setSavingField("nextStage");
     setError(null);
-    const result = await updateOpportunityStage({
-      opportunityId: props.opportunityId,
-      stageId: nextStage.id,
-      lostReason: null,
-    });
-    setSavingField(null);
-    if (!result.ok) {
-      setError(result.error ?? "Não foi possível mover a oportunidade.");
-      return;
+    try {
+      const result = await updateOpportunityStage({
+        opportunityId: props.opportunityId,
+        stageId: nextStage.id,
+        lostReason: null,
+      });
+      if (!result.ok) {
+        setError(result.error ?? "Não foi possível mover a oportunidade.");
+        return;
+      }
+      updateQualificationDraft({ stageId: nextStage.id });
+    } catch {
+      setError("Não foi possível mover a oportunidade. Tente novamente.");
+    } finally {
+      setSavingField(null);
     }
-    setQualification((current) => ({ ...current, stageId: nextStage.id }));
   }
 
   const controlClass = "min-w-0 flex-1 border-0 bg-transparent text-right text-[13px] font-bold text-[var(--vp-ink-body)] outline-none";
@@ -159,8 +196,8 @@ export function InboxLeadPanel(props: InboxLeadPanelProps) {
               <CityAutocompleteInput
                 className={controlClass}
                 value={qualification.city}
-                onChange={(city) => setQualification((current) => ({ ...current, city }))}
-                onBlur={() => void saveQualification({ city: qualification.city }, "city")}
+                  onChange={(city) => updateQualificationDraft({ city })}
+                  onBlur={() => void saveQualification({ city: qualificationRef.current.city }, "city")}
                 stateFilter={qualification.state}
                 placeholder="Não informada"
                 disabled={savingField === "city"}
@@ -256,7 +293,7 @@ export function InboxLeadPanelDrawer(props: InboxLeadPanelProps) {
             <button type="button" className="absolute right-5 top-5 z-10 grid size-9 place-items-center rounded-full bg-[var(--vp-surface)] text-[var(--vp-wine)]" onClick={() => setOpen(false)} aria-label="Fechar ficha">
               <CrmIcon name="close" className="text-xl" />
             </button>
-            <InboxLeadPanel {...props} />
+            <InboxLeadPanel key={props.conversationId} {...props} />
           </div>
         </div>
       ) : null}

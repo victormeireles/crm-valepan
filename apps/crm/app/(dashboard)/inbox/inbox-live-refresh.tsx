@@ -10,8 +10,10 @@ const REFRESH_COOLDOWN_MS = 2_000;
 /** Atualiza o Inbox apenas quando o Supabase informa uma mudança relevante. */
 export function InboxLiveRefresh({
   selectedConversationId,
+  selectedLeadId,
 }: {
   selectedConversationId: string | null;
+  selectedLeadId: string | null;
 }) {
   const router = useRouter();
   const supabase = useMemo(() => createBrowserSupabaseClient(), []);
@@ -113,12 +115,27 @@ export function InboxLiveRefresh({
       .on(
         "postgres_changes",
         { event: "UPDATE", schema: "crm", table: "leads" },
-        scheduleRefresh,
+        (payload) => {
+          const changedLeadId =
+            (payload.new as { id?: string } | null)?.id ??
+            (payload.old as { id?: string } | null)?.id ??
+            null;
+          // A ficha selecionada já aplica essas mudanças localmente. Recarregar
+          // todo o Inbox no meio da digitação interrompe o formulário e soma uma
+          // renderização pesada à Server Action.
+          if (!selectedLeadId || changedLeadId !== selectedLeadId) scheduleRefresh();
+        },
       )
       .on(
         "postgres_changes",
         { event: "*", schema: "crm", table: "opportunities" },
-        scheduleRefresh,
+        (payload) => {
+          const changedLeadId =
+            (payload.new as { lead_id?: string } | null)?.lead_id ??
+            (payload.old as { lead_id?: string } | null)?.lead_id ??
+            null;
+          if (!selectedLeadId || changedLeadId !== selectedLeadId) scheduleRefresh();
+        },
       )
       .on(
         "postgres_changes",
@@ -132,7 +149,7 @@ export function InboxLiveRefresh({
       document.removeEventListener("visibilitychange", onVis);
       void supabase.removeChannel(channel);
     };
-  }, [router, selectedConversationId, supabase]);
+  }, [router, selectedConversationId, selectedLeadId, supabase]);
 
   return callAlert ? (
     <div

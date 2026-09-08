@@ -51,8 +51,11 @@ export async function fetchLeadListRows(
   clientCategory: string | null,
   page: number,
   pageSize: number,
+  campaign: string | null = null,
 ): Promise<{ rows: LeadListRow[]; error: string | null; totalCount: number }> {
-  let query = crm.from("leads").select(LEAD_LIST_SELECT_WITH_NETWORK, { count: "exact" });
+  const campaignJoin = campaign ? ", lead_registrations!inner(source)" : "";
+  let query = crm.from("leads").select(LEAD_LIST_SELECT_WITH_NETWORK + campaignJoin, { count: "exact" });
+  if (campaign) query = query.eq("lead_registrations.source", campaign);
   if (clientCategory === "distribuidor") {
     query = query
       .or("client_category.eq.distribuidor,distributor_id.not.is.null,network_type.eq.distribuidor")
@@ -65,12 +68,13 @@ export async function fetchLeadListRows(
     .order("updated_at", { ascending: false })
     .range((page - 1) * pageSize, page * pageSize - 1);
 
-  const { data, error, count } = await query;
+  const { data, error, count } = await query.returns<LeadListRow[]>();
 
   if (error && isMissingNetworkTypeColumnError(error)) {
     let fallbackQuery = crm
       .from("leads")
-      .select(LEAD_LIST_SELECT_BASE, { count: "exact" });
+      .select(LEAD_LIST_SELECT_BASE + campaignJoin, { count: "exact" });
+    if (campaign) fallbackQuery = fallbackQuery.eq("lead_registrations.source", campaign);
     if (clientCategory === "distribuidor") {
       fallbackQuery = fallbackQuery
         .or("client_category.eq.distribuidor,distributor_id.not.is.null")
@@ -84,7 +88,7 @@ export async function fetchLeadListRows(
     fallbackQuery = fallbackQuery
       .order("updated_at", { ascending: false })
       .range((page - 1) * pageSize, page * pageSize - 1);
-    const fallback = await fallbackQuery;
+    const fallback = await fallbackQuery.returns<LeadListRow[]>();
     if (fallback.error) {
       return { rows: [], error: fallback.error.message, totalCount: 0 };
     }

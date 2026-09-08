@@ -54,17 +54,23 @@ export function ConversationClassificationSelect({
           void (async () => {
             setLoading(true);
             setErr(null);
-            const res = await updateConversationClassification({
-              conversationId,
-              classification: next.length > 0 ? next : null,
-            });
-            setLoading(false);
-            if (!res.ok) {
-              setErr(res.error ?? "Erro");
+            try {
+              const res = await updateConversationClassification({
+                conversationId,
+                classification: next.length > 0 ? next : null,
+              });
+              if (!res.ok) {
+                setErr(res.error ?? "Erro");
+                setValue(normalizeValue(classification));
+                return;
+              }
+              router.refresh();
+            } catch {
+              setErr("Não foi possível salvar a classificação. Tente novamente.");
               setValue(normalizeValue(classification));
-              return;
+            } finally {
+              setLoading(false);
             }
-            router.refresh();
           })();
         }}
         className="min-w-[16rem] rounded border border-[var(--border)] bg-[var(--vp-paper-pure)] px-2 py-1.5 text-xs text-[var(--foreground)]"

@@ -868,26 +868,33 @@ export async function updateConversationLeadQualification(input: {
       .is("owner_id", null);
     if (claimLeadErr) return { ok: false as const, error: claimLeadErr.message };
 
-    const { data: stage, error: stageErr } = await crm
-      .from("pipeline_stages")
-      .select("id")
-      .eq("id", stageId)
-      .maybeSingle();
+    const [stageResult, opportunityResult] = await Promise.all([
+      crm
+        .from("pipeline_stages")
+        .select("id")
+        .eq("id", stageId)
+        .maybeSingle(),
+      crm
+        .from("opportunities")
+        .select("id, stage_id, owner_id")
+        .eq("lead_id", leadId)
+        .order("updated_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+    ]);
+    const { data: stage, error: stageErr } = stageResult;
     if (stageErr) return { ok: false as const, error: stageErr.message };
     if (!stage?.id) return { ok: false as const, error: "Etapa do funil inválida." };
-
-    const { data: opportunity } = await crm
-      .from("opportunities")
-      .select("id, stage_id, owner_id")
-      .eq("lead_id", leadId)
-      .order("updated_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    if (opportunityResult.error) {
+      return { ok: false as const, error: opportunityResult.error.message };
+    }
+    const opportunity = opportunityResult.data;
 
     let opportunityId: string | null = opportunity?.id ?? null;
     const previousStageId = opportunity?.stage_id ?? null;
+    const stageChanged = previousStageId !== stage.id;
 
-    if (opportunity?.id) {
+    if (opportunity?.id && stageChanged) {
       const { error: oppUpdateErr } = await crm
         .from("opportunities")
         .update({
@@ -915,7 +922,7 @@ export async function updateConversationLeadQualification(input: {
       opportunityId = insertedOpp.id;
     }
 
-    if (opportunityId) {
+    if (opportunityId && stageChanged) {
       const automation = await applyPipelineStageEntryAutomations(crm, {
         opportunityId,
         leadId,
@@ -941,10 +948,6 @@ export async function updateConversationLeadQualification(input: {
     }
   }
 
-  revalidatePath("/inbox");
-  revalidatePath("/leads", "page");
-  revalidatePath("/leads", "layout");
-  revalidatePath("/pipeline");
   return { ok: true as const };
 }
 
