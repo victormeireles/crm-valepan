@@ -1,4 +1,5 @@
 import { createServerClient } from "@supabase/ssr";
+import { isAuthRetryableFetchError } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import { cache } from "react";
 import type { Database } from "@/lib/database.types";
@@ -44,7 +45,12 @@ export const getServerUser = cache(async () => {
   const supabase = await createServerSupabaseClient();
   const {
     data: { user },
+    error,
   } = await supabase.auth.getUser();
+  // Não confundir uma oscilação do serviço de autenticação com logout. Em uma
+  // atualização do App Router, lançar o erro mantém a URL/tela em vez de mandar
+  // o usuário ao login e, depois, ao Dashboard.
+  if (error && isAuthRetryableFetchError(error)) throw error;
   return user;
 });
 

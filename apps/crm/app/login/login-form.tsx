@@ -1,13 +1,14 @@
 "use client";
 
 import { usernameToLoginEmail } from "@/lib/auth/login-email";
+import { safeAuthenticatedPath } from "@/lib/auth/session-navigation";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 
 export function LoginForm() {
   const search = useSearchParams();
-  const next = search.get("next") ?? "/dashboard";
+  const next = safeAuthenticatedPath(search.get("next"));
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);

@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { signOutAction } from "@/app/actions/auth";
 import { DashboardNav } from "./dashboard-nav";
 import { DashboardContextSearch } from "./dashboard-context-search";
+import { SessionKeepAlive } from "@/lib/auth/session-keep-alive";
 
 const roleLabel: Record<string, string> = {
   admin: "Administrador",
@@ -31,6 +32,7 @@ export default async function DashboardLayout({
 
   return (
     <div className="flex min-h-screen flex-col bg-[var(--vp-paper)]">
+      <SessionKeepAlive />
       <header className="shrink-0 border-b border-[rgba(199,166,77,0.35)] bg-[var(--vp-wine)] shadow-[0_8px_28px_rgba(35,0,4,0.35)]">
         <div className="mx-auto flex min-h-[var(--header-height)] max-w-[min(100%,var(--container-wide))] flex-wrap items-center justify-between gap-4 px-4 py-3">
           <div className="flex min-w-0 flex-1 flex-wrap items-center gap-4 md:gap-6">

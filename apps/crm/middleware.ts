@@ -1,15 +1,17 @@
 import { createServerClient } from "@supabase/ssr";
+import { isAuthRetryableFetchError } from "@supabase/supabase-js";
 import { NextResponse, type NextRequest } from "next/server";
+import {
+  isProtectedRoute,
+  requestReturnPath,
+  safeAuthenticatedPath,
+} from "@/lib/auth/session-navigation";
 
-const protectedPrefixes = [
-  "/dashboard",
-  "/inbox",
-  "/leads",
-  "/pipeline",
-  "/tasks",
-  "/distributors",
-  "/samples",
-];
+function redirectWithResponseCookies(destination: URL, response: NextResponse) {
+  const redirectResponse = NextResponse.redirect(destination);
+  response.cookies.getAll().forEach((cookie) => redirectResponse.cookies.set(cookie));
+  return redirectResponse;
+}
 
 export async function middleware(request: NextRequest) {
   // Passar o `request` inteiro — não `{ headers }` só — para o Next preservar
@@ -24,13 +26,7 @@ export async function middleware(request: NextRequest) {
   }
 
   const path = request.nextUrl.pathname;
-  const isProtected = protectedPrefixes.some((p) => path.startsWith(p));
-
-  // Todas as rotas protegidas abaixo pertencem ao route group `(dashboard)`,
-  // cujo layout valida a sessão e redireciona para /login. Repetir getUser no
-  // middleware acrescentava uma chamada remota ao Supabase em toda navegação
-  // (e chegava a consumir segundos quando a rede oscilava).
-  if (isProtected) return response;
+  const isProtected = isProtectedRoute(path);
 
   const supabase = createServerClient(url, anon, {
     cookies: {
@@ -49,21 +45,36 @@ export async function middleware(request: NextRequest) {
     },
   });
 
-  let user: { id: string } | null = null;
+  let isAuthenticated = false;
   try {
-    const {
-      data: { user: authUser },
-    } = await supabase.auth.getUser();
-    user = authUser ? { id: authUser.id } : null;
+    // getClaims renova uma sessão vencendo e, com chaves assimétricas, valida o
+    // JWT localmente. Isso preserva os cookies sem impor uma chamada remota em
+    // toda navegação, que era o problema de desempenho da implementação antiga.
+    const { data, error } = await supabase.auth.getClaims();
+    if (error) {
+      if (isAuthRetryableFetchError(error)) {
+        console.warn("[middleware] autenticação indisponível temporariamente; mantendo a rota.", error);
+        return response;
+      }
+    } else {
+      isAuthenticated = Boolean(data?.claims?.sub);
+    }
   } catch (e) {
-    // Em instabilidade de rede (ECONNRESET/fetch failed), não quebrar a navegação com loop de login.
-    // O app continuará e as páginas protegidas farão validação própria no server quando necessário.
-    console.warn("[middleware] supabase.auth.getUser falhou; seguindo sem redirect.", e);
+    // Uma falha de rede não deve transformar uma atualização silenciosa em
+    // troca de tela. A rota atual continua e pode tentar novamente depois.
+    console.warn("[middleware] validação da sessão falhou; mantendo a rota.", e);
     return response;
   }
 
-  if (path === "/login" && user) {
-    return NextResponse.redirect(new URL("/dashboard", request.url));
+  if (isProtected && !isAuthenticated) {
+    const redirectUrl = new URL("/login", request.url);
+    redirectUrl.searchParams.set("next", requestReturnPath(request.nextUrl));
+    return redirectWithResponseCookies(redirectUrl, response);
+  }
+
+  if (path === "/login" && isAuthenticated) {
+    const destination = safeAuthenticatedPath(request.nextUrl.searchParams.get("next"));
+    return redirectWithResponseCookies(new URL(destination, request.url), response);
   }
 
   return response;
