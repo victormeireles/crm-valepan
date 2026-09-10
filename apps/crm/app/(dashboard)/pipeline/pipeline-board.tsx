@@ -25,7 +25,17 @@ import { LeadFollowUp } from "@/components/lead-follow-up";
 import type { LeadFollowUpDTO } from "@/lib/follow-ups";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import {
+  createContext,
+  memo,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import { PipelineSignalBadges } from "./pipeline-signal-badges";
 
 export type PipelineStageDTO = {
@@ -58,6 +68,9 @@ export type PipelineCardDTO = {
   followUp: LeadFollowUpDTO | null;
   ownerId: string | null;
 };
+
+const PipelineClockContext = createContext(0);
+const PipelineDragEnabledContext = createContext(false);
 
 function groupByStage(
   stages: PipelineStageDTO[],
@@ -163,7 +176,86 @@ function DroppableColumn({
   );
 }
 
-function DraggableCard({
+function VirtualizedPipelineCard({
+  children,
+  forceMount,
+}: {
+  children: React.ReactNode;
+  forceMount: boolean;
+}) {
+  const containerRef = useRef<HTMLLIElement | null>(null);
+  const measuredHeightRef = useRef(160);
+  const [isNearViewport, setIsNearViewport] = useState(true);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || forceMount || typeof IntersectionObserver === "undefined") {
+      setIsNearViewport(true);
+      return;
+    }
+
+    const scrollRoot = container.closest("ul");
+    const observer = new IntersectionObserver(
+      ([entry]) => setIsNearViewport(entry?.isIntersecting ?? false),
+      { root: scrollRoot, rootMargin: "320px 0px" },
+    );
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [forceMount]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || !isNearViewport || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(([entry]) => {
+      const height = entry?.borderBoxSize?.[0]?.blockSize ?? entry?.contentRect.height;
+      if (height && height > 0) measuredHeightRef.current = height;
+    });
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [isNearViewport]);
+
+  const shouldRender = forceMount || isNearViewport;
+  return (
+    <li
+      ref={containerRef}
+      style={shouldRender ? undefined : { height: measuredHeightRef.current }}
+      aria-hidden={shouldRender ? undefined : true}
+    >
+      {shouldRender ? children : null}
+    </li>
+  );
+}
+
+type PipelineCardProps = {
+  card: PipelineCardDTO;
+  stageId: string;
+  stages: PipelineStageDTO[];
+  onOpen: (card: PipelineCardDTO) => void;
+  onOpenFollowUp: (card: PipelineCardDTO) => void;
+  onMove: (opportunityId: string, fromStageId: string, toStageId: string) => void;
+  onClose: (card: PipelineCardDTO, stageId: string) => void;
+};
+
+type DraggableBinding = ReturnType<typeof useDraggable>;
+
+const DraggableCard = memo(function DraggableCard(props: PipelineCardProps) {
+  const dragEnabled = useContext(PipelineDragEnabledContext);
+  return dragEnabled ? <DesktopDraggableCard {...props} /> : <PipelineCardContent {...props} drag={null} />;
+});
+
+function DesktopDraggableCard(props: PipelineCardProps) {
+  const drag = useDraggable({
+    id: `opp:${props.card.id}`,
+    data: {
+      type: "opportunity" as const,
+      opportunityId: props.card.id,
+      stageId: props.stageId,
+    },
+  });
+  return <PipelineCardContent {...props} drag={drag} />;
+}
+
+function PipelineCardContent({
   card,
   stageId,
   stages,
@@ -171,31 +263,13 @@ function DraggableCard({
   onOpenFollowUp,
   onMove,
   onClose,
-  nowMs,
-}: {
-  card: PipelineCardDTO;
-  stageId: string;
-  stages: PipelineStageDTO[];
-  onOpen: () => void;
-  onOpenFollowUp: (card: PipelineCardDTO) => void;
-  onMove: (opportunityId: string, fromStageId: string, toStageId: string) => void;
-  onClose: (card: PipelineCardDTO, stageId: string) => void;
-  nowMs: number;
-}) {
-  const dragEnabled = useDesktopDrag();
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
-    id: `opp:${card.id}`,
-    disabled: !dragEnabled,
-    data: {
-      type: "opportunity" as const,
-      opportunityId: card.id,
-      stageId,
-    },
-  });
+  drag,
+}: PipelineCardProps & { drag: DraggableBinding | null }) {
+  const [actionsOpen, setActionsOpen] = useState(false);
 
-  const style = transform
+  const style = drag?.transform
     ? {
-        transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`,
+        transform: `translate3d(${drag.transform.x}px, ${drag.transform.y}px, 0)`,
       }
     : undefined;
 
@@ -218,24 +292,24 @@ function DraggableCard({
   const stopPointer = (event: React.SyntheticEvent) => event.stopPropagation();
 
   return (
-    <li
-      ref={setNodeRef}
+    <div
+      ref={drag?.setNodeRef}
       style={style}
-      {...(dragEnabled ? listeners : {})}
-      {...(dragEnabled ? attributes : {})}
+      {...(drag?.listeners ?? {})}
+      {...(drag?.attributes ?? {})}
       role="button"
       className={`cursor-pointer rounded-xl border border-l-[3px] border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] px-3 pb-2.5 pt-[11px] shadow-[var(--sh-sm)] md:touch-none md:cursor-grab md:active:cursor-grabbing ${borderSignal} ${
-        isDragging ? "opacity-40" : ""
+        drag?.isDragging ? "opacity-40" : ""
       }`}
       tabIndex={0}
       aria-label={`${card.personName}. Abrir oportunidade`}
       title={[card.personName, formattedPhone, card.companyLine].filter(Boolean).join(" · ")}
-      onClick={onOpen}
+      onClick={() => onOpen(card)}
       onKeyDown={(event) => {
         if (event.currentTarget !== event.target) return;
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
-          onOpen();
+          onOpen(card);
         }
       }}
     >
@@ -267,14 +341,7 @@ function DraggableCard({
           ) : null}
         </div>
       ) : null}
-      <PipelineSignalBadges
-        lastDirection={card.lastDirection}
-        lastSentAt={card.lastSentAt}
-        opportunityUpdatedAt={card.opportunityUpdatedAt}
-        nextActionAt={card.nextActionAt}
-        followUpTitle={card.followUp?.title ?? null}
-        nowMs={nowMs}
-      />
+      <CardSignalBadges card={card} />
       <div className="mt-2.5 flex items-center justify-between gap-1.5 border-t border-[var(--vp-surface-high)] pt-2">
         <span className="inline-flex min-w-0 items-center gap-1.5">
           <span className="grid size-5 shrink-0 place-items-center rounded-full bg-[var(--vp-gold)] text-[9px] font-extrabold text-[var(--vp-wine)]">{ownerInitials || "—"}</span>
@@ -308,35 +375,63 @@ function DraggableCard({
               <CrmIcon name="event" className="text-[17px]" />
             </button>
           ) : null}
-          <details className="group relative" onPointerDown={stopPointer} onClick={stopPointer}>
+          <details
+            className="group relative"
+            open={actionsOpen}
+            onToggle={(event) => setActionsOpen(event.currentTarget.open)}
+            onPointerDown={stopPointer}
+            onClick={stopPointer}
+          >
             <summary className="grid size-11 cursor-pointer list-none place-items-center rounded-lg bg-[var(--vp-surface)] text-[var(--vp-wine)] marker:content-none md:size-7 [&::-webkit-details-marker]:hidden" aria-label="Mais ações">
               <CrmIcon name="more_horiz" className="text-[17px]" />
             </summary>
-            <div className="absolute bottom-full right-0 z-30 mb-1 min-w-52 overflow-hidden rounded-xl border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] py-1 shadow-[var(--sh-md)]">
-              <p className="px-3 py-1 text-[10px] font-extrabold uppercase tracking-[0.1em] text-[var(--vp-ink-soft)] md:hidden">Mover para</p>
-              {stages.filter((stage) => !stage.is_final && stage.id !== stageId).map((stage) => (
+            {actionsOpen ? (
+              <div className="absolute bottom-full right-0 z-30 mb-1 min-w-52 overflow-hidden rounded-xl border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] py-1 shadow-[var(--sh-md)]">
+                <p className="px-3 py-1 text-[10px] font-extrabold uppercase tracking-[0.1em] text-[var(--vp-ink-soft)] md:hidden">Mover para</p>
+                {stages.filter((stage) => !stage.is_final && stage.id !== stageId).map((stage) => (
+                  <button
+                    key={stage.id}
+                    type="button"
+                    className="block min-h-11 w-full px-3 text-left text-xs text-[var(--vp-ink-muted)] hover:bg-[var(--vp-surface)] md:hidden"
+                    onClick={() => {
+                      setActionsOpen(false);
+                      onMove(card.id, stageId, stage.id);
+                    }}
+                  >
+                    {stage.name}
+                  </button>
+                ))}
                 <button
-                  key={stage.id}
                   type="button"
-                  className="block min-h-11 w-full px-3 text-left text-xs text-[var(--vp-ink-muted)] hover:bg-[var(--vp-surface)] md:hidden"
-                  onClick={() => onMove(card.id, stageId, stage.id)}
+                  className="flex min-h-11 w-full items-center gap-2 px-3 text-left text-xs font-semibold text-[var(--vp-error)] hover:bg-[var(--vp-surface)]"
+                  onClick={() => {
+                    setActionsOpen(false);
+                    onClose(card, stageId);
+                  }}
                 >
-                  {stage.name}
+                  <CrmIcon name="block" className="text-base" />
+                  Encerrar oportunidade
                 </button>
-              ))}
-              <button
-                type="button"
-                className="flex min-h-11 w-full items-center gap-2 px-3 text-left text-xs font-semibold text-[var(--vp-error)] hover:bg-[var(--vp-surface)]"
-                onClick={() => onClose(card, stageId)}
-              >
-                <CrmIcon name="block" className="text-base" />
-                Encerrar oportunidade
-              </button>
-            </div>
+              </div>
+            ) : null}
           </details>
         </span>
       </div>
-    </li>
+    </div>
+  );
+}
+
+function CardSignalBadges({ card }: { card: PipelineCardDTO }) {
+  const nowMs = useContext(PipelineClockContext);
+  return (
+    <PipelineSignalBadges
+      lastDirection={card.lastDirection}
+      lastSentAt={card.lastSentAt}
+      opportunityUpdatedAt={card.opportunityUpdatedAt}
+      nextActionAt={card.nextActionAt}
+      followUpTitle={card.followUp?.title ?? null}
+      nowMs={nowMs}
+    />
   );
 }
 
@@ -376,6 +471,7 @@ export function PipelineBoard({
   currentUserId: string | null;
 }) {
   const router = useRouter();
+  const dragEnabled = useDesktopDrag();
   const activeStages = useMemo(() => stages.filter((stage) => !stage.is_final), [stages]);
   const finalStages = useMemo(() => stages.filter((stage) => stage.is_final), [stages]);
   const closedCards = useMemo(
@@ -670,16 +766,34 @@ export function PipelineBoard({
     setClosingReason("");
     setBannerError(null);
   }
+  const openCard = useCallback((card: PipelineCardDTO) => {
+    if (card.lead_id) router.push(`/leads/${card.lead_id}`);
+  }, [router]);
+  const openCardFollowUp = useCallback((card: PipelineCardDTO) => {
+    setFollowUpCardId(card.id);
+  }, []);
+  const moveCardFromMenu = useCallback((opportunityId: string, fromStageId: string, toStageId: string) => {
+    void commitMove(opportunityId, fromStageId, toStageId, null);
+  }, [commitMove]);
+  const requestClose = useCallback((card: PipelineCardDTO, fromStageId: string) => {
+    setPendingClose({
+      opportunityId: card.id,
+      fromStageId,
+      personName: card.personName,
+    });
+  }, []);
   const maxWeeklyBreadCount = Math.max(0, ...activeStages.map((stage) => localStageBreadCounts[stage.id] ?? 0));
 
   return (
-    <DndContext
-      id="pipeline-board"
-      sensors={sensors}
-      collisionDetection={closestCorners}
-      onDragStart={handleDragStart}
-      onDragEnd={handleDragEnd}
-    >
+    <PipelineClockContext.Provider value={nowMs}>
+      <PipelineDragEnabledContext.Provider value={dragEnabled}>
+        <DndContext
+          id="pipeline-board"
+          sensors={sensors}
+          collisionDetection={closestCorners}
+          onDragStart={handleDragStart}
+          onDragEnd={handleDragEnd}
+        >
       {bannerError ? (
         <p className="rounded border border-[var(--vp-error)] bg-[var(--card)] px-3 py-2 text-sm text-[var(--vp-error)]">
           {bannerError}
@@ -710,25 +824,20 @@ export function PipelineBoard({
                 maxWeeklyBreadCount={maxWeeklyBreadCount}
               >
                 {items.map((card) => (
-                  <DraggableCard
+                  <VirtualizedPipelineCard
                     key={card.id}
-                    card={card}
-                    stageId={stage.id}
-                    stages={activeStages}
-                    nowMs={nowMs}
-                    onOpen={() => card.lead_id && router.push(`/leads/${card.lead_id}`)}
-                    onOpenFollowUp={(selectedCard) => setFollowUpCardId(selectedCard.id)}
-                    onMove={(opportunityId, fromStageId, toStageId) => {
-                      void commitMove(opportunityId, fromStageId, toStageId, null);
-                    }}
-                    onClose={(selectedCard, fromStageId) =>
-                      setPendingClose({
-                        opportunityId: selectedCard.id,
-                        fromStageId,
-                        personName: selectedCard.personName,
-                      })
-                    }
-                  />
+                    forceMount={items.length <= 15 || activeCard !== null}
+                  >
+                    <DraggableCard
+                      card={card}
+                      stageId={stage.id}
+                      stages={activeStages}
+                      onOpen={openCard}
+                      onOpenFollowUp={openCardFollowUp}
+                      onMove={moveCardFromMenu}
+                      onClose={requestClose}
+                    />
+                  </VirtualizedPipelineCard>
                 ))}
                 {items.length === 0 ? (
                   <li className="px-2 py-6 text-center text-xs text-[var(--vp-ink-soft)]">
@@ -921,6 +1030,8 @@ export function PipelineBoard({
           </ul>
         </details>
       ) : null}
-    </DndContext>
+        </DndContext>
+      </PipelineDragEnabledContext.Provider>
+    </PipelineClockContext.Provider>
   );
 }

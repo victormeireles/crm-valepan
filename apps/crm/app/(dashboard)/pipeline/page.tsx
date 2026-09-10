@@ -18,7 +18,7 @@ import { indexFollowUpsByLead, type LeadFollowUpDTO } from "@/lib/follow-ups";
 import { isPhoneSearchQuery } from "@/lib/phone-search-query";
 
 export const dynamic = "force-dynamic";
-const CARDS_PER_STAGE = 20;
+const INITIAL_CARDS_PER_STAGE = 10;
 
 function formatTeamOption(p: { id: string; full_name: string | null; role: string }) {
   const name = (p.full_name ?? "").trim() || "Sem nome";
@@ -136,7 +136,7 @@ export default async function PipelinePage({
       ...commonFilters,
       p_owner_user_id: ownerUserId,
       p_offset: 0,
-      p_limit: CARDS_PER_STAGE,
+      p_limit: INITIAL_CARDS_PER_STAGE,
     }),
     phoneSearch
       ? skippedAggregate
@@ -266,7 +266,7 @@ export default async function PipelinePage({
     stageBreadCounts[stageId] = (stageBreadCounts[stageId] ?? 0) + Number(row.volume_kg);
   }
   const initialCards = stages.flatMap((stage) =>
-    pagedCards.filter((card) => card.stage_id === stage.id).slice(0, CARDS_PER_STAGE),
+    pagedCards.filter((card) => card.stage_id === stage.id).slice(0, INITIAL_CARDS_PER_STAGE),
   );
   const totalCount = ((compactStageCounts ?? allStageCountRows ?? []) as PipelineStageCountRow[]).reduce(
     (total: number, row: PipelineStageCountRow) => total + Number(row.card_count),

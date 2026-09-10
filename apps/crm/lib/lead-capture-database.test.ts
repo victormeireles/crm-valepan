@@ -38,6 +38,11 @@ beforeAll(async () => {
   await db.exec(sql("20260907120000_public_lead_registration.sql"));
   await db.exec(sql("20260907121000_pipeline_public_registrations.sql"));
   await db.exec(sql("20260908120000_public_lead_cpf_cnpj.sql"));
+  await db.exec(sql("20260908160000_phone_search_match.sql"));
+  await db.exec(sql("20260908161000_pipeline_phone_search.sql"));
+  await db.exec(sql("20260910153000_pipeline_indexed_search.sql")
+    .replace("create extension if not exists pg_trgm with schema extensions;", "")
+    .replace(/create index if not exists idx_[\s\S]*?extensions\.gin_trgm_ops\);/g, ""));
 }, 30000);
 afterAll(async () => { await db?.close(); });
 
@@ -66,6 +71,17 @@ describe.sequential("gravação pública transacional", () => {
     expect(cards.rows[0]).toMatchObject({ conversation_id: null, last_direction: null, last_sent_at: null });
     expect((await db.query("select * from crm.pipeline_filtered_cards(now() - interval '1 year', null, 'awaiting_reply')")).rows).toHaveLength(0);
     expect((await db.query("select * from crm.pipeline_filtered_cards(now() - interval '1 year', null, null, null, 'distribuidor')")).rows).toHaveLength(0);
+  });
+  it("busca cartões por nome, empresa e telefone normalizado", async () => {
+    await db.exec(`
+      insert into crm.companies(name) values ('Padaria Horizonte');
+      update crm.leads set company_id = (select id from crm.companies where name = 'Padaria Horizonte')
+      where phone_e164 = '+5511987654321';
+    `);
+    expect((await db.query("select * from crm.pipeline_filtered_cards(now() - interval '1 year', null, null, null, null, 'Ana Souza')")).rows).toHaveLength(1);
+    expect((await db.query("select * from crm.pipeline_filtered_cards(now() - interval '1 year', null, null, null, null, 'Horizonte')")).rows).toHaveLength(1);
+    expect((await db.query("select * from crm.pipeline_filtered_cards(now() - interval '1 year', null, null, null, null, '98765-4321')")).rows).toHaveLength(1);
+    expect((await db.query("select * from crm.pipeline_filtered_cards(now() - interval '1 year', null, null, null, null, '1187654321')")).rows).toHaveLength(1);
   });
   it("preserva dados comerciais e etapa de quem já existe, registrando a participação", async () => {
     await db.exec(`

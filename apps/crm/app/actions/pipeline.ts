@@ -16,6 +16,7 @@ import { logPipelinePerformance, timePipelineOperation } from "@/lib/pipeline-pe
 import { indexFollowUpsByLead, type LeadFollowUpDTO } from "@/lib/follow-ups";
 import { isPhoneSearchQuery } from "@/lib/phone-search-query";
 
+const INITIAL_PAGE_SIZE = 10;
 const PAGE_SIZE = 20;
 type PipelineCardRow = Database["crm"]["Functions"]["pipeline_cards"]["Returns"][number];
 type Crm = ReturnType<typeof crmTables>;
@@ -105,7 +106,7 @@ export async function loadPipelineFilterSnapshot(input: { filters: PipelinePageF
         ...common,
         p_owner_user_id: input.filters.ownerUserId,
         p_offset: 0,
-        p_limit: PAGE_SIZE,
+        p_limit: INITIAL_PAGE_SIZE,
       })),
       timePipelineOperation("profiles", crm.from("profiles").select("id, full_name")),
     ]);
@@ -179,7 +180,7 @@ export async function loadPipelineFilterSnapshot(input: { filters: PipelinePageF
         ...common,
         p_owner_user_id: input.filters.ownerUserId,
         p_offset: 0,
-        p_limit: PAGE_SIZE,
+        p_limit: INITIAL_PAGE_SIZE,
       })),
       timePipelineOperation("all_stage_counts", crm.rpc("pipeline_stage_counts", { ...common, p_owner_user_id: null })),
       timePipelineOperation("visible_stage_counts", crm.rpc("pipeline_stage_counts", {
