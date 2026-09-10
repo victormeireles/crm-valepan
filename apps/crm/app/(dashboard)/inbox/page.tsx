@@ -103,11 +103,12 @@ function compactHistoryItem(row: { kind: string; event_id: string; at: string; d
 export default async function InboxPage({
   searchParams,
 }: {
-  searchParams: Promise<{ cid?: string; tab?: string; page?: string; q?: string }>;
+  searchParams: Promise<{ cid?: string; tab?: string; page?: string; q?: string; lookup?: string }>;
 }) {
   const renderNowMs = Date.now();
   const params = await searchParams;
   const { cid, tab } = params;
+  const isPhoneLookupSelection = params.lookup === "1";
   const inboxQuery = typeof params.q === "string" ? params.q.trim() : "";
   const inboxQueryDigits = inboxQuery.replace(/\D/g, "");
   const phoneSearchVariants =
@@ -232,14 +233,14 @@ export default async function InboxPage({
       .from("conversations")
       .select(conversationSelect)
       .eq("id", cid)
-      .eq("conversation_kind", conversationKind)
+      .eq("conversation_kind", isPhoneLookupSelection ? "lead" : conversationKind)
       .gte("last_message_at", INBOX_MESSAGES_VISIBLE_SINCE);
-    if (!isPhoneSearch && activeTab === "qualify") {
+    if (!isPhoneLookupSelection && !isPhoneSearch && activeTab === "qualify") {
       selectedQuery = selectedQuery.is("leads.excluded_from_pipeline_at", null);
       if (entryStageIds.length > 0) {
         selectedQuery = selectedQuery.in("leads.opportunities.stage_id", entryStageIds);
       }
-    } else if (!isPhoneSearch && activeTab === "pipeline") {
+    } else if (!isPhoneLookupSelection && !isPhoneSearch && activeTab === "pipeline") {
       selectedQuery = selectedQuery.is("leads.excluded_from_pipeline_at", null);
       if (entryStageIds.length > 0) {
         selectedQuery = selectedQuery.not(
@@ -248,7 +249,7 @@ export default async function InboxPage({
           `(${entryStageIds.join(",")})`,
         );
       }
-    } else if (!isPhoneSearch && activeTab === "archived") {
+    } else if (!isPhoneLookupSelection && !isPhoneSearch && activeTab === "archived") {
       selectedQuery = selectedQuery.not("leads.excluded_from_pipeline_at", "is", null);
     }
     const selectedResult = await selectedQuery.maybeSingle();

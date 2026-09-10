@@ -1,34 +1,47 @@
 "use client";
 
 import { CrmIcon } from "@/components/crm-icon";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { usePathname, useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-const SEARCH_DEBOUNCE_MS = 300;
+const SEARCH_DEBOUNCE_MS = 500;
+export const PIPELINE_SEARCH_EVENT = "crm:pipeline-search";
 
 export function DashboardContextSearch() {
   const pathname = usePathname();
-  const router = useRouter();
   const searchParams = useSearchParams();
   const query = searchParams.get("q") ?? "";
   const [draft, setDraft] = useState(query);
+  const lastCommitted = useRef(query.trim());
 
-  useEffect(() => setDraft(query), [query]);
+  useEffect(() => {
+    setDraft(query);
+    lastCommitted.current = query.trim();
+  }, [query]);
 
   const commit = useCallback((value: string) => {
-    const next = new URLSearchParams(searchParams.toString());
     const trimmed = value.trim();
+    if (trimmed === lastCommitted.current) return;
+    lastCommitted.current = trimmed;
+    const next = new URLSearchParams(window.location.search);
     if (trimmed) next.set("q", trimmed);
     else next.delete("q");
     const queryString = next.toString();
-    router.push(queryString ? `/pipeline?${queryString}` : "/pipeline");
-  }, [router, searchParams]);
+    window.history.replaceState(
+      window.history.state,
+      "",
+      queryString ? `/pipeline?${queryString}` : "/pipeline",
+    );
+    window.dispatchEvent(new CustomEvent(PIPELINE_SEARCH_EVENT, {
+      detail: { query: trimmed },
+    }));
+  }, []);
 
   useEffect(() => {
-    if (pathname !== "/pipeline" || draft.trim() === query.trim()) return;
+    if (pathname !== "/pipeline" || draft.trim() === lastCommitted.current) return;
     const id = window.setTimeout(() => commit(draft), SEARCH_DEBOUNCE_MS);
     return () => window.clearTimeout(id);
-  }, [commit, draft, pathname, query]);
+  }, [commit, draft, pathname]);
 
   if (pathname !== "/pipeline") return null;
 

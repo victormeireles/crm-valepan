@@ -15,6 +15,7 @@ import { getWeeklyBreadCount } from "@/lib/lead-signals";
 import type { PipelineVolumeFilter } from "@/app/actions/pipeline";
 import { logPipelinePerformance } from "@/lib/pipeline-performance";
 import { indexFollowUpsByLead, type LeadFollowUpDTO } from "@/lib/follow-ups";
+import { isPhoneSearchQuery } from "@/lib/phone-search-query";
 
 export const dynamic = "force-dynamic";
 const CARDS_PER_STAGE = 20;
@@ -114,6 +115,8 @@ export default async function PipelinePage({
     p_stage_id: stageFilter,
     p_volume: volumeFilter,
   };
+  const phoneSearch = isPhoneSearchQuery(query);
+  const skippedAggregate = Promise.resolve({ data: null, error: null });
   const databaseStartedAt = performance.now();
   const [
     { data: stageRows },
@@ -135,20 +138,26 @@ export default async function PipelinePage({
       p_offset: 0,
       p_limit: CARDS_PER_STAGE,
     }),
-    crm.rpc("pipeline_stage_counts", { ...commonFilters, p_owner_user_id: null }),
-    ownerUserId
-      ? crm.rpc("pipeline_stage_counts", { ...commonFilters, p_owner_user_id: ownerUserId })
+    phoneSearch
+      ? skippedAggregate
       : crm.rpc("pipeline_stage_counts", { ...commonFilters, p_owner_user_id: null }),
-    crm.rpc("pipeline_owner_counts", commonFilters),
-    crm.rpc("pipeline_owner_summary", {
-      p_messages_visible_since: INBOX_MESSAGES_VISIBLE_SINCE,
-      p_owner_user_id: ownerUserId,
-      p_region: regionFilter,
-      p_client_category: categoryFilter,
-      p_query: query.trim() || null,
-      p_stage_id: stageFilter,
-      p_volume: volumeFilter,
-    }),
+    phoneSearch
+      ? skippedAggregate
+      : ownerUserId
+        ? crm.rpc("pipeline_stage_counts", { ...commonFilters, p_owner_user_id: ownerUserId })
+        : crm.rpc("pipeline_stage_counts", { ...commonFilters, p_owner_user_id: null }),
+    phoneSearch ? skippedAggregate : crm.rpc("pipeline_owner_counts", commonFilters),
+    phoneSearch
+      ? skippedAggregate
+      : crm.rpc("pipeline_owner_summary", {
+          p_messages_visible_since: INBOX_MESSAGES_VISIBLE_SINCE,
+          p_owner_user_id: ownerUserId,
+          p_region: regionFilter,
+          p_client_category: categoryFilter,
+          p_query: query.trim() || null,
+          p_stage_id: stageFilter,
+          p_volume: volumeFilter,
+        }),
   ]);
   const databaseDurationMs = performance.now() - databaseStartedAt;
   const pipelineError =
@@ -160,6 +169,38 @@ export default async function PipelinePage({
   if (pipelineError) throw pipelineError;
 
   const pipelineRows = (rows ?? []) as PipelineCardRow[];
+  const compactStageCounts = phoneSearch
+    ? [...pipelineRows.reduce((counts, row) => {
+        const current = counts.get(row.stage_id) ?? { card_count: 0, volume_kg: 0 };
+        current.card_count += 1;
+        current.volume_kg += Number(row.weekly_bread_consumption ?? 0);
+        counts.set(row.stage_id, current);
+        return counts;
+      }, new Map<string, { card_count: number; volume_kg: number }>())]
+        .map(([stage_id, counts]) => ({ stage_id, ...counts }))
+    : null;
+  const compactOwnerCounts = phoneSearch
+    ? [...pipelineRows.reduce((counts, row) => {
+        const ownerId = row.opportunity_owner_id ?? row.lead_owner_id;
+        if (ownerId) counts.set(ownerId, (counts.get(ownerId) ?? 0) + 1);
+        return counts;
+      }, new Map<string, number>())]
+        .map(([owner_id, card_count]) => ({ owner_id, card_count }))
+    : null;
+  const compactSummary = phoneSearch
+    ? pipelineRows.reduce((current, row) => {
+        if (row.stage_is_final) return current;
+        current.open_count += 1;
+        if (row.last_direction === "in") current.awaiting_reply_count += 1;
+        if (new Date(row.opportunity_updated_at).getTime() <= renderNowMs - 7 * 86_400_000) {
+          current.stale_count += 1;
+        }
+        if (row.next_action_at && new Date(row.next_action_at).getTime() < renderNowMs) {
+          current.overdue_count += 1;
+        }
+        return current;
+      }, { open_count: 0, awaiting_reply_count: 0, stale_count: 0, overdue_count: 0 })
+    : null;
   const pipelineLeadIds = [...new Set(pipelineRows.map((row) => row.lead_id).filter(Boolean))];
   const { data: followUpRows, error: followUpsError } = pipelineLeadIds.length > 0
     ? await crm
@@ -216,7 +257,7 @@ export default async function PipelinePage({
 
   const stageTotals = Object.fromEntries(stages.map((stage) => [stage.id, 0]));
   const stageBreadCounts = Object.fromEntries(stages.map((stage) => [stage.id, 0]));
-  for (const row of (selectedStageCountRows ?? []) as PipelineStageCountRow[]) {
+  for (const row of (compactStageCounts ?? selectedStageCountRows ?? []) as PipelineStageCountRow[]) {
     const stageId = canonicalEntryStage && entryStageIds.has(row.stage_id)
       ? canonicalEntryStage.id
       : row.stage_id;
@@ -227,19 +268,19 @@ export default async function PipelinePage({
   const initialCards = stages.flatMap((stage) =>
     pagedCards.filter((card) => card.stage_id === stage.id).slice(0, CARDS_PER_STAGE),
   );
-  const totalCount = ((allStageCountRows ?? []) as PipelineStageCountRow[]).reduce(
+  const totalCount = ((compactStageCounts ?? allStageCountRows ?? []) as PipelineStageCountRow[]).reduce(
     (total: number, row: PipelineStageCountRow) => total + Number(row.card_count),
     0,
   );
   const visibleCount = Object.values(stageTotals).reduce((total, count) => total + count, 0);
   const visibleBreadCount = Object.values(stageBreadCounts).reduce((total, count) => total + count, 0);
-  const ownerSummary = ownerSummaryRows?.[0] ?? null;
+  const ownerSummary = compactSummary ?? ownerSummaryRows?.[0] ?? null;
   const selectedOwnerName = ownerUserId
     ? (ownerNameById.get(ownerUserId) ?? (mineOnly ? "Minha carteira" : "Responsável desconhecido"))
     : null;
 
   const countByOwner = new Map<string, number>(
-    ((ownerCountRows ?? []) as PipelineOwnerCountRow[]).map((row: PipelineOwnerCountRow) => [
+    ((compactOwnerCounts ?? ownerCountRows ?? []) as PipelineOwnerCountRow[]).map((row: PipelineOwnerCountRow) => [
       row.owner_id,
       Number(row.card_count),
     ]),

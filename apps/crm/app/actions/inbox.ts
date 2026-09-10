@@ -3,8 +3,12 @@
 import { revalidatePath } from "next/cache";
 import {
   INBOX_MESSAGE_PAGE_SIZE,
+  INBOX_MESSAGES_VISIBLE_SINCE,
   loadOlderMessagesPage,
 } from "@/lib/inbox/load-messages";
+import { nestOne } from "@/lib/supabase/nested";
+import { isPhoneSearchQuery } from "@/lib/phone-search-query";
+import { brazilPhoneSearchVariants } from "@crm/shared/phone";
 import { isInboxClassification } from "@/lib/inbox-classifications";
 import { applyPipelineStageEntryAutomations } from "@/lib/pipeline-stage-automations";
 import { pipelineStageForInboxClassification } from "@/lib/pipeline-stage-for-inbox-classification";
@@ -29,6 +33,57 @@ import {
   setZapiMessageReaction,
   sendZapiVideo,
 } from "@/lib/zapi/send";
+
+export type InboxPhoneSearchRow = {
+  id: string;
+  phone: string;
+  identityName: string;
+  companyName: string | null;
+  lastAt: string;
+};
+
+export async function searchInboxConversationsByPhone(query: string) {
+  if (!isPhoneSearchQuery(query)) {
+    return { ok: true as const, conversations: [] as InboxPhoneSearchRow[] };
+  }
+
+  const supabase = await createServerSupabaseClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false as const, error: "Não autenticado" };
+  const crm = crmTables(supabase);
+  const variants = brazilPhoneSearchVariants(query);
+
+  try {
+    const { data, error } = await crm
+      .from("conversations")
+      .select("id, phone_e164, last_message_at, updated_at, leads!inner(contacts(full_name), companies(name))")
+      .eq("conversation_kind", "lead")
+      .gte("last_message_at", INBOX_MESSAGES_VISIBLE_SINCE)
+      .or(variants.map((digits) => `phone_e164.ilike.%${digits}%`).join(","))
+      .order("last_message_at", { ascending: false, nullsFirst: false })
+      .limit(40);
+    if (error) return { ok: false as const, error: error.message };
+
+    const conversations: InboxPhoneSearchRow[] = (data ?? []).map((row) => {
+      const lead = nestOne(row.leads);
+      const contact = nestOne(lead?.contacts ?? null);
+      const company = nestOne(lead?.companies ?? null);
+      return {
+        id: row.id,
+        phone: row.phone_e164,
+        identityName: contact?.full_name?.trim() || row.phone_e164,
+        companyName: company?.name?.trim() || null,
+        lastAt: row.last_message_at ?? row.updated_at,
+      };
+    });
+    return { ok: true as const, conversations };
+  } catch (searchError) {
+    return {
+      ok: false as const,
+      error: searchError instanceof Error ? searchError.message : "Falha ao buscar telefone.",
+    };
+  }
+}
 
 export async function sendConversationMessage(formData: FormData) {
   const conversationId = String(formData.get("conversation_id") ?? "").trim();

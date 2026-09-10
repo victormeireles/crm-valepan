@@ -14,6 +14,7 @@ import type { PipelineCardDTO } from "@/app/(dashboard)/pipeline/pipeline-board"
 import { getWeeklyBreadCount } from "@/lib/lead-signals";
 import { logPipelinePerformance, timePipelineOperation } from "@/lib/pipeline-performance";
 import { indexFollowUpsByLead, type LeadFollowUpDTO } from "@/lib/follow-ups";
+import { isPhoneSearchQuery } from "@/lib/phone-search-query";
 
 const PAGE_SIZE = 20;
 type PipelineCardRow = Database["crm"]["Functions"]["pipeline_cards"]["Returns"][number];
@@ -98,6 +99,80 @@ export async function loadPipelineFilterSnapshot(input: { filters: PipelinePageF
     p_stage_id: input.filters.stageId,
     p_volume: input.filters.volume,
   };
+  if (isPhoneSearchQuery(input.filters.query)) {
+    const [cardsTimed, profilesTimed] = await Promise.all([
+      timePipelineOperation("cards", crm.rpc("pipeline_cards_page", {
+        ...common,
+        p_owner_user_id: input.filters.ownerUserId,
+        p_offset: 0,
+        p_limit: PAGE_SIZE,
+      })),
+      timePipelineOperation("profiles", crm.from("profiles").select("id, full_name")),
+    ]);
+    const cardsResult = cardsTimed.value;
+    const profilesResult = profilesTimed.value;
+    logPipelinePerformance(
+      "filter_snapshot_phone",
+      performance.now() - startedAt,
+      [cardsTimed, profilesTimed],
+      { cards: cardsResult.data?.length ?? 0, hasOwner: Boolean(input.filters.ownerUserId) },
+    );
+    const error = cardsResult.error ?? profilesResult.error;
+    if (error) return { ok: false as const, error: error.message };
+
+    const ownerNames = new Map(
+      (profilesResult.data ?? []).map((profile) => [
+        profile.id,
+        (profile.full_name ?? "").trim() || "Sem nome",
+      ]),
+    );
+    const cardRows = (cardsResult.data ?? []) as PipelineCardRow[];
+    let followUps: Map<string, LeadFollowUpDTO>;
+    try {
+      followUps = await loadFollowUps(crm, cardRows);
+    } catch (followUpError) {
+      return {
+        ok: false as const,
+        error: followUpError instanceof Error ? followUpError.message : "Falha ao carregar follow-ups.",
+      };
+    }
+    const cards = cardRows.map((row) => mapRow(row, ownerNames, followUps));
+    const stageCounts = new Map<string, { card_count: number; volume_kg: number }>();
+    const ownerCounts = new Map<string, number>();
+    for (const row of cardRows) {
+      const stage = stageCounts.get(row.stage_id) ?? { card_count: 0, volume_kg: 0 };
+      stage.card_count += 1;
+      stage.volume_kg += Number(row.weekly_bread_consumption ?? 0);
+      stageCounts.set(row.stage_id, stage);
+      const ownerId = row.opportunity_owner_id ?? row.lead_owner_id;
+      if (ownerId) ownerCounts.set(ownerId, (ownerCounts.get(ownerId) ?? 0) + 1);
+    }
+    const now = Date.now();
+    const summary = cardRows.reduce(
+      (current, row) => {
+        if (row.stage_is_final) return current;
+        current.open_count += 1;
+        if (row.last_direction === "in") current.awaiting_reply_count += 1;
+        if (new Date(row.opportunity_updated_at).getTime() <= now - 7 * 86_400_000) {
+          current.stale_count += 1;
+        }
+        if (row.next_action_at && new Date(row.next_action_at).getTime() < now) {
+          current.overdue_count += 1;
+        }
+        return current;
+      },
+      { open_count: 0, awaiting_reply_count: 0, stale_count: 0, overdue_count: 0 },
+    );
+    const compactStageCounts = [...stageCounts].map(([stage_id, counts]) => ({ stage_id, ...counts }));
+    return {
+      ok: true as const,
+      cards,
+      allStageCounts: compactStageCounts,
+      visibleStageCounts: compactStageCounts,
+      ownerCounts: [...ownerCounts].map(([owner_id, card_count]) => ({ owner_id, card_count })),
+      ownerSummary: summary,
+    };
+  }
   const [cardsTimed, allCountsTimed, visibleCountsTimed, ownerCountsTimed, summaryTimed, profilesTimed] =
     await Promise.all([
       timePipelineOperation("cards", crm.rpc("pipeline_cards_page", {
@@ -151,7 +226,15 @@ export async function loadPipelineFilterSnapshot(input: { filters: PipelinePageF
     ]),
   );
   const cardRows = (cardsResult.data ?? []) as PipelineCardRow[];
-  const followUps = await loadFollowUps(crm, cardRows);
+  let followUps: Map<string, LeadFollowUpDTO>;
+  try {
+    followUps = await loadFollowUps(crm, cardRows);
+  } catch (followUpError) {
+    return {
+      ok: false as const,
+      error: followUpError instanceof Error ? followUpError.message : "Falha ao carregar follow-ups.",
+    };
+  }
   return {
     ok: true as const,
     cards: cardRows.map((row) => mapRow(row, ownerNames, followUps)),

@@ -8,7 +8,8 @@ import {
 import { isClientCategoryValue } from "@/lib/client-categories";
 import { isPipelineRegion, isPipelineSignal } from "@/lib/pipeline-signals";
 import { recordPipelineBrowserMetric } from "@/lib/pipeline-browser-performance";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { PIPELINE_SEARCH_EVENT } from "../dashboard-context-search";
 import { PipelineBoard, type PipelineCardDTO, type PipelineStageDTO } from "./pipeline-board";
 import { PipelineFilters, PipelineHeader } from "./pipeline-filters";
 import { PipelineKpiStrip } from "./pipeline-kpi-strip";
@@ -48,8 +49,10 @@ export function PipelineWorkspace(props: {
   const [mineCount, setMineCount] = useState(props.initialMineCount);
   const [summary, setSummary] = useState<Summary>(props.initialSummary ?? { open: 0, awaiting: 0, stale: 0, overdue: 0 });
   const [pending, setPending] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [activeFilters, setActiveFilters] = useState(props.initialFilters);
   const [nowMs, setNowMs] = useState(props.renderNowMs);
+  const filterRequestId = useRef(0);
 
   useEffect(() => {
     setNowMs(Date.now());
@@ -57,7 +60,11 @@ export function PipelineWorkspace(props: {
     return () => window.clearInterval(interval);
   }, []);
 
-  const changeFilters = useCallback(async (patch: Record<string, string | null>) => {
+  const changeFilters = useCallback(async (
+    patch: Record<string, string | null>,
+    historyMode: "push" | "replace" = "push",
+  ) => {
+    const requestId = ++filterRequestId.current;
     const metricStartedAt = performance.now();
     const params = new URLSearchParams(window.location.search);
     for (const [key, value] of Object.entries(patch)) {
@@ -87,9 +94,25 @@ export function PipelineWorkspace(props: {
       volume: isVolumeFilter(volumeRaw) ? volumeRaw : null,
     };
 
-    window.history.pushState(null, "", params.size ? `/pipeline?${params}` : "/pipeline");
+    const nextUrl = params.size ? `/pipeline?${params}` : "/pipeline";
+    if (historyMode === "replace") {
+      window.history.replaceState(window.history.state, "", nextUrl);
+    } else {
+      window.history.pushState(window.history.state, "", nextUrl);
+    }
     setPending(true);
-    const result = await loadPipelineFilterSnapshot({ filters });
+    setLoadError(null);
+    let result: Awaited<ReturnType<typeof loadPipelineFilterSnapshot>>;
+    try {
+      result = await loadPipelineFilterSnapshot({ filters });
+    } catch {
+      if (requestId === filterRequestId.current) {
+        setPending(false);
+        setLoadError("Não foi possível concluir a busca. Tente novamente.");
+      }
+      return;
+    }
+    if (requestId !== filterRequestId.current) return;
     setPending(false);
     recordPipelineBrowserMetric("filter", metricStartedAt, {
       ok: result.ok,
@@ -97,7 +120,10 @@ export function PipelineWorkspace(props: {
       hasQuery: Boolean(filters.query),
       stageFiltered: Boolean(filters.stageId),
     });
-    if (!result.ok) return;
+    if (!result.ok) {
+      setLoadError("Não foi possível concluir a busca. Tente novamente.");
+      return;
+    }
     setActiveFilters(filters);
 
     const entryStages = props.stages.filter((stage) =>
@@ -135,6 +161,15 @@ export function PipelineWorkspace(props: {
       overdue: Number(rawSummary.overdue_count),
     } : { open: 0, awaiting: 0, stale: 0, overdue: 0 });
   }, [props.canViewTeam, props.currentUserId, props.initialTeamOptions, props.stages]);
+
+  useEffect(() => {
+    const handlePipelineSearch = (event: Event) => {
+      const query = (event as CustomEvent<{ query?: string }>).detail?.query ?? "";
+      void changeFilters({ q: query }, "replace");
+    };
+    window.addEventListener(PIPELINE_SEARCH_EVENT, handlePipelineSearch);
+    return () => window.removeEventListener(PIPELINE_SEARCH_EVENT, handlePipelineSearch);
+  }, [changeFilters]);
 
   const hasAnyFilter = useMemo(
     () => Boolean(
@@ -177,6 +212,11 @@ export function PipelineWorkspace(props: {
         hasAnyFilter={hasAnyFilter}
         onFilterChange={changeFilters}
       />
+      {loadError ? (
+        <p role="alert" className="rounded-xl border border-[rgba(186,26,26,0.25)] bg-[rgba(186,26,26,0.08)] px-4 py-3 text-sm text-[var(--vp-error)]">
+          {loadError} A tela e os dados anteriores foram preservados.
+        </p>
+      ) : null}
       {visibleCount === 0 ? (
         <p className="rounded-xl border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] px-4 py-10 text-center text-sm text-[var(--vp-ink-muted)]">
           Nenhuma oportunidade corresponde aos filtros selecionados.

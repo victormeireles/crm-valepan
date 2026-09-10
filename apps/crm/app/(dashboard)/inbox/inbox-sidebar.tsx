@@ -1,6 +1,9 @@
 "use client";
 
-import { updateConversationContactName } from "@/app/actions/inbox";
+import {
+  searchInboxConversationsByPhone,
+  updateConversationContactName,
+} from "@/app/actions/inbox";
 import { getCustomerWaitSignal } from "@/lib/lead-signals";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -8,6 +11,7 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 import { ContactAvatar } from "@/components/contact-avatar";
 import { CrmIcon } from "@/components/crm-icon";
 import { brazilPhoneSearchVariants } from "@crm/shared/phone";
+import { isPhoneSearchQuery } from "@/lib/phone-search-query";
 
 export type InboxSidebarRow = {
   id: string;
@@ -65,7 +69,9 @@ export function InboxSidebar({
   const router = useRouter();
   const [nowMs, setNowMs] = useState(renderNowMs);
   const [navigationPending, startNavigation] = useTransition();
-  const [searchPending, startSearch] = useTransition();
+  const [searchPending, setSearchPending] = useState(false);
+  const [phoneResults, setPhoneResults] = useState<InboxSidebarRow[] | null>(null);
+  const [searchError, setSearchError] = useState<string | null>(null);
   const [q, setQ] = useState(initialQuery);
   const [optimisticSelectedId, setOptimisticSelectedId] = useState(selectedId);
   const [readIds, setReadIds] = useState<Set<string>>(() => new Set());
@@ -75,15 +81,16 @@ export function InboxSidebar({
   const conversationHref = (conversationId: string) => {
     const params = new URLSearchParams({ tab: activeTab, cid: conversationId });
     if (page > 1) params.set("page", String(page));
-    if (initialQuery) params.set("q", initialQuery);
+    if (phoneResults !== null && isPhoneSearchQuery(q)) params.set("lookup", "1");
     return `/inbox?${params.toString()}`;
   };
 
+  const visibleConversations = phoneResults ?? conversations;
   const filtered = useMemo(() => {
     const needle = norm(q.trim());
-    if (!needle) return conversations;
+    if (!needle) return visibleConversations;
     const queryVariants = new Set(brazilPhoneSearchVariants(q));
-    return conversations.filter((c) => {
+    return visibleConversations.filter((c) => {
       const hay = norm(
         [
           c.displayName,
@@ -99,7 +106,7 @@ export function InboxSidebar({
         queryVariants.has(variant),
       );
     });
-  }, [conversations, q]);
+  }, [q, visibleConversations]);
 
   useEffect(() => {
     setQ(initialQuery);
@@ -107,17 +114,49 @@ export function InboxSidebar({
 
   useEffect(() => {
     const trimmed = q.trim();
-    const digits = trimmed.replace(/\D/g, "");
-    const nextServerQuery = digits.length >= 4 ? trimmed : "";
-    if (nextServerQuery === initialQuery) return;
-
+    if (!isPhoneSearchQuery(trimmed)) {
+      setPhoneResults(null);
+      setSearchError(null);
+      setSearchPending(false);
+      return;
+    }
+    let cancelled = false;
     const timeout = window.setTimeout(() => {
-      const params = new URLSearchParams({ tab: activeTab });
-      if (nextServerQuery) params.set("q", nextServerQuery);
-      startSearch(() => router.replace(`/inbox?${params.toString()}`, { scroll: false }));
-    }, 300);
-    return () => window.clearTimeout(timeout);
-  }, [activeTab, initialQuery, q, router]);
+      setSearchPending(true);
+      setSearchError(null);
+      void searchInboxConversationsByPhone(trimmed).then((result) => {
+        if (cancelled) return;
+        setSearchPending(false);
+        if (!result.ok) {
+          setPhoneResults([]);
+          setSearchError("Não foi possível buscar o telefone. Tente novamente.");
+          return;
+        }
+        setPhoneResults(result.conversations.map((conversation) => ({
+          id: conversation.id,
+          kind: "lead" as const,
+          displayName: conversation.identityName,
+          phone_e164: conversation.phone,
+          preview: "Telefone encontrado no CRM",
+          lastAt: conversation.lastAt,
+          leadLine: "Resultado da busca",
+          awaiting: false,
+          identityName: conversation.identityName,
+          companyName: conversation.companyName,
+          clientCategory: null,
+          stageName: null,
+          weeklyBreadCount: null,
+          lastDirection: null,
+          unread: false,
+          callStatus: null,
+        })));
+      });
+    }, 500);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeout);
+    };
+  }, [q]);
 
   useEffect(() => {
     setOptimisticSelectedId(selectedId);
@@ -180,9 +219,14 @@ export function InboxSidebar({
             spellCheck={false}
           />
         </label>
-        {initialQuery.replace(/\D/g, "").length >= 4 ? (
+        {isPhoneSearchQuery(q) ? (
           <p className="mt-1.5 px-2 text-[10px] text-[var(--vp-ink-muted)]">
             Buscando o telefone em todas as listas.
+          </p>
+        ) : null}
+        {searchError ? (
+          <p role="alert" className="mt-1.5 px-2 text-[10px] font-semibold text-[var(--vp-error)]">
+            {searchError} A conversa atual foi preservada.
           </p>
         ) : null}
       </div>
@@ -319,12 +363,13 @@ export function InboxSidebar({
             ) : null}
           </li>
         )})}
-        {conversations.length === 0 && (
+        {phoneResults === null && conversations.length === 0 && (
           <li className="px-4 py-8 text-center text-sm text-[var(--muted)]">Nenhuma conversa ainda.</li>
         )}
-        {conversations.length > 0 && filtered.length === 0 && (
+        {(phoneResults !== null && phoneResults.length === 0) ||
+        (visibleConversations.length > 0 && filtered.length === 0) ? (
           <li className="px-4 py-8 text-center text-sm text-[var(--muted)]">Nenhum resultado.</li>
-        )}
+        ) : null}
       </ul>
       {navigationPending || searchPending ? (
         <div className="pointer-events-none absolute bottom-2 left-1/2 z-20 -translate-x-1/2 rounded-full bg-[var(--vp-wine)] px-3 py-1 text-[10px] font-medium text-[var(--vp-gold)] shadow-[var(--sh-md)]">
