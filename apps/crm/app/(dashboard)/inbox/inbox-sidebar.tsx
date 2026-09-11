@@ -1,17 +1,20 @@
 "use client";
 
 import {
+  refreshInboxSidebar,
   searchInboxConversationsByPhone,
   updateConversationContactName,
 } from "@/app/actions/inbox";
 import { getCustomerWaitSignal } from "@/lib/lead-signals";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ContactAvatar } from "@/components/contact-avatar";
 import { CrmIcon } from "@/components/crm-icon";
 import { brazilPhoneSearchVariants } from "@crm/shared/phone";
 import { isPhoneSearchQuery } from "@/lib/phone-search-query";
+import { INBOX_SELECT_CONVERSATION_EVENT } from "./inbox-conversation-pane";
+import { recordInboxBrowserMetric } from "@/lib/inbox-browser-performance";
 
 export type InboxSidebarRow = {
   id: string;
@@ -68,11 +71,12 @@ export function InboxSidebar({
 }) {
   const router = useRouter();
   const [nowMs, setNowMs] = useState(renderNowMs);
-  const [navigationPending, startNavigation] = useTransition();
   const [searchPending, setSearchPending] = useState(false);
   const [phoneResults, setPhoneResults] = useState<InboxSidebarRow[] | null>(null);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [q, setQ] = useState(initialQuery);
+  const [liveConversations, setLiveConversations] = useState(conversations);
+  const [liveTabCounts, setLiveTabCounts] = useState(tabCounts);
   const [optimisticSelectedId, setOptimisticSelectedId] = useState(selectedId);
   const [readIds, setReadIds] = useState<Set<string>>(() => new Set());
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
@@ -85,7 +89,7 @@ export function InboxSidebar({
     return `/inbox?${params.toString()}`;
   };
 
-  const visibleConversations = phoneResults ?? conversations;
+  const visibleConversations = phoneResults ?? liveConversations;
   const filtered = useMemo(() => {
     const needle = norm(q.trim());
     if (!needle) return visibleConversations;
@@ -111,6 +115,42 @@ export function InboxSidebar({
   useEffect(() => {
     setQ(initialQuery);
   }, [initialQuery]);
+
+  useEffect(() => {
+    setLiveConversations(conversations);
+    setLiveTabCounts(tabCounts);
+  }, [conversations, tabCounts]);
+
+  useEffect(() => {
+    let disposed = false;
+    let requestVersion = 0;
+    const refresh = () => {
+      const startedAt = performance.now();
+      const version = ++requestVersion;
+      void refreshInboxSidebar({ tab: activeTab, page }).then((result) => {
+        if (disposed || version !== requestVersion) return;
+        recordInboxBrowserMetric("sidebar_refresh", startedAt, {
+          success: result.ok,
+          rows: result.ok ? result.conversations.length : 0,
+        });
+        if (!result.ok) return;
+        setLiveConversations(result.conversations);
+        setLiveTabCounts(result.tabCounts);
+      }).catch(() => {
+        if (!disposed && version === requestVersion) {
+          recordInboxBrowserMetric("sidebar_refresh", startedAt, {
+            success: false,
+            rows: 0,
+          });
+        }
+      });
+    };
+    window.addEventListener("crm:inbox-sidebar-changed", refresh);
+    return () => {
+      disposed = true;
+      window.removeEventListener("crm:inbox-sidebar-changed", refresh);
+    };
+  }, [activeTab, page]);
 
   useEffect(() => {
     const trimmed = q.trim();
@@ -181,16 +221,16 @@ export function InboxSidebar({
 
   return (
     <div
-      aria-busy={navigationPending || searchPending}
+      aria-busy={searchPending}
       className="relative flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-[14px] border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] shadow-[var(--sh-sm)]"
     >
       <div className="shrink-0 border-b border-[var(--vp-ink-line)] p-3">
         <div className="mb-2.5 grid grid-cols-2 gap-1 rounded-[18px] bg-[rgba(35,0,4,0.06)] p-[3px]">
           {([
-            ["qualify", "Qualificar", tabCounts.qualify],
-            ["archived", "Arquivados", tabCounts.archived],
-            ["groups", "Grupos", tabCounts.groups],
-            ["pipeline", "No funil", tabCounts.pipeline],
+            ["qualify", "Qualificar", liveTabCounts.qualify],
+            ["archived", "Arquivados", liveTabCounts.archived],
+            ["groups", "Grupos", liveTabCounts.groups],
+            ["pipeline", "No funil", liveTabCounts.pipeline],
           ] as const).map(([tab, label, count]) => (
             <Link
               key={tab}
@@ -252,7 +292,9 @@ export function InboxSidebar({
                 event.preventDefault();
                 const href = conversationHref(c.id);
                 setOptimisticSelectedId(c.id);
-                startNavigation(() => router.push(href, { scroll: false }));
+                window.dispatchEvent(new CustomEvent(INBOX_SELECT_CONVERSATION_EVENT, {
+                  detail: { conversationId: c.id, href },
+                }));
               }}
               className="block px-3.5 py-3 pr-10"
             >
@@ -363,7 +405,7 @@ export function InboxSidebar({
             ) : null}
           </li>
         )})}
-        {phoneResults === null && conversations.length === 0 && (
+        {phoneResults === null && liveConversations.length === 0 && (
           <li className="px-4 py-8 text-center text-sm text-[var(--muted)]">Nenhuma conversa ainda.</li>
         )}
         {(phoneResults !== null && phoneResults.length === 0) ||
@@ -371,9 +413,9 @@ export function InboxSidebar({
           <li className="px-4 py-8 text-center text-sm text-[var(--muted)]">Nenhum resultado.</li>
         ) : null}
       </ul>
-      {navigationPending || searchPending ? (
+      {searchPending ? (
         <div className="pointer-events-none absolute bottom-2 left-1/2 z-20 -translate-x-1/2 rounded-full bg-[var(--vp-wine)] px-3 py-1 text-[10px] font-medium text-[var(--vp-gold)] shadow-[var(--sh-md)]">
-          {searchPending ? "Buscando…" : "Abrindo conversa…"}
+          Buscando…
         </div>
       ) : null}
     </div>

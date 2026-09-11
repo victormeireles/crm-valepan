@@ -1123,7 +1123,7 @@ export async function updateLeadCategoryContactInfo(input: {
 
   const { data: lead } = await crm
     .from("leads")
-    .select("id, phone_e164, status, contact_id, company_id")
+    .select("id, phone_e164, status, contact_id, company_id, owner_id")
     .eq("id", leadId)
     .maybeSingle();
   if (!lead?.id) return { ok: false as const, error: "Lead não encontrado." };
@@ -1264,6 +1264,9 @@ export async function updateLeadCategoryContactInfo(input: {
   const updatePayloadBase = {
     phone_e164: normalizedLeadPhone ?? lead.phone_e164,
     status: leadStatus ?? lead.status,
+    // Mudar o status dispara a sincronizacao da etapa no banco. Atribua o
+    // lead na mesma operacao para ele nao sair da visao do usuario comercial.
+    owner_id: lead.owner_id ?? (leadStatus === "em negociação" ? user.id : null),
     distributor_id: distributorId,
     contact_id: nextContactId,
     company_id: nextCompanyId,
@@ -1350,7 +1353,11 @@ export async function updateLeadCategoryContactInfo(input: {
     if (opportunityId) {
       const { error: moveError } = await crm
         .from("opportunities")
-        .update({ stage_id: negotiationStage.id, updated_at: new Date().toISOString() })
+        .update({
+          stage_id: negotiationStage.id,
+          owner_id: opportunity?.owner_id ?? user.id,
+          updated_at: new Date().toISOString(),
+        })
         .eq("id", opportunityId);
       if (moveError) return { ok: false as const, error: moveError.message };
     } else {

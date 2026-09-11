@@ -13,10 +13,12 @@ begin
       ('CHATBOT', 60, false),
       ('SEM RETORNO', 70, false),
       ('CONVERTIDO', 80, true),
-      ('JÁ É CLIENTE', 140, false),
       ('NÃO ATENDEMOS A REGIÃO', 150, false),
       ('NÃO RESPONDE', 160, false),
       ('NÃO TEMOS O PÃO', 170, false),
-      ('SEM INTERESSE', 190, true);
+      ('SEM INTERESSE', 190, true),
+      ('JÁ É CLIENTE', 200, false),
+      ('NÃO INAUGUROU', 210, false),
+      ('SEM PEDIDO MÍNIMO', 220, false);
   end if;
 end $$;

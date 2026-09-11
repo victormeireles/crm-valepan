@@ -18,7 +18,7 @@ import {
   type InboxMessageRow,
 } from "@/lib/inbox/load-messages";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AudioMessagePlayer } from "./audio-message-player";
 import { DocumentInsightPanel } from "./document-insight-panel";
 import { DocumentSearch } from "./document-search";
@@ -665,6 +665,80 @@ function CallEventCard({ message }: { message: InboxMessageRow }) {
   );
 }
 
+const ChatMessageItem = memo(function ChatMessageItem({
+  message,
+  conversationId,
+  repliedMessage,
+  showDay,
+  showNewDivider,
+  isNewSinceRead,
+  isFavorite,
+  selected,
+  onToggle,
+  onClose,
+  onFeedback,
+  onFavoriteChange,
+}: {
+  message: InboxMessageRow;
+  conversationId: string;
+  repliedMessage: InboxMessageRow | null;
+  showDay: boolean;
+  showNewDivider: boolean;
+  isNewSinceRead: boolean;
+  isFavorite: boolean;
+  selected: boolean;
+  onToggle: (messageId: string) => void;
+  onClose: () => void;
+  onFeedback: (text: string, error?: boolean) => void;
+  onFavoriteChange: (messageId: string, favorite: boolean) => void;
+}) {
+  const out = message.direction === "out";
+  const contactCard = parseContactCard(message.body);
+  return (
+    <div
+      id={`message-${message.id}`}
+      className="w-full space-y-3 [contain-intrinsic-size:auto_96px] [content-visibility:auto]"
+    >
+      {showDay ? <div className="flex justify-center py-1"><span className="rounded-full bg-[rgba(35,0,4,0.06)] px-3 py-1 text-[11px] font-bold text-[var(--vp-ink-muted)]">{messageDayLabel(message.sent_at)}</span></div> : null}
+      {showNewDivider ? <div className="flex items-center gap-2 py-1" role="separator" aria-label="Novas mensagens desde a última leitura"><div className="h-px flex-1 bg-[var(--border)]" /><span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-[var(--vp-wine)]">Novas desde a última leitura</span><div className="h-px flex-1 bg-[var(--border)]" /></div> : null}
+      {message.event_kind === "whatsapp_call" ? <CallEventCard message={message} /> : (
+        <div className={`flex w-full ${out ? "justify-end" : "justify-start"}`}>
+          <div
+            role="button"
+            tabIndex={0}
+            aria-label="Abrir ações da mensagem"
+            aria-expanded={selected}
+            onClick={() => onToggle(message.id)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                onToggle(message.id);
+              }
+              if (event.key === "Escape") onClose();
+            }}
+            className={out
+              ? `relative max-w-[min(76%,460px)] cursor-pointer rounded-2xl rounded-br-[4px] bg-[var(--vp-wine)] px-3.5 py-[11px] text-sm leading-[1.45] text-[var(--vp-gold-cream)] shadow-[var(--sh-sm)]${isNewSinceRead ? " ring-2 ring-[var(--vp-gold)]/35" : ""}${selected ? " ring-2 ring-[var(--vp-gold)]/60" : ""}`
+              : `relative max-w-[min(76%,460px)] cursor-pointer rounded-2xl rounded-bl-[4px] border bg-[var(--vp-paper-pure)] px-3.5 py-[11px] text-sm leading-[1.45] text-[var(--vp-ink-body)] shadow-[var(--sh-sm)]${isNewSinceRead ? " border-[var(--vp-wine)]/45 ring-1 ring-[var(--vp-wine)]/25" : " border-[var(--vp-ink-line)]"}${selected ? " ring-2 ring-[var(--vp-wine)]/35" : ""}`}
+          >
+            {repliedMessage ? <div className={`mb-2 rounded-lg border-l-4 px-2.5 py-2 text-xs ${out ? "border-[var(--vp-gold)] bg-black/15" : "border-[var(--vp-wine)] bg-black/5"}`}><p className="mb-0.5 font-semibold">Em resposta a</p><p className="line-clamp-2 opacity-80">{messagePreview(repliedMessage)}</p></div> : null}
+            {message.deleted_at ? <p className="flex items-center gap-2 italic opacity-70"><span aria-hidden>⌫</span> Esta mensagem foi apagada</p> : contactCard ? (
+              <div className="w-[min(100%,360px)] overflow-hidden rounded-xl border border-[var(--vp-ink-line)] bg-[var(--vp-surface)] text-[var(--vp-ink-body)]">
+                <div className="flex items-center gap-2 border-b border-[var(--vp-ink-line)] px-3 py-2"><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--vp-surface-highest)] text-xs font-semibold text-[var(--vp-wine)]">{initials(contactCard.name)}</div><div className="min-w-0"><p className="truncate text-sm font-semibold">{contactCard.name}</p><p className="truncate text-xs text-[var(--vp-ink-muted)]">{contactCard.phone}</p></div></div>
+                <div className="grid grid-cols-2 divide-x divide-[rgba(80,20,24,0.14)]"><button type="button" className="px-2 py-2 text-xs font-medium text-[var(--vp-wine)] hover:bg-[rgba(35,0,4,0.08)]">Conversar</button><button type="button" className="px-2 py-2 text-xs font-medium text-[var(--vp-wine)] hover:bg-[rgba(35,0,4,0.08)]">Adicionar a um grupo</button></div>
+              </div>
+            ) : <div className="space-y-2">{renderMedia(message)}<p className="whitespace-pre-wrap break-words">{message.body?.trim() ? message.body : "Sem texto neste registro (mensagem antiga ou mídia sem legenda)."}</p></div>}
+            <div className={`mt-1.5 flex items-center gap-1.5 text-[10px] leading-none ${out ? "justify-end text-[var(--vp-gold-pale)]/90" : "justify-end text-[var(--muted)]"}`}><time dateTime={message.sent_at}>{new Date(message.sent_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</time><span className="opacity-70">·</span><span className="font-medium">{out ? outboundStatusLabel(message) : "Recebida"}</span>{message.edited_at && !message.deleted_at ? <span className="opacity-70">· editada</span> : null}</div>
+            {message.reaction && !message.deleted_at ? <span className={`absolute -bottom-3 ${out ? "left-2" : "right-2"} rounded-full border border-[var(--border)] bg-[var(--vp-paper-pure)] px-1.5 py-0.5 text-sm shadow-sm`}>{message.reaction}</span> : null}
+            {message.pinned_at && !message.deleted_at ? <span className={`absolute -top-3 ${out ? "left-2" : "right-2"} rounded-full border border-[var(--border)] bg-[var(--vp-paper-pure)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--vp-wine)] shadow-sm`}>⚑ Fixada</span> : null}
+            {isFavorite && !message.deleted_at ? <span className={`absolute -top-3 ${out ? "right-2" : "left-2"} rounded-full border border-[var(--border)] bg-[var(--vp-paper-pure)] px-1.5 py-0.5 text-xs text-[var(--vp-gold-deep)] shadow-sm`} title="Favorita">★</span> : null}
+            {selected ? <MessageActions message={{ ...message, is_favorite: isFavorite }} conversationId={conversationId} onClose={onClose} onFeedback={onFeedback} onFavoriteChange={(favorite) => onFavoriteChange(message.id, favorite)} /> : null}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+});
+
 export function ChatThread({
   conversationId,
   initialMessages,
@@ -695,6 +769,10 @@ export function ChatThread({
   const messages = useMemo(
     () => mergeById(mergeById(olderMessages, initialMessages), liveMessages),
     [olderMessages, initialMessages, liveMessages],
+  );
+  const messageById = useMemo(
+    () => new Map(messages.map((message) => [message.id, message])),
+    [messages],
   );
   const pinnedMessage = useMemo(
     () => [...messages].reverse().find((message) =>
@@ -798,6 +876,16 @@ export function ChatThread({
     if (!lr) return -1;
     return messages.findIndex((m) => m.sent_at > lr);
   }, [messages, lastReadAtIso]);
+  const toggleMessage = useCallback((messageId: string) => {
+    setSelectedMessageId((current) => current === messageId ? null : messageId);
+  }, []);
+  const closeMessageActions = useCallback(() => setSelectedMessageId(null), []);
+  const showFeedback = useCallback((text: string, error = false) => {
+    setFeedback({ text, error });
+  }, []);
+  const changeFavorite = useCallback((messageId: string, favorite: boolean) => {
+    setFavoriteOverrides((current) => ({ ...current, [messageId]: favorite }));
+  }, []);
 
   useEffect(() => {
     if (skipScrollToBottomRef.current) {
@@ -906,159 +994,23 @@ export function ChatThread({
           <p className="text-center text-xs text-[var(--vp-error)]">{loadError}</p>
         ) : null}
 
-        {messages.map((m, idx) => {
-          const out = m.direction === "out";
-          const contactCard = parseContactCard(m.body);
-          const isNewSinceRead =
-            firstNewSinceReadIdx >= 0 &&
-            idx >= firstNewSinceReadIdx &&
-            (lastReadAtIso ?? "").trim().length > 0;
-          const repliedMessage = m.reply_to_message_id
-            ? messages.find((candidate) => candidate.id === m.reply_to_message_id) ?? null
-            : null;
-          const isFavorite = favoriteOverrides[m.id] ?? m.is_favorite;
-          return (
-            <div key={m.id} id={`message-${m.id}`} className="w-full space-y-3">
-              {idx === 0 || messageDayKey(messages[idx - 1]?.sent_at ?? "") !== messageDayKey(m.sent_at) ? (
-                <div className="flex justify-center py-1">
-                  <span className="rounded-full bg-[rgba(35,0,4,0.06)] px-3 py-1 text-[11px] font-bold text-[var(--vp-ink-muted)]">
-                    {messageDayLabel(m.sent_at)}
-                  </span>
-                </div>
-              ) : null}
-              {idx === firstNewSinceReadIdx && firstNewSinceReadIdx >= 0 ? (
-                <div
-                  className="flex items-center gap-2 py-1"
-                  role="separator"
-                  aria-label="Novas mensagens desde a última leitura"
-                >
-                  <div className="h-px flex-1 bg-[var(--border)]" />
-                  <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-[var(--vp-wine)]">
-                    Novas desde a última leitura
-                  </span>
-                  <div className="h-px flex-1 bg-[var(--border)]" />
-                </div>
-              ) : null}
-            {m.event_kind === "whatsapp_call" ? (
-              <CallEventCard message={m} />
-            ) : (
-            <div
-              className={`flex w-full ${out ? "justify-end" : "justify-start"}`}
-            >
-              <div
-                role="button"
-                tabIndex={0}
-                aria-label="Abrir ações da mensagem"
-                aria-expanded={selectedMessageId === m.id}
-                onClick={() => setSelectedMessageId((current) => current === m.id ? null : m.id)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    setSelectedMessageId((current) => current === m.id ? null : m.id);
-                  }
-                  if (event.key === "Escape") setSelectedMessageId(null);
-                }}
-                className={
-                  out
-                    ? `relative max-w-[min(76%,460px)] cursor-pointer rounded-2xl rounded-br-[4px] bg-[var(--vp-wine)] px-3.5 py-[11px] text-sm leading-[1.45] text-[var(--vp-gold-cream)] shadow-[var(--sh-sm)]${isNewSinceRead && out ? " ring-2 ring-[var(--vp-gold)]/35" : ""}${selectedMessageId === m.id ? " ring-2 ring-[var(--vp-gold)]/60" : ""}`
-                    : `relative max-w-[min(76%,460px)] cursor-pointer rounded-2xl rounded-bl-[4px] border bg-[var(--vp-paper-pure)] px-3.5 py-[11px] text-sm leading-[1.45] text-[var(--vp-ink-body)] shadow-[var(--sh-sm)]${isNewSinceRead && !out ? " border-[var(--vp-wine)]/45 ring-1 ring-[var(--vp-wine)]/25" : " border-[var(--vp-ink-line)]"}${selectedMessageId === m.id ? " ring-2 ring-[var(--vp-wine)]/35" : ""}`
-                }
-              >
-                {repliedMessage ? (
-                  <div className={`mb-2 rounded-lg border-l-4 px-2.5 py-2 text-xs ${out ? "border-[var(--vp-gold)] bg-black/15" : "border-[var(--vp-wine)] bg-black/5"}`}>
-                    <p className="mb-0.5 font-semibold">Em resposta a</p>
-                    <p className="line-clamp-2 opacity-80">{messagePreview(repliedMessage)}</p>
-                  </div>
-                ) : null}
-                {m.deleted_at ? (
-                  <p className="flex items-center gap-2 italic opacity-70">
-                    <span aria-hidden>⌫</span> Esta mensagem foi apagada
-                  </p>
-                ) : contactCard ? (
-                  <div className="w-[min(100%,360px)] overflow-hidden rounded-xl border border-[var(--vp-ink-line)] bg-[var(--vp-surface)] text-[var(--vp-ink-body)]">
-                    <div className="flex items-center gap-2 border-b border-[var(--vp-ink-line)] px-3 py-2">
-                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--vp-surface-highest)] text-xs font-semibold text-[var(--vp-wine)]">
-                        {initials(contactCard.name)}
-                      </div>
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold">{contactCard.name}</p>
-                        <p className="truncate text-xs text-[var(--vp-ink-muted)]">{contactCard.phone}</p>
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-2 divide-x divide-[rgba(80,20,24,0.14)]">
-                      <button
-                        type="button"
-                        className="px-2 py-2 text-xs font-medium text-[var(--vp-wine)] hover:bg-[rgba(35,0,4,0.08)]"
-                      >
-                        Conversar
-                      </button>
-                      <button
-                        type="button"
-                        className="px-2 py-2 text-xs font-medium text-[var(--vp-wine)] hover:bg-[rgba(35,0,4,0.08)]"
-                      >
-                        Adicionar a um grupo
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {renderMedia(m)}
-                    <p className="whitespace-pre-wrap break-words">
-                      {m.body?.trim()
-                        ? m.body
-                        : "Sem texto neste registro (mensagem antiga ou mídia sem legenda)."}
-                    </p>
-                  </div>
-                )}
-                <div
-                  className={`mt-1.5 flex items-center gap-1.5 text-[10px] leading-none ${
-                    out
-                      ? "justify-end text-[var(--vp-gold-pale)]/90"
-                      : "justify-end text-[var(--muted)]"
-                  }`}
-                >
-                  <time dateTime={m.sent_at}>
-                    {new Date(m.sent_at).toLocaleTimeString("pt-BR", {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
-                  </time>
-                  <span className="opacity-70">·</span>
-                  <span className="font-medium">
-                    {out ? outboundStatusLabel(m) : "Recebida"}
-                  </span>
-                  {m.edited_at && !m.deleted_at ? <span className="opacity-70">· editada</span> : null}
-                </div>
-                {m.reaction && !m.deleted_at ? (
-                  <span className={`absolute -bottom-3 ${out ? "left-2" : "right-2"} rounded-full border border-[var(--border)] bg-[var(--vp-paper-pure)] px-1.5 py-0.5 text-sm shadow-sm`}>
-                    {m.reaction}
-                  </span>
-                ) : null}
-                {m.pinned_at && !m.deleted_at ? (
-                  <span className={`absolute -top-3 ${out ? "left-2" : "right-2"} rounded-full border border-[var(--border)] bg-[var(--vp-paper-pure)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--vp-wine)] shadow-sm`}>
-                    ⚑ Fixada
-                  </span>
-                ) : null}
-                {isFavorite && !m.deleted_at ? (
-                  <span className={`absolute -top-3 ${out ? "right-2" : "left-2"} rounded-full border border-[var(--border)] bg-[var(--vp-paper-pure)] px-1.5 py-0.5 text-xs text-[var(--vp-gold-deep)] shadow-sm`} title="Favorita">
-                    ★
-                  </span>
-                ) : null}
-                {selectedMessageId === m.id ? (
-                  <MessageActions
-                    message={{ ...m, is_favorite: isFavorite }}
-                    conversationId={conversationId}
-                    onClose={() => setSelectedMessageId(null)}
-                    onFeedback={(text, error = false) => setFeedback({ text, error })}
-                    onFavoriteChange={(favorite) => setFavoriteOverrides((current) => ({ ...current, [m.id]: favorite }))}
-                  />
-                ) : null}
-              </div>
-            </div>
-            )}
-            </div>
-          );
-        })}
+        {messages.map((message, index) => (
+          <ChatMessageItem
+            key={message.id}
+            message={message}
+            conversationId={conversationId}
+            repliedMessage={message.reply_to_message_id ? messageById.get(message.reply_to_message_id) ?? null : null}
+            showDay={index === 0 || messageDayKey(messages[index - 1]?.sent_at ?? "") !== messageDayKey(message.sent_at)}
+            showNewDivider={index === firstNewSinceReadIdx && firstNewSinceReadIdx >= 0}
+            isNewSinceRead={firstNewSinceReadIdx >= 0 && index >= firstNewSinceReadIdx && Boolean(lastReadAtIso?.trim())}
+            isFavorite={favoriteOverrides[message.id] ?? message.is_favorite}
+            selected={selectedMessageId === message.id}
+            onToggle={toggleMessage}
+            onClose={closeMessageActions}
+            onFeedback={showFeedback}
+            onFavoriteChange={changeFavorite}
+          />
+        ))}
       </div>
     </div>
   );

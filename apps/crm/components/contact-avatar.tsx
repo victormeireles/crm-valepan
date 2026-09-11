@@ -12,34 +12,42 @@ export function ContactAvatar({
   phone,
   className,
   textClassName,
+  loading = "lazy",
 }: {
   name: string;
   src?: string | null;
   phone?: string | null;
   className: string;
   textClassName?: string;
+  loading?: "eager" | "lazy";
 }) {
-  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  const [failedSources, setFailedSources] = useState<ReadonlySet<string>>(() => new Set());
   const normalizedPhone = phone?.trim() ?? "";
-  const directSrc = src?.trim() ?? null;
+  const directSrc = src?.trim() || null;
   const proxySrc = /^\+\d{8,15}$/.test(normalizedPhone)
     ? `/api/contacts/avatar?phone=${encodeURIComponent(normalizedPhone)}`
     : null;
-  const primarySrc = proxySrc ?? directSrc;
-  const normalizedSrc =
-    proxySrc && directSrc && failedSrc === proxySrc
-      ? `${proxySrc}&refresh=1`
-      : primarySrc;
+  const refreshSrc = proxySrc ? `${proxySrc}&refresh=1` : null;
+  const normalizedSrc = [directSrc, proxySrc, refreshSrc].find(
+    (candidate): candidate is string => Boolean(candidate && !failedSources.has(candidate)),
+  ) ?? null;
 
-  if (normalizedSrc && failedSrc !== normalizedSrc) {
+  if (normalizedSrc) {
     return (
-      // A rota interna renova links temporários da Z-API; as iniciais cobrem contatos sem foto.
+      // Usa primeiro a URL já carregada com a lista. O endpoint interno só entra
+      // como fallback e renova links temporários quando ambos falham.
       // eslint-disable-next-line @next/next/no-img-element
       <img
         src={normalizedSrc}
         alt={`Foto de ${name}`}
         className={`${className} rounded-full object-cover`}
-        onError={() => setFailedSrc(normalizedSrc)}
+        loading={loading}
+        decoding="async"
+        onError={() => setFailedSources((previous) => {
+          const next = new Set(previous);
+          next.add(normalizedSrc);
+          return next;
+        })}
       />
     );
   }

@@ -1,25 +1,17 @@
 "use client";
 
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
-import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 const REFRESH_DEBOUNCE_MS = 750;
 const REFRESH_COOLDOWN_MS = 2_000;
 
 /** Atualiza o Inbox apenas quando o Supabase informa uma mudança relevante. */
-export function InboxLiveRefresh({
-  selectedConversationId,
-  selectedLeadId,
-}: {
-  selectedConversationId: string | null;
-  selectedLeadId: string | null;
-}) {
-  const router = useRouter();
+export function InboxLiveRefresh() {
   const supabase = useMemo(() => createBrowserSupabaseClient(), []);
   const visible = useRef(true);
   const changedWhileHidden = useRef(false);
-  const lastRefreshAt = useRef(0);
+  const lastUpdateAt = useRef(0);
   const [callAlert, setCallAlert] = useState<string | null>(null);
 
   const signalCall = (status: string | null | undefined) => {
@@ -55,29 +47,20 @@ export function InboxLiveRefresh({
   };
 
   useEffect(() => {
-    if (!selectedConversationId) return;
-    const url = new URL(window.location.href);
-    if (url.searchParams.get("cid")) return;
-
-    url.searchParams.set("cid", selectedConversationId);
-    router.replace(`${url.pathname}?${url.searchParams.toString()}`, { scroll: false });
-  }, [router, selectedConversationId]);
-
-  useEffect(() => {
     let refreshTimer: ReturnType<typeof setTimeout> | null = null;
 
-    const scheduleRefresh = () => {
+    const scheduleIncrementalUpdate = () => {
       if (!visible.current) {
         changedWhileHidden.current = true;
         return;
       }
       if (refreshTimer) clearTimeout(refreshTimer);
-      const elapsed = Date.now() - lastRefreshAt.current;
+      const elapsed = Date.now() - lastUpdateAt.current;
       const wait = Math.max(REFRESH_DEBOUNCE_MS, REFRESH_COOLDOWN_MS - elapsed);
       refreshTimer = setTimeout(() => {
         refreshTimer = null;
-        lastRefreshAt.current = Date.now();
-        router.refresh();
+        lastUpdateAt.current = Date.now();
+        window.dispatchEvent(new CustomEvent("crm:inbox-sidebar-changed"));
       }, wait);
     };
 
@@ -85,7 +68,7 @@ export function InboxLiveRefresh({
       visible.current = document.visibilityState === "visible";
       if (visible.current && changedWhileHidden.current) {
         changedWhileHidden.current = false;
-        scheduleRefresh();
+        scheduleIncrementalUpdate();
       }
     };
 
@@ -105,11 +88,7 @@ export function InboxLiveRefresh({
           if (changedRow?.event_kind === "whatsapp_call") {
             signalCall(changedRow.event_status);
           }
-          const changedConversationId =
-            (payload.new as { conversation_id?: string } | null)?.conversation_id ??
-            (payload.old as { conversation_id?: string } | null)?.conversation_id ??
-            null;
-          if (changedConversationId !== selectedConversationId) scheduleRefresh();
+          scheduleIncrementalUpdate();
         },
       )
       .on(
@@ -123,7 +102,7 @@ export function InboxLiveRefresh({
           // A ficha selecionada já aplica essas mudanças localmente. Recarregar
           // todo o Inbox no meio da digitação interrompe o formulário e soma uma
           // renderização pesada à Server Action.
-          if (!selectedLeadId || changedLeadId !== selectedLeadId) scheduleRefresh();
+          if (changedLeadId) scheduleIncrementalUpdate();
         },
       )
       .on(
@@ -134,13 +113,8 @@ export function InboxLiveRefresh({
             (payload.new as { lead_id?: string } | null)?.lead_id ??
             (payload.old as { lead_id?: string } | null)?.lead_id ??
             null;
-          if (!selectedLeadId || changedLeadId !== selectedLeadId) scheduleRefresh();
+          if (changedLeadId) scheduleIncrementalUpdate();
         },
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "crm", table: "tasks" },
-        scheduleRefresh,
       )
       .subscribe();
 
@@ -149,7 +123,7 @@ export function InboxLiveRefresh({
       document.removeEventListener("visibilitychange", onVis);
       void supabase.removeChannel(channel);
     };
-  }, [router, selectedConversationId, selectedLeadId, supabase]);
+  }, [supabase]);
 
   return callAlert ? (
     <div

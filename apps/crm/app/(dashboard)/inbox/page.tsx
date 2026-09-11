@@ -6,46 +6,29 @@ import {
 import { displayCompanyName, displayPersonName } from "@/lib/lead-identity";
 import { nestOne } from "@/lib/supabase/nested";
 import { createServerSupabaseClient, crmTables } from "@/lib/supabase/server";
-import { ChatThread } from "./chat-thread";
 import { InboxLiveRefresh } from "./inbox-live-refresh";
 import { InboxSidebar, type InboxSidebarRow } from "./inbox-sidebar";
 import { PaginationNav } from "@/components/pagination-nav";
-import { ContactAvatar } from "@/components/contact-avatar";
-import { CrmIcon } from "@/components/crm-icon";
-import { MarkConversationRead } from "./mark-conversation-read";
-import type { InboxTaskRow } from "./inbox-tasks-panel";
-import { SendMessageForm } from "./send-message-form";
-import { ExcludeLeadButton, RestoreLeadButton } from "./exclude-lead-actions";
-import { InboxLeadPanel, InboxLeadPanelDrawer, type InboxLeadPanelProps } from "./inbox-lead-panel";
+import { InboxConversationPane } from "./inbox-conversation-pane";
+import type { InboxConversationView } from "@/app/actions/inbox";
 import {
   isLeadExcludedFromPipeline,
   leadExclusionReasonLabel,
 } from "@/lib/lead-pipeline-exclusion";
-import { getCustomerWaitSignal, getWeeklyBreadCount } from "@/lib/lead-signals";
-import { timelineActivityLabel } from "@/lib/timeline-labels";
-import type { Json } from "@/lib/database.types";
-import { toFollowUpDTO } from "@/lib/follow-ups";
-import { brazilPhoneSearchVariants } from "@crm/shared/phone";
-
-const TEAM_ROLE_LABEL: Record<string, string> = {
-  admin: "Admin",
-  comercial: "Comercial",
-  gestao: "Gestão",
-  operacao: "Operação",
-};
-
-function formatTeamOption(p: { id: string; full_name: string | null; role: string }) {
-  const name = (p.full_name ?? "").trim() || "Sem nome";
-  const role = TEAM_ROLE_LABEL[p.role] ?? p.role;
-  return { id: p.id, label: `${name} (${role})` };
-}
+import { getWeeklyBreadCount } from "@/lib/lead-signals";
+import type { Database } from "@/lib/database.types";
+import {
+  logInboxPerformance,
+  timeInboxOperation,
+  type InboxPerformanceOperation,
+} from "@/lib/inbox-performance";
 
 /** Evita cache estático: mensagens novas precisam aparecer após webhook / envio. */
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 const PREVIEW_MAX = 80;
-const PAGE_SIZE = 40;
+const PAGE_SIZE = 20;
 type InboxTab = "qualify" | "archived" | "groups" | "pipeline";
 type ConversationRow = {
   id: string;
@@ -59,6 +42,7 @@ type ConversationRow = {
   last_read_at: string | null;
   leads: unknown;
 };
+type InboxSidebarSnapshotRow = Database["crm"]["Functions"]["inbox_sidebar_snapshot"]["Returns"][number];
 
 function previewLine(body: string | null | undefined): string {
   const t = (body ?? "").trim().replace(/\s+/g, " ");
@@ -84,36 +68,24 @@ function validAvatarUrl(v: string | null | undefined): string | null {
   return t;
 }
 
-function compactHistoryItem(row: { kind: string; event_id: string; at: string; data: Json }) {
-  const data = (row.data ?? {}) as Record<string, unknown>;
-  if (row.kind === "sample") {
-    return { id: row.event_id, at: row.at, icon: "inventory_2", label: `Amostra · ${String(data.status ?? "atualizada")}` };
-  }
-  if (row.kind === "activity") {
-    const action = typeof data.action === "string" ? data.action : "activity";
-    return { id: row.event_id, at: row.at, icon: action === "stage_changed" ? "conversion_path" : "history", label: timelineActivityLabel(action) };
-  }
-  if (row.kind === "task") {
-    const itemName = data.task_kind === "follow_up" ? "Follow-up" : "Tarefa";
-    return { id: row.event_id, at: row.at, icon: "task_alt", label: `${itemName} · ${String(data.title ?? "criado")}` };
-  }
-  return { id: row.event_id, at: row.at, icon: row.kind === "message" ? "chat" : "history", label: row.kind === "message" ? "Interação no WhatsApp" : "Lead atualizado" };
-}
-
 export default async function InboxPage({
   searchParams,
 }: {
   searchParams: Promise<{ cid?: string; tab?: string; page?: string; q?: string; lookup?: string }>;
 }) {
+  const pageStartedAt = performance.now();
+  const performanceOperations: InboxPerformanceOperation[] = [];
+  async function timed<T>(operation: string, work: PromiseLike<T>) {
+    const result = await timeInboxOperation(operation, work);
+    performanceOperations.push(result);
+    return result.value;
+  }
   const renderNowMs = Date.now();
-  const params = await searchParams;
+  const params = await timed("search_params", searchParams);
   const { cid, tab } = params;
-  const isPhoneLookupSelection = params.lookup === "1";
   const inboxQuery = typeof params.q === "string" ? params.q.trim() : "";
   const inboxQueryDigits = inboxQuery.replace(/\D/g, "");
-  const phoneSearchVariants =
-    inboxQueryDigits.length >= 4 ? brazilPhoneSearchVariants(inboxQuery) : [];
-  const isPhoneSearch = phoneSearchVariants.length > 0;
+  const isPhoneSearch = inboxQueryDigits.length >= 4;
   const requestedPage = params.page ? Number.parseInt(params.page, 10) : 1;
   const page = Number.isFinite(requestedPage) && requestedPage > 0 ? requestedPage : 1;
   const activeTab: InboxTab =
@@ -124,153 +96,81 @@ export default async function InboxPage({
         : tab === "pipeline"
           ? "pipeline"
           : "qualify";
-  const conversationKind = isPhoneSearch || activeTab !== "groups" ? "lead" : "group";
-  const supabase = await createServerSupabaseClient();
+  const supabase = await timed("supabase_client", createServerSupabaseClient());
   const crm = crmTables(supabase);
+  const conversationSelect =
+    "id, phone_e164, conversation_kind, group_display_name, classification, last_message_at, created_at, updated_at, last_read_at, leads(id, client_category, excluded_from_pipeline_at, excluded_reason, contacts(full_name, avatar_url), companies(name, city, state), distributors(name))";
   // A conversa solicitada já vem na URL; carregue suas mensagens enquanto a
   // barra lateral e a etapa inicial são consultadas.
-  const requestedMessagesPromise = cid ? loadRecentConversationMessages(crm, cid) : null;
-  const stagesPromise = crm
+  const requestedMessagesPromise = cid ? timed("messages_initial", loadRecentConversationMessages(crm, cid)) : null;
+  const requestedConversationPromise = cid
+    ? timed("selected_conversation", crm.from("conversations").select(conversationSelect).eq("id", cid).maybeSingle())
+    : null;
+  const stagesPromise = timed("pipeline_stages", crm
     .from("pipeline_stages")
     .select("id, name, sort_order, is_final")
-    .order("sort_order", { ascending: true });
-  const { data: stages } = await stagesPromise;
-  // LEADS e o nome legado ENTRADA representam a mesma fila de contatos ainda
-  // não qualificados. Aceitar ambos mantém o chat correto durante a migração.
-  const entryStageIds = (stages ?? [])
-    .filter((stage) => ["LEADS", "ENTRADA"].includes(stage.name.trim().toUpperCase()))
-    .map((stage) => stage.id);
-  const opportunityRelation: string =
-    !isPhoneSearch && (activeTab === "pipeline" || activeTab === "qualify")
-      ? "opportunities!inner(id, stage_id, title, next_action_at, owner_id, updated_at)"
-      : "opportunities(id, stage_id, title, next_action_at, owner_id, updated_at)";
-  const leadRelation: string =
-    activeTab === "groups" && !isPhoneSearch
-      ? "leads(id, phone_e164, status, owner_id, client_category, zip_code, weekly_bread_consumption, bread_type, bread_weight_grams, excluded_from_pipeline_at, excluded_reason, contacts(full_name, avatar_url), companies(id, name, document, city, state), distributors(name), opportunities(id, stage_id, updated_at))"
-      : `leads!inner(id, phone_e164, status, owner_id, client_category, zip_code, weekly_bread_consumption, bread_type, bread_weight_grams, excluded_from_pipeline_at, excluded_reason, contacts(full_name, avatar_url), companies(id, name, document, city, state), distributors(name), ${opportunityRelation})`;
-  const conversationSelect: string =
-    `id, phone_e164, conversation_kind, group_display_name, classification, last_message_at, created_at, updated_at, last_read_at, ${leadRelation}`;
-  let conversationsQuery = crm
-    .from("conversations")
-    .select(conversationSelect, { count: "exact" })
-    .eq("conversation_kind", conversationKind)
-    .gte("last_message_at", INBOX_MESSAGES_VISIBLE_SINCE);
-  if (phoneSearchVariants.length > 0) {
-    conversationsQuery = conversationsQuery.or(
-      phoneSearchVariants.map((digits) => `phone_e164.ilike.%${digits}%`).join(","),
-    );
-  }
-  if (!isPhoneSearch && activeTab === "qualify") {
-    conversationsQuery = conversationsQuery.is("leads.excluded_from_pipeline_at", null);
-    if (entryStageIds.length > 0) {
-      conversationsQuery = conversationsQuery.in("leads.opportunities.stage_id", entryStageIds);
-    }
-  } else if (!isPhoneSearch && activeTab === "pipeline") {
-    conversationsQuery = conversationsQuery.is("leads.excluded_from_pipeline_at", null);
-    if (entryStageIds.length > 0) {
-      conversationsQuery = conversationsQuery.not(
-        "leads.opportunities.stage_id",
-        "in",
-        `(${entryStageIds.join(",")})`,
-      );
-    }
-  } else if (!isPhoneSearch && activeTab === "archived") {
-    conversationsQuery = conversationsQuery.not("leads.excluded_from_pipeline_at", "is", null);
-  }
-
-  const conversationsResult = await conversationsQuery
-    .order("last_message_at", { ascending: false, nullsFirst: false })
-    .order("created_at", { ascending: false })
-    .range((page - 1) * PAGE_SIZE, page * PAGE_SIZE - 1);
-  const conversations = (conversationsResult.data ?? []) as unknown as ConversationRow[];
-  const conversationsError = conversationsResult.error;
-  const conversationsCount = conversationsResult.count;
-
-  let qualifyCountQuery = crm
-    .from("conversations")
-    .select("id, leads!inner(excluded_from_pipeline_at, opportunities!inner(stage_id))", { count: "exact", head: true })
-    .eq("conversation_kind", "lead")
-    .gte("last_message_at", INBOX_MESSAGES_VISIBLE_SINCE)
-    .is("leads.excluded_from_pipeline_at", null);
-  let pipelineCountQuery = crm
-    .from("conversations")
-    .select("id, leads!inner(excluded_from_pipeline_at, opportunities!inner(stage_id))", { count: "exact", head: true })
-    .eq("conversation_kind", "lead")
-    .gte("last_message_at", INBOX_MESSAGES_VISIBLE_SINCE)
-    .is("leads.excluded_from_pipeline_at", null);
-  if (entryStageIds.length > 0) {
-    qualifyCountQuery = qualifyCountQuery.in("leads.opportunities.stage_id", entryStageIds);
-    pipelineCountQuery = pipelineCountQuery.not("leads.opportunities.stage_id", "in", `(${entryStageIds.join(",")})`);
-  }
-  const [qualifyCountResult, archivedCountResult, groupsCountResult, pipelineCountResult] = await Promise.all([
-    qualifyCountQuery,
-    crm
-      .from("conversations")
-      .select("id, leads!inner(excluded_from_pipeline_at)", { count: "exact", head: true })
-      .eq("conversation_kind", "lead")
-      .gte("last_message_at", INBOX_MESSAGES_VISIBLE_SINCE)
-      .not("leads.excluded_from_pipeline_at", "is", null),
-    crm
-      .from("conversations")
-      .select("id", { count: "exact", head: true })
-      .eq("conversation_kind", "group")
-      .gte("last_message_at", INBOX_MESSAGES_VISIBLE_SINCE),
-    pipelineCountQuery,
+    .order("sort_order", { ascending: true }));
+  const snapshotPromise = timed("sidebar_snapshot", crm.rpc("inbox_sidebar_snapshot", {
+    p_messages_visible_since: INBOX_MESSAGES_VISIBLE_SINCE,
+    p_tab: activeTab,
+    p_offset: (page - 1) * PAGE_SIZE,
+    p_limit: PAGE_SIZE,
+    p_query: isPhoneSearch ? inboxQuery : null,
+  }));
+  const [{ data: stages }, snapshotResult, requestedConversationResult] = await Promise.all([
+    stagesPromise,
+    snapshotPromise,
+    requestedConversationPromise,
   ]);
+  const snapshotRows = (snapshotResult.data ?? []) as InboxSidebarSnapshotRow[];
+  const snapshotMeta = snapshotRows[0];
+  const compactRows = snapshotRows.filter(
+    (row) => row.conversation_id && row.phone_e164 && row.conversation_kind && row.created_at && row.updated_at,
+  );
+  const conversations: ConversationRow[] = compactRows.map((row) => ({
+    id: row.conversation_id!,
+    phone_e164: row.phone_e164!,
+    conversation_kind: row.conversation_kind!,
+    group_display_name: row.group_display_name,
+    classification: row.classification,
+    last_message_at: row.last_message_at,
+    created_at: row.created_at!,
+    updated_at: row.updated_at!,
+    last_read_at: row.last_read_at,
+    leads: row.lead_id
+      ? {
+          id: row.lead_id,
+          status: "open",
+          owner_id: null,
+          client_category: row.client_category,
+          weekly_bread_consumption: row.weekly_bread_consumption,
+          bread_weight_grams: row.bread_weight_grams,
+          excluded_from_pipeline_at: row.excluded_from_pipeline_at,
+          contacts: { full_name: row.contact_name, avatar_url: row.avatar_url },
+          companies: row.company_name ? { name: row.company_name } : null,
+          distributors: row.distributor_name ? { name: row.distributor_name } : null,
+          opportunities: row.stage_id ? { stage_id: row.stage_id } : null,
+        }
+      : null,
+  }));
+  const conversationsError = snapshotResult.error;
+  const conversationsCount = Number(snapshotMeta?.tab_total ?? 0);
   const tabCounts = {
-    qualify: qualifyCountResult.count ?? 0,
-    archived: archivedCountResult.count ?? 0,
-    groups: groupsCountResult.count ?? 0,
-    pipeline: pipelineCountResult.count ?? 0,
+    qualify: Number(snapshotMeta?.qualify_count ?? 0),
+    archived: Number(snapshotMeta?.archived_count ?? 0),
+    groups: Number(snapshotMeta?.groups_count ?? 0),
+    pipeline: Number(snapshotMeta?.pipeline_count ?? 0),
   };
-
-  const pageConversationIds = (conversations ?? []).map((conversation) => conversation.id);
-
-  let selectedOutsidePage: ConversationRow | null = null;
-  let selectedConversationError: { message: string; code?: string } | null = null;
-  if (cid && !pageConversationIds.includes(cid)) {
-    let selectedQuery = crm
-      .from("conversations")
-      .select(conversationSelect)
-      .eq("id", cid)
-      .eq("conversation_kind", isPhoneLookupSelection ? "lead" : conversationKind)
-      .gte("last_message_at", INBOX_MESSAGES_VISIBLE_SINCE);
-    if (!isPhoneLookupSelection && !isPhoneSearch && activeTab === "qualify") {
-      selectedQuery = selectedQuery.is("leads.excluded_from_pipeline_at", null);
-      if (entryStageIds.length > 0) {
-        selectedQuery = selectedQuery.in("leads.opportunities.stage_id", entryStageIds);
-      }
-    } else if (!isPhoneLookupSelection && !isPhoneSearch && activeTab === "pipeline") {
-      selectedQuery = selectedQuery.is("leads.excluded_from_pipeline_at", null);
-      if (entryStageIds.length > 0) {
-        selectedQuery = selectedQuery.not(
-          "leads.opportunities.stage_id",
-          "in",
-          `(${entryStageIds.join(",")})`,
-        );
-      }
-    } else if (!isPhoneLookupSelection && !isPhoneSearch && activeTab === "archived") {
-      selectedQuery = selectedQuery.not("leads.excluded_from_pipeline_at", "is", null);
-    }
-    const selectedResult = await selectedQuery.maybeSingle();
-    selectedOutsidePage = (selectedResult.data as unknown as ConversationRow | null) ?? null;
-    selectedConversationError = selectedResult.error;
-  }
-
-  const loadedConversationIds = selectedOutsidePage
-    ? [...pageConversationIds, selectedOutsidePage.id]
-    : pageConversationIds;
-  const { data: tails, error: tailsError } =
-    loadedConversationIds.length > 0
-      ? await crm
-          .from("v_conversation_last_message")
-          .select(
-            "conversation_id, lead_id, last_direction, last_sent_at, last_body_preview, event_kind, event_status, last_inbound_sent_at",
-          )
-          .in("conversation_id", loadedConversationIds)
-      : { data: [], error: null };
-
-  const tailById = new Map((tails ?? []).map((t) => [t.conversation_id, t]));
+  const tailById = new Map(compactRows.map((row) => [row.conversation_id!, {
+    conversation_id: row.conversation_id!,
+    lead_id: row.lead_id,
+    last_direction: row.last_direction,
+    last_sent_at: row.last_sent_at,
+    last_body_preview: row.last_body_preview,
+    event_kind: row.event_kind,
+    event_status: row.event_status,
+    last_inbound_sent_at: row.last_inbound_sent_at,
+  }]));
 
   const conversationsSorted = [...(conversations ?? [])]
     .filter((c) => {
@@ -288,9 +188,15 @@ export default async function InboxPage({
       return tb.localeCompare(ta);
     });
 
-  const selected = cid
-    ? conversationsSorted.find((c) => c.id === cid) ?? selectedOutsidePage
-    : conversationsSorted[0] ?? null;
+  // Sem `cid`, a primeira conversa já veio na RPC compacta. Reconsultá-la
+  // atrasava o início da busca das mensagens sem acrescentar dados essenciais;
+  // a ficha completa permanece disponível pela ação sob demanda.
+  const selectedResult = requestedConversationResult ?? {
+    data: conversationsSorted[0] ?? null,
+    error: null,
+  };
+  const selected = (selectedResult.data as unknown as ConversationRow | null) ?? null;
+  const selectedConversationError = selectedResult.error;
   const selectedId = selected?.id ?? null;
 
   let messages: InboxMessageRow[] = [];
@@ -301,24 +207,20 @@ export default async function InboxPage({
     const res =
       selectedId === cid && requestedMessagesPromise
         ? await requestedMessagesPromise
-        : await loadRecentConversationMessages(crm, selectedId);
+        : await timed("messages_initial", loadRecentConversationMessages(crm, selectedId));
     messages = res.messages;
     hasMoreOlder = res.hasMoreOlder;
     messagesError = res.error;
   }
 
   const selectedTail = selected ? tailById.get(selected.id) : undefined;
-  const awaitingReply = selectedTail?.last_direction === "in";
-
   const dbError =
     conversationsError?.message ??
     selectedConversationError?.message ??
-    messagesError?.message ??
-    tailsError?.message;
+    messagesError?.message;
   const schemaHint =
     conversationsError?.code === "PGRST106" ||
     messagesError?.code === "PGRST106" ||
-    tailsError?.code === "PGRST106" ||
     selectedConversationError?.code === "PGRST106"
       ? "No Supabase: Settings → Data API → Exposed schemas → inclua o schema «crm» (o mesmo ajuste do webhook)."
       : null;
@@ -428,57 +330,6 @@ export default async function InboxPage({
       | { name: string | null }
       | { name: string | null }[]
       | null,
-  );
-
-  const selectedOpportunity = nestOne(
-    (selectedLead?.opportunities ?? null) as
-      | { id: string; stage_id: string; title: string | null; next_action_at: string | null; owner_id: string | null; updated_at: string }
-      | { id: string; stage_id: string; title: string | null; next_action_at: string | null; owner_id: string | null; updated_at: string }[]
-      | null,
-  );
-
-  let inboxLeadTasks: InboxTaskRow[] = [];
-  let inboxTeamOptions: { id: string; label: string }[] = [];
-  let inboxOpportunityId = selectedOpportunity?.id ?? null;
-  let inboxOpportunity = selectedOpportunity;
-  let inboxLeadOwnerId: string | null = null;
-  let inboxHistory: InboxLeadPanelProps["history"] = [];
-
-  if (selectedLead?.id) {
-    const leadId = selectedLead.id;
-    inboxLeadOwnerId = (selectedLead as { owner_id?: string | null }).owner_id ?? null;
-    const [leadTasksResult, teamProfilesResult, latestOppResult, historyResult] = await Promise.all([
-      crm
-        .from("tasks")
-        .select("id, title, due_at, done, assignee_id, task_kind")
-        .eq("lead_id", leadId)
-        .order("done", { ascending: true })
-        .order("due_at", { ascending: true, nullsFirst: false }),
-      crm.from("profiles").select("id, full_name, role").order("full_name", { ascending: true }),
-      crm
-        .from("opportunities")
-        .select("id, stage_id, title, next_action_at, owner_id, updated_at")
-        .eq("lead_id", leadId)
-        .order("updated_at", { ascending: false })
-        .limit(1)
-        .maybeSingle(),
-      crm
-        .from("timeline_events")
-        .select("kind, event_id, at, data")
-        .eq("lead_id", leadId)
-        .order("at", { ascending: false })
-        .limit(4),
-    ]);
-    inboxLeadTasks = (leadTasksResult.data ?? []) as InboxTaskRow[];
-    inboxTeamOptions = (teamProfilesResult.data ?? []).map(formatTeamOption);
-    inboxOpportunityId = latestOppResult.data?.id ?? selectedOpportunity?.id ?? null;
-    inboxOpportunity = latestOppResult.data ?? selectedOpportunity;
-    inboxHistory = (historyResult.data ?? []).map(compactHistoryItem);
-  }
-
-  const inboxAssigneeLabels = Object.fromEntries(inboxTeamOptions.map((o) => [o.id, o.label]));
-  const inboxFollowUpRow = inboxLeadTasks.find(
-    (task) => task.task_kind === "follow_up" && !task.done,
   );
 
   const sidebarRows: InboxSidebarRow[] = conversationsSorted.map((c) => {
@@ -629,49 +480,43 @@ export default async function InboxPage({
       })
     : null;
   const selectedAvatarUrl = validAvatarUrl(selectedContact?.avatar_url);
-  const selectedWait = getCustomerWaitSignal({
-    lastDirection: selectedTail?.last_direction,
-    lastSentAt: selectedTail?.last_sent_at,
-    nowMs: renderNowMs,
-  });
   const firstName = selectedHeaderName.trim().split(/\s+/)[0] || "cliente";
-  const leadPanelProps: InboxLeadPanelProps | null = selected && selectedLead?.id
+  const initialConversationView: InboxConversationView | null = selected
     ? {
-        conversationId: selected.id,
-        leadId: selectedLead.id,
-        contactName: selectedHeaderName,
-        companyName: selectedCompany?.name ?? selectedHeaderCompany,
-        initialCategory: selectedLead.client_category ?? null,
-        initialStageId: inboxOpportunity?.stage_id ?? null,
-        initialState: selectedCompany?.state ?? null,
-        initialCity: selectedCompany?.city ?? null,
-        initialZipCode: selectedLead.zip_code ?? null,
-        initialWeeklyBreadConsumption: selectedLead.weekly_bread_consumption ?? null,
-        initialBreadWeightGrams: selectedLead.bread_weight_grams ?? null,
-        initialBreadType: selectedLead.bread_type ?? null,
-        initialCnpj: selectedCompany?.document ?? null,
-        initialOwnerId: inboxLeadOwnerId,
-        stages: (stages ?? []).map((stage) => ({
-          id: stage.id,
-          name: stage.name,
-          sortOrder: stage.sort_order,
-          isFinal: stage.is_final,
-        })),
-        teamOptions: inboxTeamOptions,
-        opportunityId: inboxOpportunityId,
-        followUp: inboxFollowUpRow ? toFollowUpDTO(inboxFollowUpRow) : null,
-        tasks: inboxLeadTasks,
-        assigneeLabels: inboxAssigneeLabels,
-        history: inboxHistory,
+        conversation: {
+          id: selected.id,
+          phone: selected.phone_e164,
+          headerName: selectedHeaderName,
+          headerCompany: selectedHeaderCompany,
+          location: [selectedCompany?.city, selectedCompany?.state].filter(Boolean).join(", ") || null,
+          avatarUrl: selectedAvatarUrl,
+          firstName,
+          lastReadAt: selected.last_read_at ?? null,
+          lastDirection: selectedTail?.last_direction ?? null,
+          lastSentAt: selectedTail?.last_sent_at ?? null,
+          lastBodyPreview: selectedTail?.last_body_preview ?? null,
+          leadId: selectedLead?.id ?? null,
+          leadExcluded: selectedLeadExcluded,
+        },
+        messages,
+        hasMoreOlder,
+        ...(messagesError ? { messagesLoadError: messagesError.message } : {}),
+        leadPanel: null,
       }
     : null;
 
+  logInboxPerformance("initial_load", performance.now() - pageStartedAt, performanceOperations, {
+    tab: activeTab,
+    page,
+    conversations: conversationsSorted.length,
+    messages: messages.length,
+    hasCid: Boolean(cid),
+    hasError: Boolean(dbError),
+  });
+
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden">
-      <InboxLiveRefresh
-        selectedConversationId={selectedId}
-        selectedLeadId={selectedLead?.id ?? null}
-      />
+      <InboxLiveRefresh />
       {dbError ? (
         <div
           className="shrink-0 rounded-lg border border-[color:var(--border-strong)] bg-[var(--vp-surface)] px-3 py-2 text-sm text-[var(--vp-wine-classic)]"
@@ -705,88 +550,7 @@ export default async function InboxPage({
           />
         </div>
 
-        <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[14px] border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] shadow-[var(--sh-sm)]">
-          {selected ? (
-            <>
-              <MarkConversationRead
-                conversationId={selected.id}
-                fingerprint={`${selectedTail?.last_sent_at ?? ""}|${selectedTail?.last_direction ?? ""}|${selectedTail?.last_body_preview ?? ""}`}
-              />
-              <div className="shrink-0 border-b border-[var(--vp-ink-line)] bg-[var(--vp-paper)] px-[18px] py-3.5">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="flex min-w-0 items-center gap-3">
-                    <ContactAvatar
-                      name={selectedHeaderName}
-                      src={selectedAvatarUrl}
-                      phone={selected?.phone_e164}
-                      className="size-11 shrink-0"
-                    />
-                    <div className="min-w-0">
-                      <h1 className="truncate text-[17px] font-bold text-[var(--vp-ink-body)]">{selectedHeaderName}</h1>
-                      <p className="truncate text-xs text-[var(--vp-ink-muted)]">
-                        {[selectedHeaderCompany, selected.phone_e164, [selectedCompany?.city, selectedCompany?.state].filter(Boolean).join(", ")].filter(Boolean).join(" · ")}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-2">
-                    {awaitingReply ? (
-                      <span className="hidden items-center gap-1.5 rounded-full bg-[rgba(186,26,26,0.1)] px-3 py-1.5 text-[11px] font-extrabold tracking-[0.04em] text-[var(--vp-error)] sm:inline-flex">
-                        <span className="size-[7px] rounded-full bg-[var(--vp-error)]" aria-hidden="true" />
-                        {selectedWait.label.replace("Cliente esperando ", "Esperando ")}
-                      </span>
-                    ) : null}
-                    {leadPanelProps ? (
-                      <InboxLeadPanelDrawer
-                        key={leadPanelProps.conversationId}
-                        {...leadPanelProps}
-                      />
-                    ) : null}
-                    <a href={`tel:${selected.phone_e164}`} className="grid size-[34px] place-items-center rounded-full border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] text-[var(--vp-wine)]" aria-label={`Ligar para ${selectedHeaderName}`}>
-                      <CrmIcon name="call" className="text-lg" />
-                    </a>
-                    {selectedLeadExcluded && selectedLead?.id ? (
-                      <RestoreLeadButton leadId={selectedLead.id} />
-                    ) : selectedLead?.id ? (
-                      <ExcludeLeadButton leadId={selectedLead.id} iconOnly />
-                    ) : null}
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--vp-paper)] px-[18px]">
-                <ChatThread
-                  key={selected.id}
-                  conversationId={selected.id}
-                  initialMessages={messages}
-                  hasMoreOlder={hasMoreOlder}
-                  messagesLoadError={messagesError?.message}
-                  lastReadAtIso={(selected as { last_read_at?: string | null }).last_read_at ?? null}
-                />
-              </div>
-
-              <div className="shrink-0 border-t border-[var(--vp-ink-line)] bg-[var(--vp-paper)] px-[18px] pb-4 pt-3">
-                <SendMessageForm conversationId={selected.id} phone={selected.phone_e164} firstName={firstName} />
-              </div>
-            </>
-          ) : (
-            <div className="flex flex-1 items-center justify-center px-4 py-12">
-              <p className="text-center text-sm text-[var(--muted)]">
-                {cid
-                  ? "Esta conversa não está mais nesta lista. Ela pode ter sido movida, arquivada ou excluída."
-                  : "Nenhuma conversa para mostrar."}
-              </p>
-            </div>
-          )}
-        </section>
-        {leadPanelProps ? (
-          <div className="hidden min-h-0 xl:block">
-            <InboxLeadPanel key={leadPanelProps.conversationId} {...leadPanelProps} />
-          </div>
-        ) : (
-          <aside className="hidden min-h-0 items-center justify-center rounded-[14px] border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] px-5 text-center text-xs text-[var(--vp-ink-muted)] xl:flex">
-            Selecione uma conversa de lead para abrir a ficha.
-          </aside>
-        )}
+        <InboxConversationPane initialView={initialConversationView} />
       </div>
     </div>
   );

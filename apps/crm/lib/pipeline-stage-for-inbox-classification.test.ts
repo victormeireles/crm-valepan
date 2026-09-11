@@ -14,6 +14,13 @@ describe("pipelineStageForInboxClassification", () => {
     expect(pipelineStageForInboxClassification("SEM RETORNO")).toBe("SEM RETORNO");
   });
 
+  it.each(["JÁ É CLIENTE", "NÃO INAUGUROU", "SEM PEDIDO MÍNIMO"])(
+    "envia %s para a etapa de mesmo nome",
+    (classification) => {
+      expect(pipelineStageForInboxClassification(classification)).toBe(classification);
+    },
+  );
+
   it("trata os nomes divergentes entre classificação e etapa", () => {
     expect(pipelineStageForInboxClassification("ENCAMINHADO PARA O DISTRIBUIDOR")).toBe(
       "ENCAMINHADO PARA DISTRIBUIDOR",

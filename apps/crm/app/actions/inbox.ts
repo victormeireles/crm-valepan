@@ -4,8 +4,18 @@ import { revalidatePath } from "next/cache";
 import {
   INBOX_MESSAGE_PAGE_SIZE,
   INBOX_MESSAGES_VISIBLE_SINCE,
+  loadRecentConversationMessages,
   loadOlderMessagesPage,
 } from "@/lib/inbox/load-messages";
+import { displayCompanyName, displayPersonName } from "@/lib/lead-identity";
+import { isLeadExcludedFromPipeline } from "@/lib/lead-pipeline-exclusion";
+import { leadExclusionReasonLabel } from "@/lib/lead-pipeline-exclusion";
+import { getWeeklyBreadCount } from "@/lib/lead-signals";
+import { logInboxPerformance, timeInboxOperation } from "@/lib/inbox-performance";
+import { timelineActivityLabel } from "@/lib/timeline-labels";
+import { toFollowUpDTO } from "@/lib/follow-ups";
+import type { Database, Json } from "@/lib/database.types";
+import type { InboxLeadPanelProps } from "@/app/(dashboard)/inbox/inbox-lead-panel";
 import { nestOne } from "@/lib/supabase/nested";
 import { isPhoneSearchQuery } from "@/lib/phone-search-query";
 import { brazilPhoneSearchVariants } from "@crm/shared/phone";
@@ -41,6 +51,344 @@ export type InboxPhoneSearchRow = {
   companyName: string | null;
   lastAt: string;
 };
+
+export type InboxConversationView = {
+  conversation: {
+    id: string;
+    phone: string;
+    headerName: string;
+    headerCompany: string | null;
+    location: string | null;
+    avatarUrl: string | null;
+    firstName: string;
+    lastReadAt: string | null;
+    lastDirection: string | null;
+    lastSentAt: string | null;
+    lastBodyPreview: string | null;
+    leadId: string | null;
+    leadExcluded: boolean;
+  };
+  messages: Awaited<ReturnType<typeof loadRecentConversationMessages>>["messages"];
+  hasMoreOlder: boolean;
+  messagesLoadError?: string;
+  leadPanel: InboxLeadPanelProps | null;
+};
+
+export type InboxSidebarRefreshRow = {
+  id: string;
+  kind: "lead" | "group";
+  displayName: string;
+  phone_e164: string;
+  avatarUrl: string | null;
+  preview: string;
+  lastAt: string;
+  leadLine: string;
+  awaiting: boolean;
+  identityName: string;
+  companyName: string | null;
+  clientCategory: string | null;
+  stageName: string | null;
+  weeklyBreadCount: number | null;
+  lastDirection: string | null;
+  unread: boolean;
+  callStatus: "ringing" | "missed_voice" | "missed_video" | null;
+};
+type InboxSidebarSnapshotRow = Database["crm"]["Functions"]["inbox_sidebar_snapshot"]["Returns"][number];
+
+function inboxPreview(body: string | null) {
+  const text = (body ?? "").trim().replace(/\s+/g, " ");
+  if (!text) return "Sem mensagem ainda";
+  return text.length > 80 ? `${text.slice(0, 79)}…` : text;
+}
+
+export async function refreshInboxSidebar(input: {
+  tab: "qualify" | "archived" | "groups" | "pipeline";
+  page: number;
+}) {
+  const startedAt = performance.now();
+  const supabase = await createServerSupabaseClient();
+  const authTimed = await timeInboxOperation("auth_user", supabase.auth.getUser());
+  const { data: { user } } = authTimed.value;
+  if (!user) {
+    logInboxPerformance("sidebar_refresh", performance.now() - startedAt, [authTimed], { tab: input.tab, page: input.page, rows: 0, hasError: true });
+    return { ok: false as const, error: "Não autenticado" };
+  }
+  const crm = crmTables(supabase);
+  const page = Number.isFinite(input.page) && input.page > 0 ? Math.floor(input.page) : 1;
+  const [snapshotTimed, stagesTimed] = await Promise.all([
+    timeInboxOperation("sidebar_snapshot", crm.rpc("inbox_sidebar_snapshot", {
+      p_messages_visible_since: INBOX_MESSAGES_VISIBLE_SINCE,
+      p_tab: input.tab,
+      p_offset: (page - 1) * 20,
+      p_limit: 20,
+      p_query: null,
+    })),
+    timeInboxOperation("pipeline_stages", crm.from("pipeline_stages").select("id, name")),
+  ]);
+  const snapshotResult = snapshotTimed.value;
+  const stagesResult = stagesTimed.value;
+  const operations = [authTimed, snapshotTimed, stagesTimed];
+  logInboxPerformance("sidebar_refresh", performance.now() - startedAt, operations, {
+    tab: input.tab,
+    page,
+    rows: snapshotResult.data?.length ?? 0,
+    hasError: Boolean(snapshotResult.error),
+  });
+  if (snapshotResult.error) return { ok: false as const, error: snapshotResult.error.message };
+  const rows = (snapshotResult.data ?? []) as InboxSidebarSnapshotRow[];
+  const meta = rows[0];
+  const stageNames = new Map((stagesResult.data ?? []).map((stage) => [stage.id, stage.name]));
+  const conversations: InboxSidebarRefreshRow[] = rows
+    .filter((row) => row.conversation_id && row.phone_e164 && row.conversation_kind && row.created_at && row.updated_at)
+    .map((row) => {
+      const group = row.conversation_kind === "group";
+      const identityName = group
+        ? row.group_display_name?.trim() || row.phone_e164!
+        : row.lead_id ? displayPersonName(row.contact_name) : "Sem lead";
+      const companyName = group || !row.lead_id ? null : displayCompanyName({
+        companyName: row.company_name,
+        distributorName: row.distributor_name,
+        clientCategory: row.client_category,
+      });
+      const lastAt = row.last_sent_at ?? row.last_message_at ?? row.updated_at!;
+      const lastDirection = row.last_direction;
+      const callStatus = row.event_kind === "whatsapp_call" &&
+        (row.event_status === "ringing" || row.event_status === "missed_voice" || row.event_status === "missed_video")
+        ? row.event_status
+        : null;
+      return {
+        id: row.conversation_id!,
+        kind: group ? "group" : "lead",
+        displayName: row.contact_name?.trim() || row.phone_e164!,
+        phone_e164: row.phone_e164!,
+        avatarUrl: validInboxAvatarUrl(row.avatar_url),
+        preview: inboxPreview(row.last_body_preview),
+        lastAt,
+        leadLine: group
+          ? "Conversa em grupo"
+          : row.excluded_from_pipeline_at
+            ? `Arquivado · ${leadExclusionReasonLabel(null)}`
+            : input.tab === "pipeline" ? "No funil" : "Para qualificar",
+        awaiting: lastDirection === "in",
+        identityName,
+        companyName,
+        clientCategory: row.client_category,
+        stageName: row.stage_id ? stageNames.get(row.stage_id) ?? null : null,
+        weeklyBreadCount: getWeeklyBreadCount(row.weekly_bread_consumption),
+        lastDirection,
+        unread: Boolean(row.last_inbound_sent_at && (!row.last_read_at || row.last_inbound_sent_at > row.last_read_at)),
+        callStatus,
+      };
+    });
+  return {
+    ok: true as const,
+    conversations,
+    tabCounts: {
+      qualify: Number(meta?.qualify_count ?? 0),
+      archived: Number(meta?.archived_count ?? 0),
+      groups: Number(meta?.groups_count ?? 0),
+      pipeline: Number(meta?.pipeline_count ?? 0),
+    },
+  };
+}
+
+const INBOX_TEAM_ROLE_LABEL: Record<string, string> = {
+  admin: "Admin",
+  comercial: "Comercial",
+  gestao: "Gestão",
+  operacao: "Operação",
+};
+
+function validInboxAvatarUrl(value: string | null | undefined) {
+  const text = value?.trim() ?? "";
+  return text && text !== "null" && text !== "undefined" ? text : null;
+}
+
+function compactInboxHistoryItem(row: { kind: string; event_id: string; at: string; data: Json }) {
+  const data = (row.data ?? {}) as Record<string, unknown>;
+  if (row.kind === "sample") return { id: row.event_id, at: row.at, icon: "inventory_2", label: `Amostra · ${String(data.status ?? "atualizada")}` };
+  if (row.kind === "activity") {
+    const action = typeof data.action === "string" ? data.action : "activity";
+    return { id: row.event_id, at: row.at, icon: action === "stage_changed" ? "conversion_path" : "history", label: timelineActivityLabel(action) };
+  }
+  if (row.kind === "task") {
+    const itemName = data.task_kind === "follow_up" ? "Follow-up" : "Tarefa";
+    return { id: row.event_id, at: row.at, icon: "task_alt", label: `${itemName} · ${String(data.title ?? "criado")}` };
+  }
+  return { id: row.event_id, at: row.at, icon: row.kind === "message" ? "chat" : "history", label: row.kind === "message" ? "Interação no WhatsApp" : "Lead atualizado" };
+}
+
+export async function loadInboxConversationView(conversationId: string) {
+  const startedAt = performance.now();
+  const id = conversationId.trim();
+  if (!id) return { ok: false as const, error: "Conversa inválida." };
+
+  const supabase = await createServerSupabaseClient();
+  const authTimed = await timeInboxOperation("auth_user", supabase.auth.getUser());
+  const { data: { user } } = authTimed.value;
+  if (!user) {
+    logInboxPerformance("conversation_load", performance.now() - startedAt, [authTimed], { found: false, messages: 0, hasError: true });
+    return { ok: false as const, error: "Não autenticado" };
+  }
+  const crm = crmTables(supabase);
+  const messagesPromise = timeInboxOperation("messages_initial", loadRecentConversationMessages(crm, id));
+  const [conversationTimed, tailTimed] = await Promise.all([
+    timeInboxOperation("selected_conversation", crm.from("conversations").select(`
+      id, phone_e164, conversation_kind, group_display_name, last_read_at,
+      leads(id, client_category, excluded_from_pipeline_at,
+        contacts(full_name, avatar_url),
+        companies(name, city, state),
+        distributors(name)
+      )
+    `).eq("id", id).maybeSingle()),
+    timeInboxOperation("last_message", crm.from("v_conversation_last_message")
+      .select("last_direction, last_sent_at, last_body_preview")
+      .eq("conversation_id", id).maybeSingle()),
+  ]);
+  const messagesTimed = await messagesPromise;
+  const conversationResult = conversationTimed.value;
+  const tailResult = tailTimed.value;
+  const messagesResult = messagesTimed.value;
+  logInboxPerformance("conversation_load", performance.now() - startedAt, [authTimed, conversationTimed, tailTimed, messagesTimed], {
+    found: Boolean(conversationResult.data),
+    messages: messagesResult.messages.length,
+    hasError: Boolean(conversationResult.error || messagesResult.error),
+  });
+  if (conversationResult.error || !conversationResult.data) {
+    return { ok: false as const, error: conversationResult.error?.message ?? "Conversa não encontrada." };
+  }
+
+  const conversation = conversationResult.data;
+  const lead = nestOne(conversation.leads);
+  const contact = nestOne(lead?.contacts ?? null);
+  const company = nestOne(lead?.companies ?? null);
+  const distributor = nestOne(lead?.distributors ?? null);
+  const headerName = conversation.conversation_kind === "group"
+    ? conversation.group_display_name?.trim() || conversation.phone_e164
+    : lead ? displayPersonName(contact?.full_name) : "Sem lead";
+  const headerCompany = conversation.conversation_kind === "lead" && lead
+    ? displayCompanyName({
+        companyName: company?.name,
+        distributorName: distributor?.name,
+        clientCategory: lead.client_category,
+      })
+    : null;
+
+  const view: InboxConversationView = {
+    conversation: {
+      id: conversation.id,
+      phone: conversation.phone_e164,
+      headerName,
+      headerCompany,
+      location: [company?.city, company?.state].filter(Boolean).join(", ") || null,
+      avatarUrl: validInboxAvatarUrl(contact?.avatar_url),
+      firstName: headerName.trim().split(/\s+/)[0] || "cliente",
+      lastReadAt: conversation.last_read_at ?? null,
+      lastDirection: tailResult.data?.last_direction ?? null,
+      lastSentAt: tailResult.data?.last_sent_at ?? null,
+      lastBodyPreview: tailResult.data?.last_body_preview ?? null,
+      leadId: lead?.id ?? null,
+      leadExcluded: isLeadExcludedFromPipeline(lead),
+    },
+    messages: messagesResult.messages,
+    hasMoreOlder: messagesResult.hasMoreOlder,
+    ...(messagesResult.error ? { messagesLoadError: messagesResult.error.message } : {}),
+    leadPanel: null,
+  };
+  return { ok: true as const, view };
+}
+
+export async function loadInboxLeadPanel(conversationId: string) {
+  const startedAt = performance.now();
+  const id = conversationId.trim();
+  if (!id) return { ok: false as const, error: "Conversa inválida." };
+  const supabase = await createServerSupabaseClient();
+  const authTimed = await timeInboxOperation("auth_user", supabase.auth.getUser());
+  const { data: { user } } = authTimed.value;
+  if (!user) {
+    logInboxPerformance("lead_panel_load", performance.now() - startedAt, [authTimed], { tasks: 0, history: 0, hasError: true });
+    return { ok: false as const, error: "Não autenticado" };
+  }
+  const crm = crmTables(supabase);
+  const [conversationTimed, stagesTimed, profilesTimed] = await Promise.all([
+    timeInboxOperation("lead_details", crm.from("conversations").select(`
+      id, phone_e164,
+      leads(id, owner_id, client_category, zip_code, weekly_bread_consumption,
+        bread_type, bread_weight_grams,
+        contacts(full_name), companies(name, document, city, state), distributors(name),
+        opportunities(id, stage_id, updated_at)
+      )
+    `).eq("id", id).maybeSingle()),
+    timeInboxOperation("pipeline_stages", crm.from("pipeline_stages").select("id, name, sort_order, is_final").order("sort_order")),
+    timeInboxOperation("team_profiles", crm.from("profiles").select("id, full_name, role").order("full_name")),
+  ]);
+  const conversationResult = conversationTimed.value;
+  const stagesResult = stagesTimed.value;
+  const profilesResult = profilesTimed.value;
+  if (conversationResult.error || !conversationResult.data) {
+    return { ok: false as const, error: conversationResult.error?.message ?? "Conversa não encontrada." };
+  }
+  const conversation = conversationResult.data;
+  const lead = nestOne(conversation.leads);
+  if (!lead?.id) return { ok: true as const, panel: null };
+  const contact = nestOne(lead.contacts);
+  const company = nestOne(lead.companies);
+  const distributor = nestOne(lead.distributors);
+  const opportunities = Array.isArray(lead.opportunities) ? lead.opportunities : lead.opportunities ? [lead.opportunities] : [];
+  const opportunity = [...opportunities].sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0] ?? null;
+  const contactName = displayPersonName(contact?.full_name);
+  const companyName = company?.name ?? displayCompanyName({ companyName: company?.name, distributorName: distributor?.name, clientCategory: lead.client_category });
+  const [tasksTimed, historyTimed] = await Promise.all([
+    timeInboxOperation("lead_tasks", crm.from("tasks").select("id, title, due_at, done, assignee_id, task_kind")
+      .eq("lead_id", lead.id).order("done").order("due_at", { ascending: true, nullsFirst: false })),
+    timeInboxOperation("lead_history", crm.from("timeline_events").select("kind, event_id, at, data")
+      .eq("lead_id", lead.id).order("at", { ascending: false }).limit(4)),
+  ]);
+  const tasksResult = tasksTimed.value;
+  const historyResult = historyTimed.value;
+  const teamOptions = (profilesResult.data ?? []).map((profile) => ({
+    id: profile.id,
+    label: `${profile.full_name?.trim() || "Sem nome"} (${INBOX_TEAM_ROLE_LABEL[profile.role] ?? profile.role})`,
+  }));
+  const tasks = tasksResult.data ?? [];
+  const followUp = tasks.find((task) => task.task_kind === "follow_up" && !task.done) ?? null;
+  const panel: InboxLeadPanelProps = {
+    conversationId: conversation.id,
+    leadId: lead.id,
+    contactName,
+    companyName,
+    initialCategory: lead.client_category ?? null,
+    initialStageId: opportunity?.stage_id ?? null,
+    initialState: company?.state ?? null,
+    initialCity: company?.city ?? null,
+    initialZipCode: lead.zip_code ?? null,
+    initialWeeklyBreadConsumption: lead.weekly_bread_consumption ?? null,
+    initialBreadWeightGrams: lead.bread_weight_grams ?? null,
+    initialBreadType: lead.bread_type ?? null,
+    initialCnpj: company?.document ?? null,
+    initialOwnerId: lead.owner_id ?? null,
+    stages: (stagesResult.data ?? []).map((stage) => ({ id: stage.id, name: stage.name, sortOrder: stage.sort_order, isFinal: stage.is_final })),
+    teamOptions,
+    opportunityId: opportunity?.id ?? null,
+    followUp: followUp ? toFollowUpDTO(followUp) : null,
+    tasks,
+    assigneeLabels: Object.fromEntries(teamOptions.map((option) => [option.id, option.label])),
+    history: (historyResult.data ?? []).map(compactInboxHistoryItem),
+  };
+  logInboxPerformance("lead_panel_load", performance.now() - startedAt, [
+    authTimed,
+    conversationTimed,
+    stagesTimed,
+    profilesTimed,
+    tasksTimed,
+    historyTimed,
+  ], {
+    tasks: tasks.length,
+    history: historyResult.data?.length ?? 0,
+    hasError: Boolean(tasksResult.error || historyResult.error),
+  });
+  return { ok: true as const, panel };
+}
 
 export async function searchInboxConversationsByPhone(query: string) {
   if (!isPhoneSearchQuery(query)) {

@@ -279,14 +279,30 @@ export function InboxLeadPanel(props: InboxLeadPanelProps) {
   );
 }
 
-export function InboxLeadPanelDrawer(props: InboxLeadPanelProps) {
-  const [open, setOpen] = useState(false);
+export function InboxLeadPanelDrawer({
+  open: controlledOpen,
+  onOpenChange,
+  hideTrigger = false,
+  ...props
+}: InboxLeadPanelProps & {
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  hideTrigger?: boolean;
+}) {
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = controlledOpen ?? internalOpen;
+  const setOpen = (next: boolean) => {
+    if (controlledOpen === undefined) setInternalOpen(next);
+    onOpenChange?.(next);
+  };
   return (
     <>
-      <button type="button" className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] px-3 text-xs font-bold text-[var(--vp-wine)] xl:hidden" onClick={() => setOpen(true)}>
-        <CrmIcon name="contact_page" className="text-base" />
-        Ficha
-      </button>
+      {!hideTrigger ? (
+        <button type="button" className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] px-3 text-xs font-bold text-[var(--vp-wine)] xl:hidden" onClick={() => setOpen(true)}>
+          <CrmIcon name="contact_page" className="text-base" />
+          Ficha
+        </button>
+      ) : null}
       {open ? (
         <div className="fixed inset-0 z-50 bg-[rgba(35,0,4,0.35)] xl:hidden" role="dialog" aria-modal="true" aria-label="Ficha do lead">
           <div className="absolute inset-y-0 right-0 w-[min(92vw,348px)] p-2">

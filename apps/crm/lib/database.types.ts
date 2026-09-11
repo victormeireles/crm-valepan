@@ -546,6 +546,47 @@ export interface Database {
       };
     };
     Functions: {
+      inbox_sidebar_snapshot: {
+        Args: {
+          p_messages_visible_since: string;
+          p_tab?: string;
+          p_offset?: number;
+          p_limit?: number;
+          p_query?: string | null;
+        };
+        Returns: {
+          conversation_id: string | null;
+          phone_e164: string | null;
+          conversation_kind: string | null;
+          group_display_name: string | null;
+          classification: string | null;
+          last_message_at: string | null;
+          created_at: string | null;
+          updated_at: string | null;
+          last_read_at: string | null;
+          lead_id: string | null;
+          client_category: string | null;
+          excluded_from_pipeline_at: string | null;
+          contact_name: string | null;
+          avatar_url: string | null;
+          company_name: string | null;
+          distributor_name: string | null;
+          stage_id: string | null;
+          weekly_bread_consumption: number | null;
+          bread_weight_grams: number | null;
+          last_direction: string | null;
+          last_sent_at: string | null;
+          last_body_preview: string | null;
+          event_kind: string | null;
+          event_status: string | null;
+          last_inbound_sent_at: string | null;
+          tab_total: number;
+          qualify_count: number;
+          archived_count: number;
+          groups_count: number;
+          pipeline_count: number;
+        }[];
+      };
       register_public_lead: {
         Args: {
           p_source: string;

@@ -157,6 +157,12 @@ function normalizeLoadedRows(rows: unknown[]): InboxMessageRow[] {
 export const INBOX_MESSAGE_PAGE_SIZE = 100;
 
 /**
+ * O primeiro lote precisa apenas preencher a área visível do chat. Os blocos
+ * de histórico continuam maiores para que “carregar anteriores” seja eficiente.
+ */
+export const INBOX_INITIAL_MESSAGE_PAGE_SIZE = 40;
+
+/**
  * Filtro temporário de organização do Inbox: mantém visíveis as mensagens de
  * agosto de 2026 em diante. Sem limite superior, para incluir mensagens novas.
  */
@@ -188,7 +194,7 @@ export async function loadRecentConversationMessages(
 
 }> {
 
-  const take = INBOX_MESSAGE_PAGE_SIZE + 1;
+  const take = INBOX_INITIAL_MESSAGE_PAGE_SIZE + 1;
 
   let res = await crm
     .from("messages")
@@ -240,7 +246,7 @@ export async function loadRecentConversationMessages(
     data: {
       conversationIdPrefix: conversationId.slice(0, 8),
       returnedCount: (res.data ?? []).length,
-      hasMoreOlderHint: (res.data ?? []).length > INBOX_MESSAGE_PAGE_SIZE,
+      hasMoreOlderHint: (res.data ?? []).length > INBOX_INITIAL_MESSAGE_PAGE_SIZE,
       dbError: !!res.error,
       errorCode: res.error?.code ?? null,
     },
@@ -257,9 +263,9 @@ export async function loadRecentConversationMessages(
 
   const rows = normalizeLoadedRows(res.data ?? []);
 
-  const hasMoreOlder = rows.length > INBOX_MESSAGE_PAGE_SIZE;
+  const hasMoreOlder = rows.length > INBOX_INITIAL_MESSAGE_PAGE_SIZE;
 
-  const windowRows = (hasMoreOlder ? rows.slice(0, INBOX_MESSAGE_PAGE_SIZE) : rows).filter(
+  const windowRows = (hasMoreOlder ? rows.slice(0, INBOX_INITIAL_MESSAGE_PAGE_SIZE) : rows).filter(
     (row) => !isLegacyZapiReactionBody(row.body),
   );
 

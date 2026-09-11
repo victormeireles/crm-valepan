@@ -10,6 +10,8 @@ export const INBOX_CLASSIFICATION_OPTIONS = [
   "NÃO RESPONDE",
   "SEM RETORNO",
   "JÁ É CLIENTE",
+  "NÃO INAUGUROU",
+  "SEM PEDIDO MÍNIMO",
 ] as const;
 
 export type InboxClassification = (typeof INBOX_CLASSIFICATION_OPTIONS)[number];
