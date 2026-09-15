@@ -36,6 +36,6 @@ Não há uma rota genérica publicada. O componente `RegistrationForm` concentra
 
 ## Imagem
 
-A foto real da fábrica enviada pelo usuário, `Moon Fotografia-102.jpg`, substitui a imagem gerada da primeira versão. Foi apenas redimensionada para 1200 × 1800 e convertida para WebP de 286.734 bytes, sem reconstrução dos produtos. Arquivo consumido: `apps/crm/public/images/cadastro/paes-valepan-moon-102.webp`. O enquadramento é feito no layout, com destaque para os três pães. A marca Valepan usa o SVG já existente, em versão clara via CSS; o nome do evento permanece separado da imagem.
+A foto enviada pelo usuário, `FOTOS PAES VALEPAN (1).png`, substitui a imagem anterior. Foi apenas redimensionada para 1200 × 1500 e convertida para WebP, sem reconstrução dos produtos. Arquivo consumido: `apps/crm/public/images/cadastro/paes-valepan-fotos-1.webp`. O enquadramento é feito no layout, com destaque para os três pães. A marca Valepan usa o SVG já existente, em versão clara via CSS; o nome do evento permanece separado da imagem.
 
 Referência da validação alfanumérica: [manual de dígitos verificadores da Receita Federal](https://www.gov.br/receitafederal/pt-br/centrais-de-conteudo/publicacoes/documentos-tecnicos/cnpj/manual-dv-cnpj.pdf).

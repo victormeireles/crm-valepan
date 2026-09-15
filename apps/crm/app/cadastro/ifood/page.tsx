@@ -27,7 +27,7 @@ export default function IfoodRegistrationPage() {
           <p className={styles.heroText}>Da primeira mordida à próxima parceria.<br />Leve o sabor da Valepan para o seu negócio.</p>
           <div className={styles.heroNote}><span />PARA HAMBURGUERIAS E DISTRIBUIDORES</div>
           <div className={styles.productPhoto}>
-            <Image src="/images/cadastro/paes-valepan-moon-102.webp" alt="Três pães da fábrica Valepan sobre uma tábua de madeira"
+            <Image src="/images/cadastro/paes-valepan-fotos-1.webp" alt="Três pães Valepan sobre uma tábua de madeira"
               fill sizes="(max-width: 800px) 100vw, 700px" priority className={styles.breadImage} />
           </div>
         </section>

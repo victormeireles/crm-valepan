@@ -10,8 +10,8 @@
 .eventDivider { height: 28px; width: 1px; background: rgba(255,248,232,.25); }
 .content { display: grid; grid-template-columns: 1fr 450px; gap: 76px; align-items: start; padding: 20px 0 42px; }
 .hero { padding-top: 24px; }
-.productPhoto { position: relative; width: calc(100% + 60px); aspect-ratio: 1.65; margin: 20px 0 0 -30px; overflow: hidden; border-radius: 12px; mask-image: linear-gradient(to bottom, transparent, #000 8%, #000 94%, transparent); }
-.breadImage { object-fit: cover; object-position: center 70%; }
+.productPhoto { position: relative; width: calc(100% + 60px); aspect-ratio: 1.5; margin: 20px 0 0 -30px; overflow: hidden; border-radius: 12px; mask-image: linear-gradient(to bottom, transparent, #000 8%, #000 94%, transparent); }
+.breadImage { object-fit: cover; object-position: center 58%; }
 .heroEyebrow { font-size: 11px; letter-spacing: .2em; font-weight: 700; color: #ffd573; margin: 0 0 20px; display: flex; align-items: center; gap: 10px; }
 .heroEyebrow::before { content: ''; width: 26px; height: 1px; background: currentColor; }
 .hero h1 { font-family: var(--font-display); font-size: clamp(55px, 5.8vw, 86px); font-weight: 400; line-height: .98; letter-spacing: -.015em; max-width: 540px; margin: 0; text-wrap: balance; }
