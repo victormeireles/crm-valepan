@@ -2,9 +2,64 @@
 
 import type { PipelinePageFilters, PipelineVolumeFilter } from "@/app/actions/pipeline";
 import type { ClientCategoryValue } from "@/lib/client-categories";
-import { PIPELINE_STALE_DAYS, type PipelineRegion } from "@/lib/pipeline-signals";
+import type { PipelineRegion } from "@/lib/pipeline-signals";
 import { CrmIcon } from "@/components/crm-icon";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { PipelineStageDTO } from "./pipeline-board";
+
+const SEARCH_DEBOUNCE_MS = 500;
+
+type FilterChangeHandler = (
+  patch: Record<string, string | null>,
+  historyMode?: "push" | "replace",
+) => void;
+
+function PipelineSearch({
+  query,
+  onSearch,
+}: {
+  query: string;
+  onSearch: (value: string) => void;
+}) {
+  const [draft, setDraft] = useState(query);
+  const lastCommitted = useRef(query.trim());
+
+  useEffect(() => {
+    setDraft(query);
+    lastCommitted.current = query.trim();
+  }, [query]);
+
+  useEffect(() => {
+    const trimmed = draft.trim();
+    if (trimmed === lastCommitted.current) return;
+    const id = window.setTimeout(() => {
+      lastCommitted.current = trimmed;
+      onSearch(trimmed);
+    }, SEARCH_DEBOUNCE_MS);
+    return () => window.clearTimeout(id);
+  }, [draft, onSearch]);
+
+  return (
+    <label className="flex min-h-11 w-full min-w-0 items-center gap-2 rounded-full border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] px-3.5 shadow-[var(--sh-sm)] sm:w-[18rem] sm:flex-none">
+      <CrmIcon name="search" className="text-lg text-[var(--vp-wine)]" />
+      <span className="sr-only">Buscar no funil</span>
+      <input
+        type="search"
+        value={draft}
+        placeholder="Buscar lead, empresa ou telefone"
+        className="w-full border-0 bg-transparent text-[13px] text-[var(--vp-ink-body)] outline-none placeholder:text-[var(--vp-ink-soft)]"
+        onChange={(event) => setDraft(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key !== "Enter") return;
+          event.preventDefault();
+          const trimmed = event.currentTarget.value.trim();
+          lastCommitted.current = trimmed;
+          onSearch(trimmed);
+        }}
+      />
+    </label>
+  );
+}
 
 type TeamOption = { id: string; label: string; count: number };
 
@@ -16,156 +71,193 @@ function firstName(name: string) {
   return name.trim().split(/\s+/)[0] || "Sem nome";
 }
 
-export function PipelineHeader({
-  visibleCount,
-  weeklyBreadCount,
+function triggerClass(active: boolean) {
+  return `inline-flex min-h-11 max-w-[16rem] cursor-pointer list-none items-center gap-1.5 whitespace-nowrap rounded-full border px-3.5 text-[13px] font-semibold transition-colors duration-200 marker:content-none [&::-webkit-details-marker]:hidden ${
+    active
+      ? "border-[var(--vp-wine)] bg-[var(--vp-wine)] text-[var(--vp-gold)]"
+      : "border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] text-[var(--vp-ink-muted)] hover:border-[var(--vp-wine-soft)] hover:text-[var(--vp-ink-body)]"
+  }`;
+}
+
+function ToolbarMenu({
+  label,
+  active = false,
+  ariaLabel,
+  panelClassName = "min-w-52",
+  children,
+}: {
+  label: ReactNode;
+  active?: boolean;
+  ariaLabel: string;
+  panelClassName?: string;
+  children: ReactNode;
+}) {
+  return (
+    <details
+      name="pipeline-toolbar"
+      className="group relative shrink-0"
+      onKeyDown={(event) => {
+        if (event.key !== "Escape") return;
+        event.currentTarget.removeAttribute("open");
+      }}
+    >
+      <summary aria-label={ariaLabel} className={triggerClass(active)}>
+        <span className="min-w-0 truncate">{label}</span>
+        <CrmIcon name="expand_more" className="shrink-0 text-[16px] transition-transform duration-200 group-open:rotate-180" />
+      </summary>
+      <div className={`absolute left-0 z-40 mt-1.5 max-h-72 overflow-y-auto rounded-xl border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] py-1 shadow-[var(--sh-md)] ${panelClassName}`}>
+        {children}
+      </div>
+    </details>
+  );
+}
+
+function MenuOption({
+  selected,
+  onSelect,
+  trailing,
+  children,
+}: {
+  selected: boolean;
+  onSelect: () => void;
+  trailing?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      className={`flex min-h-11 w-full items-center gap-2 px-3 text-left text-[13px] hover:bg-[var(--vp-surface)] ${
+        selected ? "font-bold text-[var(--vp-wine)]" : "text-[var(--vp-ink-muted)]"
+      }`}
+      onClick={(event) => {
+        onSelect();
+        event.currentTarget.closest("details")?.removeAttribute("open");
+      }}
+    >
+      <span className="min-w-0 flex-1 truncate">{children}</span>
+      {trailing ? <span className="shrink-0 tabular-nums opacity-70">{trailing}</span> : null}
+      {selected ? <CrmIcon name="check" className="shrink-0 text-base" /> : null}
+    </button>
+  );
+}
+
+function OwnerAvatar({ value }: { value: string }) {
+  return (
+    <span className="grid size-[22px] shrink-0 place-items-center rounded-full bg-[var(--vp-gold)] text-[10px] font-extrabold text-[var(--vp-wine)]">
+      {value}
+    </span>
+  );
+}
+
+function OwnerMenu({
+  teamOptions,
+  mineCount,
   totalCount,
+  currentUserId,
+  selectedOwnerId,
+  onFilterChange,
+}: {
+  teamOptions: TeamOption[];
+  mineCount: number;
+  totalCount: number;
+  currentUserId: string | null;
+  selectedOwnerId: string | null;
+  onFilterChange: FilterChangeHandler;
+}) {
+  const number = new Intl.NumberFormat("pt-BR");
+  const selectedOption = teamOptions.find((option) => option.id === selectedOwnerId);
+  const isMine = Boolean(currentUserId && selectedOwnerId === currentUserId);
+  const triggerLabel = !selectedOwnerId
+    ? `Todos ${number.format(totalCount)}`
+    : isMine
+      ? `Meus ${number.format(mineCount)}`
+      : `${firstName(selectedOption?.label ?? "Vendedor")} ${number.format(selectedOption?.count ?? 0)}`;
+  const triggerAvatar = !selectedOwnerId
+    ? null
+    : isMine
+      ? "EU"
+      : initials(selectedOption?.label ?? "") || "?";
+
+  return (
+    <ToolbarMenu
+      active={Boolean(selectedOwnerId)}
+      ariaLabel={`Vendedor: ${triggerLabel}`}
+      panelClassName="min-w-60"
+      label={
+        <span className="inline-flex min-w-0 items-center gap-1.5">
+          {triggerAvatar ? <OwnerAvatar value={triggerAvatar} /> : null}
+          <span className="truncate">{triggerLabel}</span>
+        </span>
+      }
+    >
+      <MenuOption
+        selected={!selectedOwnerId}
+        trailing={number.format(totalCount)}
+        onSelect={() => onFilterChange({ mine: null, owner: null })}
+      >
+        Todos
+      </MenuOption>
+      {currentUserId ? (
+        <MenuOption
+          selected={isMine}
+          trailing={number.format(mineCount)}
+          onSelect={() => onFilterChange({ mine: "1", owner: null })}
+        >
+          <span className="inline-flex min-w-0 items-center gap-1.5">
+            <OwnerAvatar value="EU" />
+            Meus
+          </span>
+        </MenuOption>
+      ) : null}
+      {teamOptions.filter((option) => option.id !== currentUserId).map((option) => (
+        <MenuOption
+          key={option.id}
+          selected={selectedOwnerId === option.id}
+          trailing={number.format(option.count)}
+          onSelect={() => onFilterChange({ mine: null, owner: option.id })}
+        >
+          <span className="inline-flex min-w-0 items-center gap-1.5">
+            <OwnerAvatar value={initials(option.label) || "?"} />
+            <span className="truncate">{firstName(option.label)}</span>
+          </span>
+        </MenuOption>
+      ))}
+    </ToolbarMenu>
+  );
+}
+
+export function PipelineHeader({
+  stages,
   teamOptions,
   mineCount,
   canViewTeam,
   currentUserId,
   filters,
   pending,
+  hasAnyFilter,
+  totalCount,
   onFilterChange,
 }: {
-  visibleCount: number;
-  weeklyBreadCount: number;
-  totalCount: number;
+  stages: PipelineStageDTO[];
   teamOptions: TeamOption[];
   mineCount: number;
   canViewTeam: boolean;
   currentUserId: string | null;
   filters: PipelinePageFilters;
   pending: boolean;
-  onFilterChange: (patch: Record<string, string | null>) => void;
-}) {
-  const number = new Intl.NumberFormat("pt-BR");
-
-  return (
-    <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-      <div>
-        <h1
-          className="text-[40px] leading-none tracking-[0.01em] text-[var(--vp-wine)]"
-          style={{ fontFamily: "var(--font-display)" }}
-        >
-          Funil comercial
-        </h1>
-        <p className="mt-1.5 text-[13px] text-[var(--vp-ink-muted)]" aria-live="polite">
-          {number.format(visibleCount)} oportunidades abertas · {number.format(weeklyBreadCount)} pães/semana em jogo · {pending ? "atualizando…" : "atualizado agora"}
-        </p>
-      </div>
-
-      {canViewTeam ? (
-        <section className="min-w-0" aria-label="Funil por vendedor">
-          <div className="mb-1.5 text-[11px] font-extrabold uppercase tracking-[0.14em] text-[var(--vp-ink-soft)] lg:text-right">
-            Vendedor
-          </div>
-          <div className="flex max-w-full gap-1.5 overflow-x-auto pb-1" role="group" aria-label="Selecionar vendedor">
-            <button
-              type="button"
-              className={`min-h-9 shrink-0 rounded-full border px-3.5 text-[13px] font-bold ${
-                !filters.ownerUserId
-                  ? "border-[var(--vp-wine)] bg-[var(--vp-wine)] text-[var(--vp-gold)]"
-                  : "border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] text-[var(--vp-ink-body)]"
-              }`}
-              aria-pressed={!filters.ownerUserId}
-              onClick={() => onFilterChange({ mine: null, owner: null })}
-            >
-              Todos <span className="ml-1 opacity-70">{number.format(totalCount)}</span>
-            </button>
-            {currentUserId ? (
-              <button
-                type="button"
-                className={`inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-full border py-1 pl-1 pr-3 text-[13px] ${
-                  filters.ownerUserId === currentUserId
-                    ? "border-[var(--vp-wine)] bg-[var(--vp-wine)] font-bold text-[var(--vp-gold)]"
-                    : "border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] text-[var(--vp-ink-body)]"
-                }`}
-                aria-pressed={filters.ownerUserId === currentUserId}
-                onClick={() => onFilterChange({ mine: "1", owner: null })}
-              >
-                <span className="grid size-[22px] place-items-center rounded-full bg-[var(--vp-gold)] text-[10px] font-extrabold text-[var(--vp-wine)]">EU</span>
-                Meus <span className="text-[var(--vp-ink-soft)]">{number.format(mineCount)}</span>
-              </button>
-            ) : null}
-            {teamOptions.filter((option) => option.id !== currentUserId).map((option) => {
-              const selected = filters.ownerUserId === option.id;
-              return (
-                <button
-                  key={option.id}
-                  type="button"
-                  className={`inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-full border py-1 pl-1 pr-3 text-[13px] ${
-                    selected
-                      ? "border-[var(--vp-wine)] bg-[var(--vp-wine)] font-bold text-[var(--vp-gold)]"
-                      : "border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] text-[var(--vp-ink-body)]"
-                  }`}
-                  aria-pressed={selected}
-                  onClick={() => onFilterChange({ mine: null, owner: option.id })}
-                >
-                  <span className="grid size-[22px] place-items-center rounded-full bg-[var(--vp-gold)] text-[10px] font-extrabold text-[var(--vp-wine)]">
-                    {initials(option.label) || "?"}
-                  </span>
-                  {firstName(option.label)} <span className={selected ? "opacity-70" : "text-[var(--vp-ink-soft)]"}>{number.format(option.count)}</span>
-                </button>
-              );
-            })}
-          </div>
-        </section>
-      ) : null}
-    </header>
-  );
-}
-
-function FilterMenu({
-  label,
-  options,
-  value,
-  onChange,
-}: {
-  label: string;
-  options: { value: string; label: string }[];
-  value: string;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <details className="group relative shrink-0">
-      <summary className="inline-flex min-h-9 cursor-pointer list-none items-center gap-1.5 rounded-full border border-dotted border-[rgba(35,0,4,0.35)] px-3 text-xs font-semibold text-[var(--vp-ink-muted)] marker:content-none [&::-webkit-details-marker]:hidden">
-        {label}
-        <CrmIcon name="expand_more" className="text-[14px] transition-transform group-open:rotate-180" />
-      </summary>
-      <div className="absolute left-0 z-40 mt-1 min-w-52 overflow-hidden rounded-xl border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] py-1 shadow-[var(--sh-md)]">
-        {options.map((option) => (
-          <button
-            key={option.value || "all"}
-            type="button"
-            className={`flex min-h-10 w-full items-center justify-between px-3 text-left text-xs hover:bg-[var(--vp-surface)] ${value === option.value ? "font-bold text-[var(--vp-wine)]" : "text-[var(--vp-ink-muted)]"}`}
-            onClick={(event) => {
-              onChange(option.value);
-              event.currentTarget.closest("details")?.removeAttribute("open");
-            }}
-          >
-            {option.label}
-            {value === option.value ? <CrmIcon name="check" className="text-base" /> : null}
-          </button>
-        ))}
-      </div>
-    </details>
-  );
-}
-
-export function PipelineFilters({
-  stages,
-  filters,
-  hasAnyFilter,
-  onFilterChange,
-}: {
-  stages: PipelineStageDTO[];
-  filters: PipelinePageFilters;
   hasAnyFilter: boolean;
-  onFilterChange: (patch: Record<string, string | null>) => void;
+  totalCount: number;
+  onFilterChange: FilterChangeHandler;
 }) {
+  const handleSearch = useCallback(
+    (value: string) => {
+      onFilterChange({ q: value || null }, "replace");
+    },
+    [onFilterChange],
+  );
+
   const selectedStage = stages.find((stage) => stage.id === filters.stageId);
-  const regionLabels: Record<PipelineRegion, string> = { sp: "São Paulo", rj: "Rio de Janeiro" };
+  const regionLabels: Record<PipelineRegion, string> = { sp: "São Paulo", rj: "Rio" };
   const categoryLabels: Record<ClientCategoryValue, string> = {
     hamburgueria: "Hamburgueria",
     distribuidor: "Distribuidor",
@@ -173,46 +265,99 @@ export function PipelineFilters({
     outros: "Outros",
   };
   const volumeLabels: Record<Exclude<PipelineVolumeFilter, null>, string> = {
-    informado: "informado",
-    ate_100: "até 100 pães/sem",
-    acima_100: "acima de 100 pães/sem",
+    informado: "Informado",
+    ate_100: "Até 100",
+    acima_100: "Acima de 100",
   };
 
   return (
-    <div className="flex flex-wrap items-center gap-2.5">
-      <span className="text-[11px] font-extrabold uppercase tracking-[0.14em] text-[var(--vp-ink-soft)]">Filtros</span>
-      <FilterMenu
-        label={`Região: ${filters.region ? regionLabels[filters.region] : "todas"}`}
-        value={filters.region ?? ""}
-        options={[{ value: "", label: "Todas" }, { value: "sp", label: "São Paulo (DDD 11)" }, { value: "rj", label: "Rio de Janeiro (DDD 21)" }]}
-        onChange={(value) => onFilterChange({ region: value || null })}
-      />
-      <FilterMenu
-        label={`Tipo de cliente: ${filters.clientCategory ? categoryLabels[filters.clientCategory].toLocaleLowerCase("pt-BR") : "todos"}`}
-        value={filters.clientCategory ?? ""}
-        options={[{ value: "", label: "Todos" }, ...Object.entries(categoryLabels).map(([value, label]) => ({ value, label }))]}
-        onChange={(value) => onFilterChange({ client_category: value || null })}
-      />
-      <FilterMenu
-        label={`Etapa: ${selectedStage?.name.toLocaleLowerCase("pt-BR") ?? "abertas"}`}
-        value={filters.stageId ?? ""}
-        options={[{ value: "", label: "Todas as abertas" }, ...stages.filter((stage) => !stage.is_final).map((stage) => ({ value: stage.id, label: stage.name }))]}
-        onChange={(value) => onFilterChange({ stage: value || null })}
-      />
-      <FilterMenu
-        label={`Volume: ${filters.volume ? volumeLabels[filters.volume] : "qualquer"}`}
-        value={filters.volume ?? ""}
-        options={[{ value: "", label: "Qualquer volume" }, { value: "informado", label: "Volume informado" }, { value: "ate_100", label: "Até 100 pães/sem" }, { value: "acima_100", label: "Acima de 100 pães/sem" }]}
-        onChange={(value) => onFilterChange({ volume: value || null })}
-      />
-      {hasAnyFilter ? (
-        <button type="button" className="min-h-9 text-xs font-semibold text-[var(--vp-wine)] hover:underline" onClick={() => onFilterChange({ mine: null, owner: null, signal: null, region: null, client_category: null, stage: null, volume: null, q: null })}>
-          Limpar filtros
-        </button>
-      ) : null}
-      <p className="ml-auto text-[11px] text-[var(--vp-ink-soft)]">
-        Sinais: resposta pendente, follow-up vencido e oportunidade parada há {PIPELINE_STALE_DAYS}+ dias · arraste para mudar de etapa
-      </p>
-    </div>
+    <header className="flex flex-col gap-3">
+      <h1
+        className="text-[40px] leading-none tracking-[0.01em] text-[var(--vp-wine)]"
+        style={{ fontFamily: "var(--font-display)" }}
+      >
+        Funil comercial
+      </h1>
+      <div className="flex flex-wrap items-center gap-2" aria-busy={pending || undefined}>
+        <PipelineSearch query={filters.query} onSearch={handleSearch} />
+        {canViewTeam ? (
+          <OwnerMenu
+            teamOptions={teamOptions}
+            mineCount={mineCount}
+            totalCount={totalCount}
+            currentUserId={currentUserId}
+            selectedOwnerId={filters.ownerUserId}
+            onFilterChange={onFilterChange}
+          />
+        ) : null}
+        <ToolbarMenu
+          active={Boolean(filters.region)}
+          ariaLabel={`Região: ${filters.region ? regionLabels[filters.region] : "todas"}`}
+          label={filters.region ? regionLabels[filters.region] : "Região"}
+        >
+          <MenuOption selected={!filters.region} onSelect={() => onFilterChange({ region: null })}>Todas</MenuOption>
+          <MenuOption selected={filters.region === "sp"} onSelect={() => onFilterChange({ region: "sp" })}>São Paulo (DDD 11)</MenuOption>
+          <MenuOption selected={filters.region === "rj"} onSelect={() => onFilterChange({ region: "rj" })}>Rio de Janeiro (DDD 21)</MenuOption>
+        </ToolbarMenu>
+        <ToolbarMenu
+          active={Boolean(filters.clientCategory)}
+          ariaLabel={`Tipo de cliente: ${filters.clientCategory ? categoryLabels[filters.clientCategory] : "todos"}`}
+          label={filters.clientCategory ? categoryLabels[filters.clientCategory] : "Tipo"}
+        >
+          <MenuOption selected={!filters.clientCategory} onSelect={() => onFilterChange({ client_category: null })}>Todos</MenuOption>
+          {Object.entries(categoryLabels).map(([value, label]) => (
+            <MenuOption
+              key={value}
+              selected={filters.clientCategory === value}
+              onSelect={() => onFilterChange({ client_category: value })}
+            >
+              {label}
+            </MenuOption>
+          ))}
+        </ToolbarMenu>
+        <ToolbarMenu
+          active={Boolean(filters.stageId)}
+          ariaLabel={`Etapa: ${selectedStage?.name ?? "abertas"}`}
+          label={selectedStage?.name ?? "Etapa"}
+        >
+          <MenuOption selected={!filters.stageId} onSelect={() => onFilterChange({ stage: null })}>Todas as abertas</MenuOption>
+          {stages.filter((stage) => !stage.is_final).map((stage) => (
+            <MenuOption
+              key={stage.id}
+              selected={filters.stageId === stage.id}
+              onSelect={() => onFilterChange({ stage: stage.id })}
+            >
+              {stage.name}
+            </MenuOption>
+          ))}
+        </ToolbarMenu>
+        <ToolbarMenu
+          active={Boolean(filters.volume)}
+          ariaLabel={`Volume: ${filters.volume ? volumeLabels[filters.volume] : "qualquer"}`}
+          label={filters.volume ? volumeLabels[filters.volume] : "Volume"}
+        >
+          <MenuOption selected={!filters.volume} onSelect={() => onFilterChange({ volume: null })}>Qualquer volume</MenuOption>
+          <MenuOption selected={filters.volume === "informado"} onSelect={() => onFilterChange({ volume: "informado" })}>Volume informado</MenuOption>
+          <MenuOption selected={filters.volume === "ate_100"} onSelect={() => onFilterChange({ volume: "ate_100" })}>Até 100 pães/sem</MenuOption>
+          <MenuOption selected={filters.volume === "acima_100"} onSelect={() => onFilterChange({ volume: "acima_100" })}>Acima de 100 pães/sem</MenuOption>
+        </ToolbarMenu>
+        {hasAnyFilter ? (
+          <button
+            type="button"
+            className="min-h-11 cursor-pointer px-2 text-[13px] font-semibold text-[var(--vp-wine)] hover:underline"
+            onClick={() => onFilterChange({ mine: null, owner: null, signal: null, region: null, client_category: null, stage: null, volume: null, q: null })}
+          >
+            Limpar
+          </button>
+        ) : null}
+        {pending ? (
+          <span className="inline-flex min-h-11 items-center gap-1.5 text-[12px] text-[var(--vp-ink-soft)]">
+            <CrmIcon name="progress_activity" className="animate-spin text-base text-[var(--vp-wine)]" />
+            Atualizando
+          </span>
+        ) : null}
+        <div className="sr-only" aria-live="polite">{pending ? "Atualizando o funil" : ""}</div>
+      </div>
+    </header>
   );
 }

@@ -43,6 +43,7 @@ beforeAll(async () => {
   await db.exec(sql("20260910153000_pipeline_indexed_search.sql")
     .replace("create extension if not exists pg_trgm with schema extensions;", "")
     .replace(/create index if not exists idx_[\s\S]*?extensions\.gin_trgm_ops\);/g, ""));
+  await db.exec(sql("20260919153000_pipeline_board_snapshot.sql"));
 }, 30000);
 afterAll(async () => { await db?.close(); });
 
@@ -177,5 +178,49 @@ describe.sequential("gravação pública transacional", () => {
     await db.exec("update crm.lead_registration_rate_limits set requests = 120 where bucket = date_trunc('minute', now())");
     await expect(capture("+5571987654321")).rejects.toThrow("registration_rate_limit");
     expect((await db.query("select id from crm.leads where phone_e164 = '+5571987654321'")).rows).toHaveLength(0);
+  });
+  it("grava a direção da última mensagem na conversa, sem reler o histórico no funil", async () => {
+    await db.exec(`
+      insert into crm.conversations(lead_id, phone_e164)
+        select id, phone_e164 from crm.leads where phone_e164 = '+5511987654321';
+      insert into crm.messages(conversation_id, direction, body, sent_at)
+        select id, 'in', 'quero pão', now() from crm.conversations where phone_e164 = '+5511987654321';
+    `);
+    const conversation = (await db.query<{ last_direction: string; last_message_at: Date }>(
+      "select last_direction, last_message_at from crm.conversations where phone_e164 = '+5511987654321'",
+    )).rows[0];
+    expect(conversation.last_direction).toBe("in");
+    expect(conversation.last_message_at).toBeInstanceOf(Date);
+
+    await db.exec(`
+      insert into crm.messages(conversation_id, direction, body, sent_at)
+        select id, 'out', 'já enviei', now() + interval '1 minute'
+        from crm.conversations where phone_e164 = '+5511987654321';
+    `);
+    expect((await db.query("select last_direction from crm.conversations where phone_e164 = '+5511987654321'")).rows[0])
+      .toEqual({ last_direction: "out" });
+
+    const cards = await db.query<{ last_direction: string; conversation_id: string }>(
+      "select last_direction, conversation_id from crm.pipeline_filtered_cards(now() - interval '1 year') where phone_e164 = '+5511987654321'",
+    );
+    expect(cards.rows[0]?.last_direction).toBe("out");
+    expect(cards.rows[0]?.conversation_id).toBeTruthy();
+  });
+  it("monta cartões, totais e KPIs do funil em uma leitura só", async () => {
+    const snapshot = (await db.query<{ pipeline_board_snapshot: {
+      cards: { phone_e164: string }[];
+      visible_stage_counts: { stage_id: string; card_count: number }[];
+      all_stage_counts: { stage_id: string; card_count: number }[];
+      owner_counts: { owner_id: string; card_count: number }[];
+      summary: { open_count: number; awaiting_reply_count: number };
+    } }>("select crm.pipeline_board_snapshot(now() - interval '1 year', null, null, null, null, null, null, 0, 10, null)")).rows[0]
+      .pipeline_board_snapshot;
+    expect(snapshot.cards.length).toBeGreaterThan(0);
+    expect(Number(snapshot.summary.open_count)).toBe(
+      snapshot.visible_stage_counts.reduce((sum, row) => sum + Number(row.card_count), 0),
+    );
+    expect(snapshot.cards.length).toBeLessThanOrEqual(Number(snapshot.summary.open_count));
+    expect(snapshot.visible_stage_counts.map((row) => row.stage_id).sort())
+      .toEqual(snapshot.all_stage_counts.map((row) => row.stage_id).sort());
   });
 });

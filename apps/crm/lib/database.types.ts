@@ -188,6 +188,7 @@ export interface Database {
           classification: string | null;
           last_read_at: string | null;
           last_message_at: string | null;
+          last_direction: "in" | "out" | null;
           created_at: string;
           updated_at: string;
         };
@@ -202,6 +203,7 @@ export interface Database {
           classification?: string | null;
           last_read_at?: string | null;
           last_message_at?: string | null;
+          last_direction?: "in" | "out" | null;
         };
         Update: Partial<Database["crm"]["Tables"]["conversations"]["Insert"]>;
       };
@@ -597,6 +599,21 @@ export interface Database {
           p_request_key: string;
           p_notice_version: string;
           p_document?: string | null;
+        };
+        Returns: Json;
+      };
+      pipeline_board_snapshot: {
+        Args: {
+          p_messages_visible_since: string;
+          p_owner_user_id?: string | null;
+          p_signal?: string | null;
+          p_region?: string | null;
+          p_client_category?: string | null;
+          p_query?: string | null;
+          p_stage_id?: string | null;
+          p_offset?: number;
+          p_limit?: number;
+          p_volume?: string | null;
         };
         Returns: Json;
       };

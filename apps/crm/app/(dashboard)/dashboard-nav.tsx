@@ -20,7 +20,7 @@ export function DashboardNav() {
   const categoryFilter = searchParams.get("client_category") ?? "";
 
   return (
-    <nav className="flex flex-wrap gap-1 text-xs font-semibold uppercase tracking-[0.08em] md:gap-2 md:text-sm md:tracking-[0.06em]">
+    <nav className="flex min-w-0 flex-nowrap gap-0.5 text-xs font-semibold uppercase tracking-[0.08em] md:gap-1 md:text-[13px] md:tracking-[0.05em] lg:text-sm">
       {dashboardNavItems.map((n) => {
         if (n.kind === "link") {
           const active = linkActive(pathname, n.href, searchParams);
@@ -28,7 +28,7 @@ export function DashboardNav() {
             <Link
               key={n.href}
               href={n.href}
-              className={`rounded-md border-b-2 px-2.5 py-2 transition-colors duration-200 md:px-3 md:py-2.5 ${
+              className={`whitespace-nowrap rounded-md border-b-2 px-2 py-2 transition-colors duration-200 md:px-2.5 md:py-2.5 ${
                 active
                   ? "border-[var(--vp-gold)] text-[var(--vp-gold)]"
                   : "border-transparent text-[rgba(255,248,247,0.78)] hover:bg-[rgba(255,248,247,0.1)] hover:text-[var(--vp-paper)]"
@@ -45,7 +45,7 @@ export function DashboardNav() {
         return (
           <details key={n.id} className="group relative">
             <summary
-              className={`list-none cursor-pointer rounded-md border-b-2 px-2.5 py-2 transition-colors duration-200 marker:content-none md:px-3 md:py-2.5 [&::-webkit-details-marker]:hidden ${
+              className={`list-none cursor-pointer whitespace-nowrap rounded-md border-b-2 px-2 py-2 transition-colors duration-200 marker:content-none md:px-2.5 md:py-2.5 [&::-webkit-details-marker]:hidden ${
                 dropdownActive
                   ? "border-[var(--vp-gold)] text-[var(--vp-gold)]"
                   : "border-transparent text-[rgba(255,248,247,0.78)] hover:bg-[rgba(255,248,247,0.1)] hover:text-[var(--vp-paper)]"

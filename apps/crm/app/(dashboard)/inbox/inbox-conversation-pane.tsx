@@ -110,7 +110,7 @@ export function InboxConversationPane({ initialView }: { initialView: InboxConve
 
   return (
     <>
-      <section aria-busy={isPending} className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-[14px] border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] shadow-[var(--sh-sm)]">
+      <section aria-busy={isPending} className="relative flex h-full min-h-0 flex-col overflow-hidden rounded-[14px] border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] shadow-[var(--sh-sm)]">
         {isPending ? (
           <div className="pointer-events-none absolute inset-x-0 top-0 z-30 h-0.5 overflow-hidden bg-[var(--vp-surface-high)]">
             <span className="block h-full w-1/2 animate-pulse bg-[var(--vp-gold-classic)]" />
@@ -153,7 +153,7 @@ export function InboxConversationPane({ initialView }: { initialView: InboxConve
           </>
         ) : <div className="flex flex-1 items-center justify-center px-4 py-12"><p className="text-center text-sm text-[var(--muted)]">Nenhuma conversa para mostrar.</p></div>}
       </section>
-      {view?.leadPanel ? <div className="hidden min-h-0 xl:block"><InboxLeadPanel key={view.conversation.id} {...view.leadPanel} /></div> : <aside className="hidden min-h-0 flex-col items-center justify-center gap-3 rounded-[14px] border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] px-5 text-center text-xs text-[var(--vp-ink-muted)] xl:flex">
+      {view?.leadPanel ? <div className="hidden h-full min-h-0 overflow-hidden xl:flex xl:flex-col"><InboxLeadPanel key={view.conversation.id} {...view.leadPanel} /></div> : <aside className="hidden h-full min-h-0 flex-col items-center justify-center gap-3 overflow-y-auto rounded-[14px] border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] px-5 text-center text-xs text-[var(--vp-ink-muted)] xl:flex">
         <span>{conversation?.leadId ? "A ficha será carregada somente quando necessária." : "Esta conversa não possui uma ficha de lead."}</span>
         {conversation?.leadId ? <button type="button" disabled={panelLoading} onClick={() => void loadLeadPanel()} className="min-h-9 rounded-full bg-[var(--vp-wine)] px-4 font-bold text-[var(--vp-gold)] disabled:opacity-60">{panelLoading ? "Carregando ficha…" : "Carregar ficha"}</button> : null}
       </aside>}

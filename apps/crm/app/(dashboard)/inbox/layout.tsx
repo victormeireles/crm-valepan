@@ -1,10 +1,13 @@
 /**
- * Chat em altura fixa (viewport − header − padding do shell), com scroll só dentro
- * da lista e da área de mensagens — evita scroll da página inteira.
+ * Chat ocupa 100% da área abaixo do header. `absolute inset-0` preenche o main
+ * do shell (já com altura definida) para não gerar scroll da página.
  */
 export default function InboxLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="-mx-4 -my-6 flex h-[calc(100dvh-var(--header-height))] min-h-0 flex-1 flex-col overflow-hidden px-5 pb-5 pt-4 md:-my-8">
+    <div
+      data-inbox-shell
+      className="absolute inset-0 flex min-h-0 flex-col overflow-hidden overscroll-none px-4 py-3 md:px-5 md:py-4"
+    >
       {children}
     </div>
   );

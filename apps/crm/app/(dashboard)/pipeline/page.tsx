@@ -1,21 +1,17 @@
-import { displayCompanyName, displayPersonName } from "@/lib/lead-identity";
 import {
-  computePipelineSignals,
   isPipelineSignal,
   isPipelineRegion,
   type PipelineSignal,
 } from "@/lib/pipeline-signals";
 import { isClientCategoryValue, type ClientCategoryValue } from "@/lib/client-categories";
-import type { Database } from "@/lib/database.types";
-import { INBOX_MESSAGES_VISIBLE_SINCE } from "@/lib/inbox/load-messages";
 import { createServerSupabaseClient, crmTables } from "@/lib/supabase/server";
 import type { PipelineCardDTO, PipelineStageDTO } from "./pipeline-board";
 import { PipelineWorkspace } from "./pipeline-workspace";
-import { getWeeklyBreadCount } from "@/lib/lead-signals";
-import type { PipelineVolumeFilter } from "@/app/actions/pipeline";
+import {
+  loadPipelineFilterSnapshot,
+  type PipelineVolumeFilter,
+} from "@/app/actions/pipeline";
 import { logPipelinePerformance } from "@/lib/pipeline-performance";
-import { indexFollowUpsByLead, type LeadFollowUpDTO } from "@/lib/follow-ups";
-import { isPhoneSearchQuery } from "@/lib/phone-search-query";
 
 export const dynamic = "force-dynamic";
 const INITIAL_CARDS_PER_STAGE = 10;
@@ -23,46 +19,6 @@ const INITIAL_CARDS_PER_STAGE = 10;
 function formatTeamOption(p: { id: string; full_name: string | null; role: string }) {
   const name = (p.full_name ?? "").trim() || "Sem nome";
   return { id: p.id, label: name };
-};
-
-type PipelineCardRow = Database["crm"]["Functions"]["pipeline_cards"]["Returns"][number];
-type PipelineStageCountRow = Database["crm"]["Functions"]["pipeline_stage_counts"]["Returns"][number];
-type PipelineOwnerCountRow = Database["crm"]["Functions"]["pipeline_owner_counts"]["Returns"][number];
-
-function mapRowToCard(o: PipelineCardRow, followUps: Map<string, LeadFollowUpDTO>): PipelineCardDTO {
-  const ownerId = o.opportunity_owner_id ?? o.lead_owner_id;
-  return {
-    id: o.opportunity_id,
-    stage_id: o.stage_id,
-    title: o.title,
-    lost_reason: o.lost_reason,
-    lead_id: o.lead_id,
-    personName: displayPersonName(o.contact_name),
-    companyLine: displayCompanyName({
-      companyName: o.company_name,
-      distributorName: o.distributor_name,
-      clientCategory: o.client_category,
-    }),
-    phone_e164: o.phone_e164,
-    client_category: o.client_category,
-    companyCity: o.company_city,
-    companyState: o.company_state,
-    conversationId: o.conversation_id,
-    weeklyBreadCount: getWeeklyBreadCount(o.weekly_bread_consumption),
-    lastDirection: o.last_direction,
-    lastSentAt: o.last_sent_at,
-    opportunityUpdatedAt: o.opportunity_updated_at,
-    nextActionAt: o.next_action_at,
-    followUp: followUps.get(o.lead_id) ?? null,
-    ownerId,
-    ownerName: null,
-    signals: computePipelineSignals({
-      oppUpdatedAt: o.opportunity_updated_at,
-      nextActionAt: o.next_action_at,
-      isFinalStage: o.stage_is_final,
-      lastMessageDirection: o.last_direction,
-    }),
-  };
 }
 
 export default async function PipelinePage({
@@ -106,113 +62,31 @@ export default async function PipelinePage({
         ? ownerParam
         : null
     : null;
-  const commonFilters = {
-    p_messages_visible_since: INBOX_MESSAGES_VISIBLE_SINCE,
-    p_signal: signalFilter,
-    p_region: regionFilter,
-    p_client_category: categoryFilter,
-    p_query: query.trim() || null,
-    p_stage_id: stageFilter,
-    p_volume: volumeFilter,
-  };
-  const phoneSearch = isPhoneSearchQuery(query);
-  const skippedAggregate = Promise.resolve({ data: null, error: null });
   const databaseStartedAt = performance.now();
   const [
     { data: stageRows },
     { data: teamProfiles },
-    { data: rows, error: cardsError },
-    { data: allStageCountRows, error: allStageCountsError },
-    { data: selectedStageCountRows, error: selectedStageCountsError },
-    { data: ownerCountRows, error: ownerCountsError },
-    { data: ownerSummaryRows, error: ownerSummaryError },
+    snapshot,
   ] = await Promise.all([
     crm
       .from("pipeline_stages")
       .select("id, name, sort_order, is_final")
       .order("sort_order", { ascending: true }),
     crm.from("profiles").select("id, full_name, role").order("full_name", { ascending: true }),
-    crm.rpc("pipeline_cards_page", {
-      ...commonFilters,
-      p_owner_user_id: ownerUserId,
-      p_offset: 0,
-      p_limit: INITIAL_CARDS_PER_STAGE,
+    loadPipelineFilterSnapshot({
+      filters: {
+        ownerUserId,
+        signal: signalFilter,
+        region: regionFilter,
+        clientCategory: categoryFilter,
+        query,
+        stageId: stageFilter,
+        volume: volumeFilter,
+      },
     }),
-    phoneSearch
-      ? skippedAggregate
-      : crm.rpc("pipeline_stage_counts", { ...commonFilters, p_owner_user_id: null }),
-    phoneSearch
-      ? skippedAggregate
-      : ownerUserId
-        ? crm.rpc("pipeline_stage_counts", { ...commonFilters, p_owner_user_id: ownerUserId })
-        : crm.rpc("pipeline_stage_counts", { ...commonFilters, p_owner_user_id: null }),
-    phoneSearch ? skippedAggregate : crm.rpc("pipeline_owner_counts", commonFilters),
-    phoneSearch
-      ? skippedAggregate
-      : crm.rpc("pipeline_owner_summary", {
-          p_messages_visible_since: INBOX_MESSAGES_VISIBLE_SINCE,
-          p_owner_user_id: ownerUserId,
-          p_region: regionFilter,
-          p_client_category: categoryFilter,
-          p_query: query.trim() || null,
-          p_stage_id: stageFilter,
-          p_volume: volumeFilter,
-        }),
   ]);
   const databaseDurationMs = performance.now() - databaseStartedAt;
-  const pipelineError =
-    cardsError ??
-    allStageCountsError ??
-    selectedStageCountsError ??
-    ownerCountsError ??
-    ownerSummaryError;
-  if (pipelineError) throw pipelineError;
-
-  const pipelineRows = (rows ?? []) as PipelineCardRow[];
-  const compactStageCounts = phoneSearch
-    ? [...pipelineRows.reduce((counts, row) => {
-        const current = counts.get(row.stage_id) ?? { card_count: 0, volume_kg: 0 };
-        current.card_count += 1;
-        current.volume_kg += Number(row.weekly_bread_consumption ?? 0);
-        counts.set(row.stage_id, current);
-        return counts;
-      }, new Map<string, { card_count: number; volume_kg: number }>())]
-        .map(([stage_id, counts]) => ({ stage_id, ...counts }))
-    : null;
-  const compactOwnerCounts = phoneSearch
-    ? [...pipelineRows.reduce((counts, row) => {
-        const ownerId = row.opportunity_owner_id ?? row.lead_owner_id;
-        if (ownerId) counts.set(ownerId, (counts.get(ownerId) ?? 0) + 1);
-        return counts;
-      }, new Map<string, number>())]
-        .map(([owner_id, card_count]) => ({ owner_id, card_count }))
-    : null;
-  const compactSummary = phoneSearch
-    ? pipelineRows.reduce((current, row) => {
-        if (row.stage_is_final) return current;
-        current.open_count += 1;
-        if (row.last_direction === "in") current.awaiting_reply_count += 1;
-        if (new Date(row.opportunity_updated_at).getTime() <= renderNowMs - 7 * 86_400_000) {
-          current.stale_count += 1;
-        }
-        if (row.next_action_at && new Date(row.next_action_at).getTime() < renderNowMs) {
-          current.overdue_count += 1;
-        }
-        return current;
-      }, { open_count: 0, awaiting_reply_count: 0, stale_count: 0, overdue_count: 0 })
-    : null;
-  const pipelineLeadIds = [...new Set(pipelineRows.map((row) => row.lead_id).filter(Boolean))];
-  const { data: followUpRows, error: followUpsError } = pipelineLeadIds.length > 0
-    ? await crm
-        .from("tasks")
-        .select("id, lead_id, title, due_at, assignee_id")
-        .in("lead_id", pipelineLeadIds)
-        .eq("task_kind", "follow_up")
-        .eq("done", false)
-        .order("due_at", { ascending: true })
-    : { data: [], error: null };
-  if (followUpsError) throw followUpsError;
-  const followUpsByLead = indexFollowUpsByLead(followUpRows ?? []);
+  if (!snapshot.ok) throw new Error(snapshot.error);
 
   const rawStages: PipelineStageDTO[] = (stageRows ?? []).map((s) => ({
     id: s.id,
@@ -236,31 +110,25 @@ export default async function PipelinePage({
         : stage,
     )
     .sort((a, b) => a.sort_order - b.sort_order);
+  const normalizeStage = (stageId: string) =>
+    canonicalEntryStage && entryStageIds.has(stageId) ? canonicalEntryStage.id : stageId;
 
   const ownerNameById = new Map(
     (teamProfiles ?? []).map((profile) => [profile.id, formatTeamOption(profile).label]),
   );
 
-  const pagedCards: PipelineCardDTO[] = pipelineRows.map((o) => {
-    const card = mapRowToCard(o, followUpsByLead);
-    const ownerId = o.opportunity_owner_id ?? o.lead_owner_id;
-    const cardWithOwner = {
-      ...card,
-      ownerName: ownerId
-        ? (ownerNameById.get(ownerId) ?? "Responsável desconhecido")
-        : null,
-    };
-    return canonicalEntryStage && entryStageIds.has(card.stage_id)
-      ? { ...cardWithOwner, stage_id: canonicalEntryStage.id }
-      : cardWithOwner;
-  });
+  const pagedCards: PipelineCardDTO[] = snapshot.cards.map((card) => ({
+    ...card,
+    stage_id: normalizeStage(card.stage_id),
+    ownerName: card.ownerId
+      ? (ownerNameById.get(card.ownerId) ?? card.ownerName)
+      : null,
+  }));
 
   const stageTotals = Object.fromEntries(stages.map((stage) => [stage.id, 0]));
   const stageBreadCounts = Object.fromEntries(stages.map((stage) => [stage.id, 0]));
-  for (const row of (compactStageCounts ?? selectedStageCountRows ?? []) as PipelineStageCountRow[]) {
-    const stageId = canonicalEntryStage && entryStageIds.has(row.stage_id)
-      ? canonicalEntryStage.id
-      : row.stage_id;
+  for (const row of snapshot.visibleStageCounts) {
+    const stageId = normalizeStage(row.stage_id);
     stageTotals[stageId] = (stageTotals[stageId] ?? 0) + Number(row.card_count);
     // `volume_kg` é o nome legado do campo retornado pela RPC; o valor agora é pães/semana.
     stageBreadCounts[stageId] = (stageBreadCounts[stageId] ?? 0) + Number(row.volume_kg);
@@ -268,33 +136,29 @@ export default async function PipelinePage({
   const initialCards = stages.flatMap((stage) =>
     pagedCards.filter((card) => card.stage_id === stage.id).slice(0, INITIAL_CARDS_PER_STAGE),
   );
-  const totalCount = ((compactStageCounts ?? allStageCountRows ?? []) as PipelineStageCountRow[]).reduce(
-    (total: number, row: PipelineStageCountRow) => total + Number(row.card_count),
+  const totalCount = snapshot.allStageCounts.reduce(
+    (total, row) => total + Number(row.card_count),
     0,
   );
   const visibleCount = Object.values(stageTotals).reduce((total, count) => total + count, 0);
   const visibleBreadCount = Object.values(stageBreadCounts).reduce((total, count) => total + count, 0);
-  const ownerSummary = compactSummary ?? ownerSummaryRows?.[0] ?? null;
   const selectedOwnerName = ownerUserId
     ? (ownerNameById.get(ownerUserId) ?? (mineOnly ? "Minha carteira" : "Responsável desconhecido"))
     : null;
 
   const countByOwner = new Map<string, number>(
-    ((compactOwnerCounts ?? ownerCountRows ?? []) as PipelineOwnerCountRow[]).map((row: PipelineOwnerCountRow) => [
-      row.owner_id,
-      Number(row.card_count),
-    ]),
+    snapshot.ownerCounts.map((row) => [row.owner_id, Number(row.card_count)]),
   );
   const teamOptions = (teamProfiles ?? []).map((profile) => ({
     ...formatTeamOption(profile),
     count: countByOwner.get(profile.id) ?? 0,
   }));
   const mineCount = user?.id ? (countByOwner.get(user.id) ?? 0) : 0;
-  const initialSummary = ownerSummary ? {
-    open: Number(ownerSummary.open_count),
-    awaiting: Number(ownerSummary.awaiting_reply_count),
-    stale: Number(ownerSummary.stale_count),
-    overdue: Number(ownerSummary.overdue_count),
+  const initialSummary = snapshot.ownerSummary ? {
+    open: Number(snapshot.ownerSummary.open_count),
+    awaiting: Number(snapshot.ownerSummary.awaiting_reply_count),
+    stale: Number(snapshot.ownerSummary.stale_count),
+    overdue: Number(snapshot.ownerSummary.overdue_count),
   } : null;
   logPipelinePerformance("initial_load", performance.now() - pageStartedAt, [
     { operation: "database_parallel", durationMs: Math.round(databaseDurationMs * 10) / 10 },

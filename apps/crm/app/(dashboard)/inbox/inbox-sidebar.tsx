@@ -222,7 +222,7 @@ export function InboxSidebar({
   return (
     <div
       aria-busy={searchPending}
-      className="relative flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-[14px] border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] shadow-[var(--sh-sm)]"
+      className="relative flex h-full min-h-0 flex-1 flex-col overflow-hidden"
     >
       <div className="shrink-0 border-b border-[var(--vp-ink-line)] p-3">
         <div className="mb-2.5 grid grid-cols-2 gap-1 rounded-[18px] bg-[rgba(35,0,4,0.06)] p-[3px]">

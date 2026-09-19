@@ -9,9 +9,8 @@ import { isClientCategoryValue } from "@/lib/client-categories";
 import { isPipelineRegion, isPipelineSignal } from "@/lib/pipeline-signals";
 import { recordPipelineBrowserMetric } from "@/lib/pipeline-browser-performance";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { PIPELINE_SEARCH_EVENT } from "../dashboard-context-search";
 import { PipelineBoard, type PipelineCardDTO, type PipelineStageDTO } from "./pipeline-board";
-import { PipelineFilters, PipelineHeader } from "./pipeline-filters";
+import { PipelineHeader } from "./pipeline-filters";
 import { PipelineKpiStrip } from "./pipeline-kpi-strip";
 
 type TeamOption = { id: string; label: string; count: number };
@@ -162,15 +161,6 @@ export function PipelineWorkspace(props: {
     } : { open: 0, awaiting: 0, stale: 0, overdue: 0 });
   }, [props.canViewTeam, props.currentUserId, props.initialTeamOptions, props.stages]);
 
-  useEffect(() => {
-    const handlePipelineSearch = (event: Event) => {
-      const query = (event as CustomEvent<{ query?: string }>).detail?.query ?? "";
-      void changeFilters({ q: query }, "replace");
-    };
-    window.addEventListener(PIPELINE_SEARCH_EVENT, handlePipelineSearch);
-    return () => window.removeEventListener(PIPELINE_SEARCH_EVENT, handlePipelineSearch);
-  }, [changeFilters]);
-
   const hasAnyFilter = useMemo(
     () => Boolean(
       activeFilters.ownerUserId ||
@@ -187,8 +177,7 @@ export function PipelineWorkspace(props: {
   return (
     <div className="flex min-h-0 flex-col gap-4">
       <PipelineHeader
-        visibleCount={visibleCount}
-        weeklyBreadCount={visibleBreadCount}
+        stages={props.stages}
         totalCount={totalCount}
         teamOptions={teamOptions}
         mineCount={mineCount}
@@ -196,6 +185,7 @@ export function PipelineWorkspace(props: {
         currentUserId={props.currentUserId}
         filters={activeFilters}
         pending={pending}
+        hasAnyFilter={hasAnyFilter}
         onFilterChange={changeFilters}
       />
       <PipelineKpiStrip
@@ -205,12 +195,6 @@ export function PipelineWorkspace(props: {
         weeklyBreadCount={visibleBreadCount}
         activeSignal={activeFilters.signal}
         onSignalChange={(signal) => void changeFilters({ signal })}
-      />
-      <PipelineFilters
-        stages={props.stages}
-        filters={activeFilters}
-        hasAnyFilter={hasAnyFilter}
-        onFilterChange={changeFilters}
       />
       {loadError ? (
         <p role="alert" className="rounded-xl border border-[rgba(186,26,26,0.25)] bg-[rgba(186,26,26,0.08)] px-4 py-3 text-sm text-[var(--vp-error)]">

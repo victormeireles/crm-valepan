@@ -18,6 +18,13 @@ body {
   line-height: var(--lh-body);
 }
 
+/* Chat: trava o scroll na página; só as colunas internas rolam. */
+html:has([data-inbox-shell]),
+html:has([data-inbox-shell]) body {
+  height: 100dvh;
+  overflow: hidden;
+}
+
 :focus-visible {
   outline: 2px solid var(--vp-gold-deep);
   outline-offset: 2px;

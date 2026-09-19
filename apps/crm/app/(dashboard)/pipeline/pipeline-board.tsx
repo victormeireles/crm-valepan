@@ -152,14 +152,14 @@ function DroppableColumn({
     <section
       ref={setNodeRef}
       title={stageName}
-      className={`flex h-[min(62vh,42rem)] min-w-0 snap-start flex-col rounded-[14px] border border-[var(--vp-ink-line)] bg-[var(--vp-surface-low)] p-2.5 ${
+      className={`flex h-[min(68vh,46rem)] min-w-[17.5rem] snap-start flex-col rounded-[14px] border border-[var(--vp-ink-line)] bg-[var(--vp-surface-low)] p-3 ${
         isOver ? "ring-2 ring-[var(--vp-gold-deep)] ring-offset-1 ring-offset-[var(--vp-paper)]" : ""
       }`}
     >
       <header className="shrink-0 px-1 pb-2.5 pt-0.5">
         <div className="flex items-baseline justify-between gap-1.5">
-          <h2 className="truncate text-[11px] font-extrabold uppercase tracking-[0.1em] text-[var(--vp-wine)]">{stageName}</h2>
-          <span className="text-[13px] font-extrabold tabular-nums text-[var(--vp-ink-body)]">{totalCount.toLocaleString("pt-BR")}</span>
+          <h2 className="min-w-0 text-[11px] font-extrabold uppercase leading-snug tracking-[0.08em] text-[var(--vp-wine)] [overflow-wrap:anywhere]">{stageName}</h2>
+          <span className="shrink-0 text-[13px] font-extrabold tabular-nums text-[var(--vp-ink-body)]">{totalCount.toLocaleString("pt-BR")}</span>
         </div>
         <p className="mb-1.5 mt-0.5 text-[11px] tabular-nums text-[var(--vp-ink-muted)]">{weeklyBreadCount.toLocaleString("pt-BR")} pães/sem</p>
         <div className="h-[3px] overflow-hidden rounded-full bg-[rgba(35,0,4,0.1)]">
@@ -298,7 +298,7 @@ function PipelineCardContent({
       {...(drag?.listeners ?? {})}
       {...(drag?.attributes ?? {})}
       role="button"
-      className={`cursor-pointer rounded-xl border border-l-[3px] border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] px-3 pb-2.5 pt-[11px] shadow-[var(--sh-sm)] md:touch-none md:cursor-grab md:active:cursor-grabbing ${borderSignal} ${
+      className={`min-w-0 cursor-pointer rounded-xl border border-l-[3px] border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] px-3 pb-2.5 pt-[11px] shadow-[var(--sh-sm)] md:touch-none md:cursor-grab md:active:cursor-grabbing ${borderSignal} ${
         drag?.isDragging ? "opacity-40" : ""
       }`}
       tabIndex={0}
@@ -315,12 +315,12 @@ function PipelineCardContent({
     >
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-bold leading-tight text-[var(--vp-ink-body)]">{card.personName}</p>
+          <p className="line-clamp-2 text-sm font-bold leading-snug text-[var(--vp-ink-body)] [overflow-wrap:anywhere]">{card.personName}</p>
           {formattedPhone ? (
             <p className="mt-0.5 truncate text-xs tabular-nums text-[var(--vp-ink-muted)]">{formattedPhone}</p>
           ) : null}
           {card.companyLine ? (
-            <p className="mt-0.5 truncate text-xs text-[var(--vp-ink-muted)]">{card.companyLine}</p>
+            <p className="mt-0.5 line-clamp-2 text-xs leading-snug text-[var(--vp-ink-muted)] [overflow-wrap:anywhere]">{card.companyLine}</p>
           ) : null}
         </div>
         {categoryLetter ? (
@@ -342,12 +342,12 @@ function PipelineCardContent({
         </div>
       ) : null}
       <CardSignalBadges card={card} />
-      <div className="mt-2.5 flex items-center justify-between gap-1.5 border-t border-[var(--vp-surface-high)] pt-2">
-        <span className="inline-flex min-w-0 items-center gap-1.5">
+      <div className="mt-2.5 flex flex-nowrap items-center gap-1.5 border-t border-[var(--vp-surface-high)] pt-2">
+        <span className="inline-flex min-w-0 flex-1 items-center gap-1.5" title={card.ownerName ?? "Sem responsável"}>
           <span className="grid size-5 shrink-0 place-items-center rounded-full bg-[var(--vp-gold)] text-[9px] font-extrabold text-[var(--vp-wine)]">{ownerInitials || "—"}</span>
-          <span className="truncate text-[11px] text-[var(--vp-ink-muted)]">{card.ownerName ?? "Sem responsável"}</span>
+          <span className="truncate text-[11px] text-[var(--vp-ink-muted)]">{card.ownerName?.split(/\s+/)[0] ?? "Sem resp."}</span>
         </span>
-        <span className="relative inline-flex shrink-0 items-center gap-0.5">
+        <span className="relative ml-auto inline-flex shrink-0 items-center gap-0.5">
           {card.conversationId ? (
             <Link
               href={`/inbox?cid=${card.conversationId}`}
@@ -807,7 +807,7 @@ export function PipelineBoard({
 
       <div className="w-full min-w-0 overflow-x-auto pb-1 [scrollbar-gutter:stable]">
         <div
-          className="grid w-max min-w-full snap-x snap-mandatory grid-flow-col auto-cols-[calc(100vw-3rem)] gap-3 md:grid-flow-row md:auto-cols-auto md:[grid-template-columns:repeat(var(--pipeline-stage-count),minmax(13rem,1fr))] md:[width:max(100%,calc(var(--pipeline-stage-count)*13.75rem))]"
+          className="grid w-max min-w-full snap-x snap-mandatory grid-flow-col auto-cols-[min(22rem,calc(100vw-2.5rem))] gap-3.5 md:grid-flow-row md:auto-cols-auto md:[grid-template-columns:repeat(var(--pipeline-stage-count),minmax(17.5rem,1fr))] md:[width:max(100%,calc(var(--pipeline-stage-count)*18.5rem))]"
           style={{ "--pipeline-stage-count": activeStages.length } as CSSProperties}
         >
           {activeStages.map((stage) => {

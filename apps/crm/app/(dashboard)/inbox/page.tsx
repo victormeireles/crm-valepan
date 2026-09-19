@@ -515,7 +515,7 @@ export default async function InboxPage({
   });
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden">
+    <div className="flex h-full min-h-0 flex-1 flex-col gap-2 overflow-hidden">
       <InboxLiveRefresh />
       {dbError ? (
         <div
@@ -527,9 +527,9 @@ export default async function InboxPage({
           {schemaHint ? <p className="mt-2 text-xs">{schemaHint}</p> : null}
         </div>
       ) : null}
-      <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,40vh)_minmax(0,1fr)] gap-4 overflow-hidden min-[900px]:grid-cols-[316px_minmax(0,1fr)] min-[900px]:grid-rows-1 xl:grid-cols-[316px_minmax(0,1fr)_348px]">
-        <div className="flex h-full min-h-0 flex-col overflow-hidden">
-          <div className="min-h-0 flex-1">
+      <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,40vh)_minmax(0,1fr)] gap-4 overflow-hidden min-[900px]:grid-cols-[316px_minmax(0,1fr)] min-[900px]:grid-rows-[minmax(0,1fr)] xl:grid-cols-[316px_minmax(0,1fr)_348px]">
+        <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-[14px] border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] shadow-[var(--sh-sm)]">
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
             <InboxSidebar
               conversations={sidebarRows}
               selectedId={selectedId}
@@ -540,14 +540,16 @@ export default async function InboxPage({
               tabCounts={tabCounts}
             />
           </div>
-          <PaginationNav
-            pathname="/inbox"
-            page={page}
-            pageSize={PAGE_SIZE}
-            totalCount={conversationsCount ?? 0}
-            searchParams={{ ...params, cid: undefined }}
-            showBoundaryLinks
-          />
+          <div className="shrink-0">
+            <PaginationNav
+              pathname="/inbox"
+              page={page}
+              pageSize={PAGE_SIZE}
+              totalCount={conversationsCount ?? 0}
+              searchParams={{ ...params, cid: undefined }}
+              showBoundaryLinks
+            />
+          </div>
         </div>
 
         <InboxConversationPane initialView={initialConversationView} />
