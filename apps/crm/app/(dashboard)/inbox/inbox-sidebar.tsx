@@ -5,15 +5,22 @@ import {
   searchInboxConversationsByPhone,
   updateConversationContactName,
 } from "@/app/actions/inbox";
-import { getCustomerWaitSignal } from "@/lib/lead-signals";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ContactAvatar } from "@/components/contact-avatar";
 import { CrmIcon } from "@/components/crm-icon";
+import { PaginationNav } from "@/components/pagination-nav";
 import { brazilPhoneSearchVariants } from "@crm/shared/phone";
 import { isPhoneSearchQuery } from "@/lib/phone-search-query";
+import { formatAbsoluteShort, formatElapsedShort, formatIntegerPt } from "@/lib/format-relative";
 import { INBOX_SELECT_CONVERSATION_EVENT } from "./inbox-conversation-pane";
+import {
+  inboxClientHref,
+  inboxShareHref,
+  pushInboxClientUrl,
+  readInboxLocation,
+  replaceInboxClientUrl,
+  type InboxTab,
+} from "./inbox-location";
 import { recordInboxBrowserMetric } from "@/lib/inbox-browser-performance";
 
 export type InboxSidebarRow = {
@@ -37,6 +44,8 @@ export type InboxSidebarRow = {
   callStatus: "ringing" | "missed_voice" | "missed_video" | null;
 };
 
+const PAGE_SIZE = 20;
+
 function norm(s: string) {
   return s
     .toLowerCase()
@@ -52,6 +61,31 @@ function validAvatarUrl(v: string | null | undefined): string | null {
   return t;
 }
 
+function ConversationElapsed({
+  lastAt,
+  awaiting,
+  nowMs,
+}: {
+  lastAt: string;
+  awaiting: boolean;
+  nowMs: number;
+}) {
+  const [elapsed, setElapsed] = useState<string | null>(null);
+  useEffect(() => {
+    setElapsed(formatElapsedShort(lastAt, nowMs) ?? "—");
+  }, [lastAt, nowMs]);
+  return (
+    <span
+      className={`ml-auto shrink-0 text-[11px] font-bold tabular-nums ${
+        awaiting ? "text-[var(--vp-error)]" : "text-[var(--vp-ink-soft)]"
+      }`}
+      title={elapsed ? formatAbsoluteShort(lastAt) : undefined}
+    >
+      {elapsed ?? "—"}
+    </span>
+  );
+}
+
 export function InboxSidebar({
   conversations,
   selectedId,
@@ -63,18 +97,20 @@ export function InboxSidebar({
 }: {
   conversations: InboxSidebarRow[];
   selectedId: string | null;
-  activeTab: "qualify" | "archived" | "groups" | "pipeline";
+  activeTab: InboxTab;
   page: number;
   initialQuery: string;
   renderNowMs: number;
   tabCounts: { qualify: number; archived: number; groups: number; pipeline: number };
 }) {
-  const router = useRouter();
   const [nowMs, setNowMs] = useState(renderNowMs);
   const [searchPending, setSearchPending] = useState(false);
   const [phoneResults, setPhoneResults] = useState<InboxSidebarRow[] | null>(null);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [q, setQ] = useState(initialQuery);
+  const [liveTab, setLiveTab] = useState(activeTab);
+  const [livePage, setLivePage] = useState(page);
+  const [listPending, setListPending] = useState(false);
   const [liveConversations, setLiveConversations] = useState(conversations);
   const [liveTabCounts, setLiveTabCounts] = useState(tabCounts);
   const [optimisticSelectedId, setOptimisticSelectedId] = useState(selectedId);
@@ -82,12 +118,17 @@ export function InboxSidebar({
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [errorById, setErrorById] = useState<Record<string, string | null>>({});
-  const conversationHref = (conversationId: string) => {
-    const params = new URLSearchParams({ tab: activeTab, cid: conversationId });
-    if (page > 1) params.set("page", String(page));
-    if (phoneResults !== null && isPhoneSearchQuery(q)) params.set("lookup", "1");
-    return `/inbox?${params.toString()}`;
-  };
+  const requestVersion = useRef(0);
+  const selectedIdRef = useRef(optimisticSelectedId);
+  selectedIdRef.current = optimisticSelectedId;
+
+  const conversationHref = (conversationId: string) =>
+    inboxShareHref({
+      tab: liveTab,
+      page: livePage,
+      cid: conversationId,
+      lookup: phoneResults !== null && isPhoneSearchQuery(q),
+    });
 
   const visibleConversations = phoneResults ?? liveConversations;
   const filtered = useMemo(() => {
@@ -112,6 +153,50 @@ export function InboxSidebar({
     });
   }, [q, visibleConversations]);
 
+  const applySidebarResult = useCallback((
+    tab: InboxTab,
+    nextPage: number,
+    result: Awaited<ReturnType<typeof refreshInboxSidebar>>,
+    startedAt: number,
+  ) => {
+    recordInboxBrowserMetric("sidebar_refresh", startedAt, {
+      success: result.ok,
+      rows: result.ok ? result.conversations.length : 0,
+    });
+    if (!result.ok) return;
+    setLiveTab(tab);
+    setLivePage(nextPage);
+    setLiveConversations(result.conversations);
+    setLiveTabCounts(result.tabCounts);
+  }, []);
+
+  const loadList = useCallback((
+    tab: InboxTab,
+    nextPage: number,
+    mode: "push" | "replace" | "silent" = "push",
+  ) => {
+    const startedAt = performance.now();
+    const version = ++requestVersion.current;
+    setListPending(true);
+    setLiveTab(tab);
+    setLivePage(nextPage);
+    if (mode !== "silent") {
+      const href = inboxClientHref({ tab, page: nextPage, cid: selectedIdRef.current });
+      const historyState = { inboxTab: tab, inboxPage: nextPage, inboxConversationId: selectedIdRef.current };
+      if (mode === "push") pushInboxClientUrl(historyState, href);
+      else replaceInboxClientUrl(historyState, href);
+    }
+    void refreshInboxSidebar({ tab, page: nextPage }).then((result) => {
+      if (version !== requestVersion.current) return;
+      applySidebarResult(tab, nextPage, result, startedAt);
+      setListPending(false);
+    }).catch(() => {
+      if (version !== requestVersion.current) return;
+      recordInboxBrowserMetric("sidebar_refresh", startedAt, { success: false, rows: 0 });
+      setListPending(false);
+    });
+  }, [applySidebarResult]);
+
   useEffect(() => {
     setQ(initialQuery);
   }, [initialQuery]);
@@ -122,35 +207,19 @@ export function InboxSidebar({
   }, [conversations, tabCounts]);
 
   useEffect(() => {
-    let disposed = false;
-    let requestVersion = 0;
-    const refresh = () => {
-      const startedAt = performance.now();
-      const version = ++requestVersion;
-      void refreshInboxSidebar({ tab: activeTab, page }).then((result) => {
-        if (disposed || version !== requestVersion) return;
-        recordInboxBrowserMetric("sidebar_refresh", startedAt, {
-          success: result.ok,
-          rows: result.ok ? result.conversations.length : 0,
-        });
-        if (!result.ok) return;
-        setLiveConversations(result.conversations);
-        setLiveTabCounts(result.tabCounts);
-      }).catch(() => {
-        if (!disposed && version === requestVersion) {
-          recordInboxBrowserMetric("sidebar_refresh", startedAt, {
-            success: false,
-            rows: 0,
-          });
-        }
-      });
-    };
+    const refresh = () => loadList(liveTab, livePage, "silent");
     window.addEventListener("crm:inbox-sidebar-changed", refresh);
-    return () => {
-      disposed = true;
-      window.removeEventListener("crm:inbox-sidebar-changed", refresh);
+    return () => window.removeEventListener("crm:inbox-sidebar-changed", refresh);
+  }, [liveTab, livePage, loadList]);
+
+  useEffect(() => {
+    const onPopState = () => {
+      const next = readInboxLocation();
+      loadList(next.tab, next.page, "silent");
     };
-  }, [activeTab, page]);
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [loadList]);
 
   useEffect(() => {
     const trimmed = q.trim();
@@ -221,7 +290,7 @@ export function InboxSidebar({
 
   return (
     <div
-      aria-busy={searchPending}
+      aria-busy={searchPending || listPending}
       className="relative flex h-full min-h-0 flex-1 flex-col overflow-hidden"
     >
       <div className="shrink-0 border-b border-[var(--vp-ink-line)] p-3">
@@ -232,17 +301,21 @@ export function InboxSidebar({
             ["groups", "Grupos", liveTabCounts.groups],
             ["pipeline", "No funil", liveTabCounts.pipeline],
           ] as const).map(([tab, label, count]) => (
-            <Link
+            <button
               key={tab}
-              href={`/inbox?tab=${tab}`}
+              type="button"
+              onClick={() => {
+                if (tab === liveTab && livePage === 1) return;
+                loadList(tab, 1);
+              }}
               className={`min-h-8 rounded-[14px] px-2 py-1.5 text-center text-xs font-bold ${
-                activeTab === tab
+                liveTab === tab
                   ? "bg-[var(--vp-wine)] text-[var(--vp-gold)]"
                   : "text-[var(--vp-ink-muted)] hover:bg-[rgba(35,0,4,0.04)]"
               }`}
             >
-              {label} {count.toLocaleString("pt-BR")}
-            </Link>
+              {label} {formatIntegerPt(count)}
+            </button>
           ))}
         </div>
         <label htmlFor="inbox-search" className="flex min-h-10 items-center gap-2 rounded-full border border-[var(--vp-ink-line)] bg-[var(--vp-paper)] px-3">
@@ -271,26 +344,33 @@ export function InboxSidebar({
         ) : null}
       </div>
       <ul className="min-h-0 flex-1 divide-y divide-[var(--vp-surface-high)] overflow-y-auto overscroll-contain">
-        {filtered.map((c) => {
-          const wait = getCustomerWaitSignal({ lastDirection: c.lastDirection, lastSentAt: c.lastAt, nowMs });
-          return (
+        {listPending
+          ? Array.from({ length: 8 }, (_, index) => (
+              <li key={`inbox-skeleton-${index}`} className="px-3.5 py-3">
+                <div className="flex items-start gap-2.5">
+                  <span className="size-10 shrink-0 animate-pulse rounded-full bg-[var(--vp-surface-high)]" />
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <span className="block h-3 w-2/3 animate-pulse rounded bg-[var(--vp-surface-high)]" />
+                    <span className="block h-3 w-full animate-pulse rounded bg-[var(--vp-surface)]" />
+                  </div>
+                </div>
+              </li>
+            ))
+          : filtered.map((c) => (
           <li
             key={c.id}
-            className={`relative [contain-intrinsic-size:auto_88px] [content-visibility:auto] transition-colors hover:bg-[rgba(35,0,4,0.05)] ${
+            className={`relative transition-colors hover:bg-[rgba(35,0,4,0.05)] ${
                 c.id === optimisticSelectedId
                   ? "border-l-[3px] border-l-[var(--vp-wine)] bg-[rgba(35,0,4,0.09)]"
                   : "border-l-[3px] border-l-transparent"
               }`}
           >
-            <Link
+            <a
               href={conversationHref(c.id)}
-              prefetch
-              scroll={false}
-              onMouseEnter={() => router.prefetch(conversationHref(c.id))}
-              onFocus={() => router.prefetch(conversationHref(c.id))}
               onClick={(event) => {
+                if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
                 event.preventDefault();
-                const href = conversationHref(c.id);
+                const href = inboxClientHref({ tab: liveTab, page: livePage, cid: c.id });
                 setOptimisticSelectedId(c.id);
                 window.dispatchEvent(new CustomEvent(INBOX_SELECT_CONVERSATION_EVENT, {
                   detail: { conversationId: c.id, href },
@@ -306,13 +386,15 @@ export function InboxSidebar({
                     phone={c.phone_e164}
                     className="size-10"
                     textClassName="text-[13px]"
+                    allowRemoteFallback={false}
+                    allowRefresh={false}
                   />
                   {c.unread && !readIds.has(c.id) ? <span className="absolute -right-0.5 -top-0.5 size-2.5 rounded-full border-2 border-[var(--vp-paper-pure)] bg-[var(--vp-wine)]" aria-label="Conversa com mensagens não lidas" /> : null}
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <span className="truncate text-sm font-bold text-[var(--vp-ink-body)]">{c.identityName}</span>
-                    <span className={`ml-auto shrink-0 text-[11px] font-bold tabular-nums ${c.awaiting ? "text-[var(--vp-error)]" : "text-[var(--vp-ink-soft)]"}`} title={new Date(c.lastAt).toLocaleString("pt-BR")}>{wait.elapsed ?? "—"}</span>
+                    <ConversationElapsed lastAt={c.lastAt} awaiting={c.awaiting} nowMs={nowMs} />
                   </div>
                   <p className="truncate text-xs text-[var(--vp-ink-muted)]">{c.companyName ?? c.phone_e164}</p>
                 </div>
@@ -330,7 +412,7 @@ export function InboxSidebar({
               <p className="mt-2 line-clamp-2 text-xs leading-relaxed text-[var(--vp-ink-muted)]">{c.preview}</p>
               <div className="mt-2 flex flex-wrap items-center gap-1 text-[10px] font-bold text-[var(--vp-ink-muted)]">
                 <span className="rounded-full bg-[var(--vp-surface)] px-2 py-0.5">{c.stageName ?? c.leadLine}</span>
-                <span className="rounded-full bg-[var(--vp-surface)] px-2 py-0.5">{c.weeklyBreadCount == null ? "volume não informado" : `${c.weeklyBreadCount.toLocaleString("pt-BR")} pães/sem`}</span>
+                <span className="rounded-full bg-[var(--vp-surface)] px-2 py-0.5">{c.weeklyBreadCount == null ? "volume não informado" : `${formatIntegerPt(c.weeklyBreadCount)} pães/sem`}</span>
                 {c.callStatus && c.callStatus !== "ringing" ? (
                   <span className="font-semibold text-[var(--vp-wine)]">
                     <CrmIcon
@@ -341,7 +423,7 @@ export function InboxSidebar({
                   </span>
                 ) : null}
               </div>
-            </Link>
+            </a>
             <div className="absolute right-2 top-2">
               <button
                 type="button"
@@ -386,7 +468,13 @@ export function InboxSidebar({
                           return;
                         }
                         setOpenMenuId(null);
-                        router.push(conversationHref(c.id), { scroll: false });
+                        setLiveConversations((rows) =>
+                          rows.map((row) =>
+                            row.id === c.id
+                              ? { ...row, displayName: name, identityName: name }
+                              : row,
+                          ),
+                        );
                       }}
                       className="w-full rounded px-2 py-1.5 text-left text-xs text-[var(--foreground)] hover:bg-[rgba(35,0,4,0.07)] disabled:opacity-50"
                     >
@@ -404,18 +492,32 @@ export function InboxSidebar({
               <p className="px-4 pb-2 text-[11px] text-[var(--vp-error)]">{errorById[c.id]}</p>
             ) : null}
           </li>
-        )})}
-        {phoneResults === null && liveConversations.length === 0 && (
+        ))}
+        {!listPending && phoneResults === null && liveConversations.length === 0 && (
           <li className="px-4 py-8 text-center text-sm text-[var(--muted)]">Nenhuma conversa ainda.</li>
         )}
-        {(phoneResults !== null && phoneResults.length === 0) ||
-        (visibleConversations.length > 0 && filtered.length === 0) ? (
+        {!listPending && ((phoneResults !== null && phoneResults.length === 0) ||
+        (visibleConversations.length > 0 && filtered.length === 0)) ? (
           <li className="px-4 py-8 text-center text-sm text-[var(--muted)]">Nenhum resultado.</li>
         ) : null}
       </ul>
-      {searchPending ? (
+      <div className="shrink-0">
+        <PaginationNav
+          pathname="/inbox"
+          page={livePage}
+          pageSize={PAGE_SIZE}
+          totalCount={liveTabCounts[liveTab]}
+          searchParams={{ tab: liveTab, cid: optimisticSelectedId ?? undefined }}
+          showBoundaryLinks
+          onNavigate={(href) => {
+            const nextPage = Number.parseInt(new URL(href, "http://local.invalid").searchParams.get("page") ?? "1", 10) || 1;
+            loadList(liveTab, nextPage);
+          }}
+        />
+      </div>
+      {searchPending || listPending ? (
         <div className="pointer-events-none absolute bottom-2 left-1/2 z-20 -translate-x-1/2 rounded-full bg-[var(--vp-wine)] px-3 py-1 text-[10px] font-medium text-[var(--vp-gold)] shadow-[var(--sh-md)]">
-          Buscando…
+          {searchPending ? "Buscando…" : "Atualizando lista…"}
         </div>
       ) : null}
     </div>

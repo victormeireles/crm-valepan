@@ -1,3 +1,30 @@
+const CRM_TIME_ZONE = "America/Sao_Paulo";
+
+/** Data/hora absoluta estável entre servidor e cliente (evita hydration mismatch). */
+export function formatAbsoluteShort(iso: string): string {
+  const date = new Date(iso);
+  if (!Number.isFinite(date.getTime())) return "";
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: CRM_TIME_ZONE,
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(date);
+  const value = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value ?? "";
+  const pad = (input: string) => input.replace(/\D/g, "").padStart(2, "0");
+  return `${pad(value("day"))}/${pad(value("month"))}/${value("year")} ${pad(value("hour"))}:${pad(value("minute"))}`;
+}
+
+/** Inteiro em pt-BR sem depender do ICU do Node (evita hydration mismatch). */
+export function formatIntegerPt(value: number): string {
+  const [sign, digits] = value < 0 ? ["-", String(Math.round(-value))] : ["", String(Math.round(value))];
+  return `${sign}${digits.replace(/\B(?=(\d{3})+(?!\d))/g, ".")}`;
+}
+
 /** Data/hora recente em linguagem natural (pt-BR), para listas e inbox. */
 export function formatRelativeShort(iso: string, nowMs = Date.now()): string {
   const then = new Date(iso).getTime();
@@ -11,12 +38,7 @@ export function formatRelativeShort(iso: string, nowMs = Date.now()): string {
   if (Math.abs(diffHr) < 36) return rtf.format(diffHr, "hour");
   const diffDay = Math.round(diffHr / 24);
   if (Math.abs(diffDay) < 14) return rtf.format(diffDay, "day");
-  return new Date(iso).toLocaleString("pt-BR", {
-    day: "2-digit",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return formatAbsoluteShort(iso);
 }
 
 /** Duração passada compacta para sinais operacionais (ex.: 8min, 6h, 3d). */

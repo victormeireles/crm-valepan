@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { resolveContactAvatarSrc } from "@/lib/contact-avatar";
 
 function firstInitial(name: string) {
   return Array.from(name.trim())[0]?.toUpperCase() ?? "?";
@@ -13,6 +14,8 @@ export function ContactAvatar({
   className,
   textClassName,
   loading = "lazy",
+  allowRemoteFallback = true,
+  allowRefresh = false,
 }: {
   name: string;
   src?: string | null;
@@ -20,22 +23,20 @@ export function ContactAvatar({
   className: string;
   textClassName?: string;
   loading?: "eager" | "lazy";
+  allowRemoteFallback?: boolean;
+  allowRefresh?: boolean;
 }) {
   const [failedSources, setFailedSources] = useState<ReadonlySet<string>>(() => new Set());
-  const normalizedPhone = phone?.trim() ?? "";
-  const directSrc = src?.trim() || null;
-  const proxySrc = /^\+\d{8,15}$/.test(normalizedPhone)
-    ? `/api/contacts/avatar?phone=${encodeURIComponent(normalizedPhone)}`
-    : null;
-  const refreshSrc = proxySrc ? `${proxySrc}&refresh=1` : null;
-  const normalizedSrc = [directSrc, proxySrc, refreshSrc].find(
-    (candidate): candidate is string => Boolean(candidate && !failedSources.has(candidate)),
-  ) ?? null;
+  const normalizedSrc = resolveContactAvatarSrc({
+    src,
+    phone,
+    failedSources,
+    allowRemoteFallback,
+    allowRefresh,
+  });
 
   if (normalizedSrc) {
     return (
-      // Usa primeiro a URL já carregada com a lista. O endpoint interno só entra
-      // como fallback e renova links temporários quando ambos falham.
       // eslint-disable-next-line @next/next/no-img-element
       <img
         src={normalizedSrc}

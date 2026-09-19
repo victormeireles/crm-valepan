@@ -18,6 +18,7 @@ import {
   type InboxMessageRow,
 } from "@/lib/inbox/load-messages";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
+import { formatAbsoluteShort } from "@/lib/format-relative";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AudioMessagePlayer } from "./audio-message-player";
 import { DocumentInsightPanel } from "./document-insight-panel";
@@ -64,22 +65,20 @@ function initials(name: string) {
 }
 
 function messageDayKey(iso: string) {
-  return new Date(iso).toLocaleDateString("pt-BR", {
-    timeZone: "America/Sao_Paulo",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  });
+  return formatAbsoluteShort(iso).slice(0, 10);
 }
 
 function messageDayLabel(iso: string) {
-  const date = new Date(iso);
+  const key = messageDayKey(iso);
   const today = messageDayKey(new Date().toISOString());
   const yesterday = messageDayKey(new Date(Date.now() - 86_400_000).toISOString());
-  const key = messageDayKey(iso);
   if (key === today) return "Hoje";
   if (key === yesterday) return "Ontem";
-  return date.toLocaleDateString("pt-BR", { day: "2-digit", month: "long" });
+  return key;
+}
+
+function messageTimeLabel(iso: string) {
+  return formatAbsoluteShort(iso).slice(11, 16);
 }
 
 function isPlayableMediaSrc(value: string | null | undefined): value is string {
@@ -470,11 +469,11 @@ function MessageActions({
             {dialog === "info" ? (
               <dl className="grid grid-cols-[auto,1fr] gap-x-4 gap-y-3 text-sm">
                 <dt className="text-[var(--muted)]">Direção</dt><dd>{message.direction === "out" ? "Enviada" : "Recebida"}</dd>
-                <dt className="text-[var(--muted)]">Data</dt><dd>{new Date(message.sent_at).toLocaleString("pt-BR")}</dd>
+                <dt className="text-[var(--muted)]">Data</dt><dd>{formatAbsoluteShort(message.sent_at)}</dd>
                 <dt className="text-[var(--muted)]">Status</dt><dd>{message.deleted_at ? "Apagada" : message.direction === "out" ? outboundStatusLabel(message) : "Recebida"}</dd>
                 <dt className="text-[var(--muted)]">Conteúdo</dt><dd>{message.media_kind ?? "Texto"}</dd>
-                {message.edited_at ? <><dt className="text-[var(--muted)]">Editada em</dt><dd>{new Date(message.edited_at).toLocaleString("pt-BR")}</dd></> : null}
-                {message.read_at ? <><dt className="text-[var(--muted)]">Lida em</dt><dd>{new Date(message.read_at).toLocaleString("pt-BR")}</dd></> : null}
+                {message.edited_at ? <><dt className="text-[var(--muted)]">Editada em</dt><dd>{formatAbsoluteShort(message.edited_at)}</dd></> : null}
+                {message.read_at ? <><dt className="text-[var(--muted)]">Lida em</dt><dd>{formatAbsoluteShort(message.read_at)}</dd></> : null}
                 <dt className="text-[var(--muted)]">ID do CRM</dt><dd className="break-all font-mono text-xs">{message.id}</dd>
                 <dt className="text-[var(--muted)]">ID WhatsApp</dt><dd className="break-all font-mono text-xs">{message.provider_message_id ?? "Indisponível"}</dd>
               </dl>
@@ -648,12 +647,7 @@ function CallEventCard({ message }: { message: InboxMessageRow }) {
           {message.body ?? (ringing ? "Cliente está ligando agora" : "Ligação não atendida")}
         </p>
         <time className="text-xs text-[var(--muted)]" dateTime={message.sent_at}>
-          {new Date(message.sent_at).toLocaleString("pt-BR", {
-            day: "2-digit",
-            month: "2-digit",
-            hour: "2-digit",
-            minute: "2-digit",
-          })}
+          {formatAbsoluteShort(message.sent_at)}
         </time>
       </div>
       {ringing ? (
@@ -727,7 +721,7 @@ const ChatMessageItem = memo(function ChatMessageItem({
                 <div className="grid grid-cols-2 divide-x divide-[rgba(80,20,24,0.14)]"><button type="button" className="px-2 py-2 text-xs font-medium text-[var(--vp-wine)] hover:bg-[rgba(35,0,4,0.08)]">Conversar</button><button type="button" className="px-2 py-2 text-xs font-medium text-[var(--vp-wine)] hover:bg-[rgba(35,0,4,0.08)]">Adicionar a um grupo</button></div>
               </div>
             ) : <div className="space-y-2">{renderMedia(message)}<p className="whitespace-pre-wrap break-words">{message.body?.trim() ? message.body : "Sem texto neste registro (mensagem antiga ou mídia sem legenda)."}</p></div>}
-            <div className={`mt-1.5 flex items-center gap-1.5 text-[10px] leading-none ${out ? "justify-end text-[var(--vp-gold-pale)]/90" : "justify-end text-[var(--muted)]"}`}><time dateTime={message.sent_at}>{new Date(message.sent_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</time><span className="opacity-70">·</span><span className="font-medium">{out ? outboundStatusLabel(message) : "Recebida"}</span>{message.edited_at && !message.deleted_at ? <span className="opacity-70">· editada</span> : null}</div>
+            <div className={`mt-1.5 flex items-center gap-1.5 text-[10px] leading-none ${out ? "justify-end text-[var(--vp-gold-pale)]/90" : "justify-end text-[var(--muted)]"}`}><time dateTime={message.sent_at}>{messageTimeLabel(message.sent_at)}</time><span className="opacity-70">·</span><span className="font-medium">{out ? outboundStatusLabel(message) : "Recebida"}</span>{message.edited_at && !message.deleted_at ? <span className="opacity-70">· editada</span> : null}</div>
             {message.reaction && !message.deleted_at ? <span className={`absolute -bottom-3 ${out ? "left-2" : "right-2"} rounded-full border border-[var(--border)] bg-[var(--vp-paper-pure)] px-1.5 py-0.5 text-sm shadow-sm`}>{message.reaction}</span> : null}
             {message.pinned_at && !message.deleted_at ? <span className={`absolute -top-3 ${out ? "left-2" : "right-2"} rounded-full border border-[var(--border)] bg-[var(--vp-paper-pure)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--vp-wine)] shadow-sm`}>⚑ Fixada</span> : null}
             {isFavorite && !message.deleted_at ? <span className={`absolute -top-3 ${out ? "right-2" : "left-2"} rounded-full border border-[var(--border)] bg-[var(--vp-paper-pure)] px-1.5 py-0.5 text-xs text-[var(--vp-gold-deep)] shadow-sm`} title="Favorita">★</span> : null}

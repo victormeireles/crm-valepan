@@ -8,8 +8,6 @@ import { fetchZapiProfilePictureLink } from "@/lib/zapi/profile-picture";
 
 export const dynamic = "force-dynamic";
 
-const AVATAR_REFRESH_MS = 24 * 60 * 60 * 1000;
-
 function usableAvatarUrl(value: string | null | undefined): string | null {
   const text = value?.trim() ?? "";
   if (!text || text === "null" || text === "undefined") return null;
@@ -19,11 +17,6 @@ function usableAvatarUrl(value: string | null | undefined): string | null {
   } catch {
     return null;
   }
-}
-
-function isFresh(value: string | null | undefined): boolean {
-  const timestamp = Date.parse(value ?? "");
-  return Number.isFinite(timestamp) && Date.now() - timestamp < AVATAR_REFRESH_MS;
 }
 
 function imageUnavailable() {
@@ -53,7 +46,7 @@ export async function GET(request: Request) {
   if (error || !contact) return imageUnavailable();
 
   let avatarUrl = usableAvatarUrl(contact.avatar_url);
-  if (forceRefresh || !isFresh(contact.avatar_updated_at)) {
+  if (forceRefresh) {
     const refreshedUrl = usableAvatarUrl(await fetchZapiProfilePictureLink(phone));
     const refreshedAt = new Date().toISOString();
 
@@ -73,7 +66,7 @@ export async function GET(request: Request) {
   return NextResponse.redirect(avatarUrl, {
     status: 307,
     headers: {
-      "Cache-Control": "private, max-age=3600, stale-while-revalidate=300",
+      "Cache-Control": "private, max-age=86400, stale-while-revalidate=3600",
     },
   });
 }

@@ -8,6 +8,7 @@ import { recordInboxBrowserMetric } from "@/lib/inbox-browser-performance";
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { ChatThread } from "./chat-thread";
 import { ExcludeLeadButton, RestoreLeadButton } from "./exclude-lead-actions";
+import { pushInboxClientUrl, readInboxLocation } from "./inbox-location";
 import { InboxLeadPanel, InboxLeadPanelDrawer } from "./inbox-lead-panel";
 import { MarkConversationRead } from "./mark-conversation-read";
 import { SendMessageForm } from "./send-message-form";
@@ -22,7 +23,14 @@ export function InboxConversationPane({ initialView }: { initialView: InboxConve
   const [mobilePanelOpen, setMobilePanelOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [nowMs, setNowMs] = useState<number | null>(null);
   const requestVersion = useRef(0);
+
+  useEffect(() => {
+    setNowMs(Date.now());
+    const interval = window.setInterval(() => setNowMs(Date.now()), 60_000);
+    return () => window.clearInterval(interval);
+  }, []);
 
   const selectConversation = useCallback((conversationId: string, href?: string) => {
     const startedAt = performance.now();
@@ -30,7 +38,7 @@ export function InboxConversationPane({ initialView }: { initialView: InboxConve
     setError(null);
     setPanelLoading(false);
     setMobilePanelOpen(false);
-    if (href) window.history.pushState({ inboxConversationId: conversationId }, "", href);
+    if (href) pushInboxClientUrl({ inboxConversationId: conversationId }, href);
     startTransition(async () => {
       const result = await loadInboxConversationView(conversationId);
       if (version !== requestVersion.current) return;
@@ -52,7 +60,7 @@ export function InboxConversationPane({ initialView }: { initialView: InboxConve
       if (detail?.conversationId) selectConversation(detail.conversationId, detail.href);
     };
     const onPopState = () => {
-      const conversationId = new URL(window.location.href).searchParams.get("cid");
+      const conversationId = readInboxLocation().cid;
       if (conversationId) selectConversation(conversationId);
     };
     window.addEventListener(INBOX_SELECT_CONVERSATION_EVENT, onSelect);
@@ -102,11 +110,13 @@ export function InboxConversationPane({ initialView }: { initialView: InboxConve
       if (version === requestVersion.current) setPanelLoading(false);
     }
   };
-  const wait = conversation ? getCustomerWaitSignal({
-    lastDirection: conversation.lastDirection,
-    lastSentAt: conversation.lastSentAt,
-    nowMs: Date.now(),
-  }) : null;
+  const wait = conversation && nowMs != null
+    ? getCustomerWaitSignal({
+        lastDirection: conversation.lastDirection,
+        lastSentAt: conversation.lastSentAt,
+        nowMs,
+      })
+    : null;
 
   return (
     <>
@@ -123,7 +133,7 @@ export function InboxConversationPane({ initialView }: { initialView: InboxConve
             <div className="shrink-0 border-b border-[var(--vp-ink-line)] bg-[var(--vp-paper)] px-[18px] py-3.5">
               <div className="flex items-center justify-between gap-4">
                 <div className="flex min-w-0 items-center gap-3">
-                  <ContactAvatar name={conversation.headerName} src={conversation.avatarUrl} phone={conversation.phone} className="size-11 shrink-0" loading="eager" />
+                  <ContactAvatar name={conversation.headerName} src={conversation.avatarUrl} phone={conversation.phone} className="size-11 shrink-0" loading="eager" allowRefresh={false} />
                   <div className="min-w-0">
                     <h1 className="truncate text-[17px] font-bold text-[var(--vp-ink-body)]">{conversation.headerName}</h1>
                     <p className="truncate text-xs text-[var(--vp-ink-muted)]">{[conversation.headerCompany, conversation.phone, conversation.location].filter(Boolean).join(" · ")}</p>

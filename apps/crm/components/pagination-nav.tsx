@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { MouseEvent } from "react";
 
 export function PaginationNav({
   pathname,
@@ -7,6 +8,7 @@ export function PaginationNav({
   totalCount,
   searchParams,
   showBoundaryLinks = false,
+  onNavigate,
 }: {
   pathname: string;
   page: number;
@@ -14,6 +16,7 @@ export function PaginationNav({
   totalCount: number;
   searchParams: Record<string, string | string[] | undefined>;
   showBoundaryLinks?: boolean;
+  onNavigate?: (href: string) => void;
 }) {
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
   if (totalPages <= 1) return null;
@@ -32,6 +35,16 @@ export function PaginationNav({
     const query = params.toString();
     return query ? `${pathname}?${query}` : pathname;
   };
+  const navigateProps = (href: string) =>
+    onNavigate
+      ? {
+          onClick: (event: MouseEvent<HTMLAnchorElement>) => {
+            if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
+            event.preventDefault();
+            onNavigate(href);
+          },
+        }
+      : {};
 
   return (
     <nav
@@ -47,6 +60,8 @@ export function PaginationNav({
             {page > 1 ? (
               <Link
                 href={hrefFor(1)}
+                prefetch={false}
+                {...navigateProps(hrefFor(1))}
                 className="rounded border border-[var(--border)] px-2.5 py-1.5 font-medium hover:bg-[var(--vp-surface-low)]"
               >
                 Primeira
@@ -62,6 +77,8 @@ export function PaginationNav({
             {page < totalPages ? (
               <Link
                 href={hrefFor(page + 1)}
+                prefetch={false}
+                {...navigateProps(hrefFor(page + 1))}
                 className="rounded border border-[var(--border)] px-2.5 py-1.5 font-medium hover:bg-[var(--vp-surface-low)]"
               >
                 Próxima
@@ -77,6 +94,8 @@ export function PaginationNav({
             {page < totalPages ? (
               <Link
                 href={hrefFor(totalPages)}
+                prefetch={false}
+                {...navigateProps(hrefFor(totalPages))}
                 className="rounded border border-[var(--border)] px-2.5 py-1.5 font-medium hover:bg-[var(--vp-surface-low)]"
               >
                 Última
@@ -95,6 +114,8 @@ export function PaginationNav({
             {page > 1 ? (
               <Link
                 href={hrefFor(page - 1)}
+                prefetch={false}
+                {...navigateProps(hrefFor(page - 1))}
                 className="rounded border border-[var(--border)] px-2.5 py-1.5 font-medium hover:bg-[var(--vp-surface-low)]"
               >
                 Anterior
@@ -103,6 +124,8 @@ export function PaginationNav({
             {page < totalPages ? (
               <Link
                 href={hrefFor(page + 1)}
+                prefetch={false}
+                {...navigateProps(hrefFor(page + 1))}
                 className="rounded border border-[var(--border)] px-2.5 py-1.5 font-medium hover:bg-[var(--vp-surface-low)]"
               >
                 Próxima

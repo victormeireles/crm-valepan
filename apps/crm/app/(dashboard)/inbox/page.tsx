@@ -8,7 +8,6 @@ import { nestOne } from "@/lib/supabase/nested";
 import { createServerSupabaseClient, crmTables } from "@/lib/supabase/server";
 import { InboxLiveRefresh } from "./inbox-live-refresh";
 import { InboxSidebar, type InboxSidebarRow } from "./inbox-sidebar";
-import { PaginationNav } from "@/components/pagination-nav";
 import { InboxConversationPane } from "./inbox-conversation-pane";
 import type { InboxConversationView } from "@/app/actions/inbox";
 import {
@@ -154,7 +153,6 @@ export default async function InboxPage({
       : null,
   }));
   const conversationsError = snapshotResult.error;
-  const conversationsCount = Number(snapshotMeta?.tab_total ?? 0);
   const tabCounts = {
     qualify: Number(snapshotMeta?.qualify_count ?? 0),
     archived: Number(snapshotMeta?.archived_count ?? 0),
@@ -538,16 +536,6 @@ export default async function InboxPage({
               initialQuery={inboxQuery}
               renderNowMs={renderNowMs}
               tabCounts={tabCounts}
-            />
-          </div>
-          <div className="shrink-0">
-            <PaginationNav
-              pathname="/inbox"
-              page={page}
-              pageSize={PAGE_SIZE}
-              totalCount={conversationsCount ?? 0}
-              searchParams={{ ...params, cid: undefined }}
-              showBoundaryLinks
             />
           </div>
         </div>

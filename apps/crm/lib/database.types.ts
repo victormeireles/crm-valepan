@@ -189,6 +189,10 @@ export interface Database {
           last_read_at: string | null;
           last_message_at: string | null;
           last_direction: "in" | "out" | null;
+          last_body_preview: string | null;
+          last_inbound_sent_at: string | null;
+          last_event_kind: string | null;
+          last_event_status: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -204,6 +208,10 @@ export interface Database {
           last_read_at?: string | null;
           last_message_at?: string | null;
           last_direction?: "in" | "out" | null;
+          last_body_preview?: string | null;
+          last_inbound_sent_at?: string | null;
+          last_event_kind?: string | null;
+          last_event_status?: string | null;
         };
         Update: Partial<Database["crm"]["Tables"]["conversations"]["Insert"]>;
       };
