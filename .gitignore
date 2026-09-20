@@ -27,7 +27,11 @@ yarn-error.log*
 .idea
 .vscode/*
 !.vscode/extensions.json
-.cursor
+.cursor/*
+!.cursor/commands/
+!.cursor/commands/**
+!.cursor/rules/
+!.cursor/rules/**
 
 # TypeScript
 *.tsbuildinfo

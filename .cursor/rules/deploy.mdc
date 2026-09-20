@@ -1,0 +1,10 @@
+---
+description: /deploy sobe pela GitHub main; nunca usar a CLI da Vercel
+alwaysApply: true
+---
+
+# Deploy
+
+`/deploy` neste repo significa: rodar o build, corrigir erros e dar push em `origin/main`.
+
+Não use a CLI da Vercel (`vercel`, `vercel link`, `vercel deploy`, `vercel --prod`, `vercel pull`). Não crie `.vercel/`. A Vercel publica sozinha a partir do Git.
