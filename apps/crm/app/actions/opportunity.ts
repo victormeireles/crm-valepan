@@ -54,10 +54,27 @@ export async function updateOpportunityStage(input: {
   const { data: oppRow } = await crm
     .from("opportunities")
     .select(
-      "lead_id, company_id, title, stage_id, owner_id, leads(phone_e164, company_id, owner_id, contacts(full_name)), companies(name)",
+      "lead_id, company_id, title, stage_id, owner_id, lost_reason, leads(phone_e164, company_id, owner_id, contacts(full_name)), companies(name)",
     )
     .eq("id", input.opportunityId)
     .maybeSingle();
+
+  if (needsClosingReason) {
+    const trimmedReason = (input.lostReason ?? "").trim();
+    const { data: catalog, error: catalogError } = await crm
+      .from("lost_reasons")
+      .select("name, active");
+    if (catalogError) return { ok: false as const, error: catalogError.message };
+    const allowed =
+      (catalog ?? []).some((reason) => reason.active && reason.name === trimmedReason) ||
+      oppRow?.lost_reason === trimmedReason;
+    if (!allowed) {
+      return {
+        ok: false as const,
+        error: "Motivo inválido. Cadastre ou ative este motivo em Configurações.",
+      };
+    }
+  }
 
   const previousStageId = oppRow?.stage_id ?? null;
 

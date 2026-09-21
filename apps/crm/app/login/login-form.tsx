@@ -62,7 +62,7 @@ export function LoginForm() {
         setError(getAuthErrorMessage(err));
         return;
       }
-      // Força uma nova requisição para que o middleware e os Server Components
+      // Força uma nova requisição para que o proxy e os Server Components
       // recebam os cookies de sessão gravados pelo Supabase antes de protegerem
       // a rota de destino. A navegação pelo router pode disputar com essa gravação
       // e redirecionar o usuário de volta ao login sem exibir erro.

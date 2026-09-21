@@ -5,6 +5,9 @@ import type { ClientCategoryValue } from "@/lib/client-categories";
 import type { PipelineRegion } from "@/lib/pipeline-signals";
 import { CrmIcon } from "@/components/crm-icon";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import type { LostReasonDTO } from "@/lib/lost-reasons";
+import { lostReasonNamesForSelect } from "@/lib/lost-reasons";
+import { displayPipelineStageName, findCanonicalPipelineStage } from "@/lib/pipeline-canonical-stages";
 import type { PipelineStageDTO } from "./pipeline-board";
 
 const SEARCH_DEBOUNCE_MS = 500;
@@ -226,6 +229,34 @@ function OwnerMenu({
   );
 }
 
+function ArchiveShortcut({
+  label,
+  count,
+  active,
+  ariaLabel,
+  onClick,
+}: {
+  label: string;
+  count: number;
+  active: boolean;
+  ariaLabel: string;
+  onClick: () => void;
+}) {
+  const number = new Intl.NumberFormat("pt-BR");
+  return (
+    <button
+      type="button"
+      className={triggerClass(active)}
+      aria-label={ariaLabel}
+      aria-pressed={active}
+      onClick={onClick}
+    >
+      <span>{label}</span>
+      <span className="tabular-nums opacity-80">{number.format(count)}</span>
+    </button>
+  );
+}
+
 export function PipelineHeader({
   stages,
   teamOptions,
@@ -236,6 +267,8 @@ export function PipelineHeader({
   pending,
   hasAnyFilter,
   totalCount,
+  lostReasons,
+  stageTotals,
   onFilterChange,
 }: {
   stages: PipelineStageDTO[];
@@ -247,6 +280,8 @@ export function PipelineHeader({
   pending: boolean;
   hasAnyFilter: boolean;
   totalCount: number;
+  lostReasons: LostReasonDTO[];
+  stageTotals: Record<string, number>;
   onFilterChange: FilterChangeHandler;
 }) {
   const handleSearch = useCallback(
@@ -257,6 +292,10 @@ export function PipelineHeader({
   );
 
   const selectedStage = stages.find((stage) => stage.id === filters.stageId);
+  const clientStage = findCanonicalPipelineStage(stages, "CONVERTIDO");
+  const lostStage = findCanonicalPipelineStage(stages, "PERDIDO");
+  const clientCount = clientStage ? stageTotals[clientStage.id] ?? 0 : 0;
+  const lostCount = lostStage ? stageTotals[lostStage.id] ?? 0 : 0;
   const regionLabels: Record<PipelineRegion, string> = { sp: "São Paulo", rj: "Rio" };
   const categoryLabels: Record<ClientCategoryValue, string> = {
     hamburgueria: "Hamburgueria",
@@ -317,17 +356,17 @@ export function PipelineHeader({
         </ToolbarMenu>
         <ToolbarMenu
           active={Boolean(filters.stageId)}
-          ariaLabel={`Etapa: ${selectedStage?.name ?? "abertas"}`}
-          label={selectedStage?.name ?? "Etapa"}
+          ariaLabel={`Etapa: ${selectedStage ? displayPipelineStageName(selectedStage.name) : "funil aberto"}`}
+          label={selectedStage ? displayPipelineStageName(selectedStage.name) : "Etapa"}
         >
-          <MenuOption selected={!filters.stageId} onSelect={() => onFilterChange({ stage: null })}>Todas as abertas</MenuOption>
-          {stages.filter((stage) => !stage.is_final).map((stage) => (
+          <MenuOption selected={!filters.stageId} onSelect={() => onFilterChange({ stage: null })}>Funil aberto</MenuOption>
+          {stages.map((stage) => (
             <MenuOption
               key={stage.id}
               selected={filters.stageId === stage.id}
               onSelect={() => onFilterChange({ stage: stage.id })}
             >
-              {stage.name}
+              {displayPipelineStageName(stage.name)}
             </MenuOption>
           ))}
         </ToolbarMenu>
@@ -341,11 +380,49 @@ export function PipelineHeader({
           <MenuOption selected={filters.volume === "ate_100"} onSelect={() => onFilterChange({ volume: "ate_100" })}>Até 100 pães/sem</MenuOption>
           <MenuOption selected={filters.volume === "acima_100"} onSelect={() => onFilterChange({ volume: "acima_100" })}>Acima de 100 pães/sem</MenuOption>
         </ToolbarMenu>
+        <ToolbarMenu
+          active={Boolean(filters.lostReason)}
+          ariaLabel={`Subclassificação: ${filters.lostReason ?? "todas"}`}
+          label={filters.lostReason ?? "Motivo"}
+        >
+          <MenuOption selected={!filters.lostReason} onSelect={() => onFilterChange({ lost_reason: null })}>Todas</MenuOption>
+          {lostReasonNamesForSelect(lostReasons, filters.lostReason).map((name) => (
+            <MenuOption
+              key={name}
+              selected={filters.lostReason === name}
+              onSelect={() => onFilterChange({ lost_reason: name })}
+            >
+              {name}
+            </MenuOption>
+          ))}
+        </ToolbarMenu>
+        {clientStage ? (
+          <ArchiveShortcut
+            label="Clientes"
+            count={clientCount}
+            active={filters.stageId === clientStage.id}
+            ariaLabel={`Arquivo de clientes: ${clientCount}`}
+            onClick={() => onFilterChange({
+              stage: filters.stageId === clientStage.id ? null : clientStage.id,
+            })}
+          />
+        ) : null}
+        {lostStage ? (
+          <ArchiveShortcut
+            label="Perdidos"
+            count={lostCount}
+            active={filters.stageId === lostStage.id}
+            ariaLabel={`Arquivo de perdidos: ${lostCount}`}
+            onClick={() => onFilterChange({
+              stage: filters.stageId === lostStage.id ? null : lostStage.id,
+            })}
+          />
+        ) : null}
         {hasAnyFilter ? (
           <button
             type="button"
             className="min-h-11 cursor-pointer px-2 text-[13px] font-semibold text-[var(--vp-wine)] hover:underline"
-            onClick={() => onFilterChange({ mine: null, owner: null, signal: null, region: null, client_category: null, stage: null, volume: null, q: null })}
+            onClick={() => onFilterChange({ mine: null, owner: null, signal: null, region: null, client_category: null, stage: null, volume: null, lost_reason: null, q: null })}
           >
             Limpar
           </button>

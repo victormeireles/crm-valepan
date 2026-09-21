@@ -114,6 +114,23 @@ export interface Database {
           created_at: string;
         };
       };
+      lost_reasons: {
+        Row: {
+          id: string;
+          name: string;
+          sort_order: number;
+          active: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          name: string;
+          sort_order?: number;
+          active?: boolean;
+        };
+        Update: Partial<Database["crm"]["Tables"]["lost_reasons"]["Insert"]>;
+      };
       pipeline_stage_task_templates: {
         Row: {
           id: string;
@@ -622,6 +639,7 @@ export interface Database {
           p_offset?: number;
           p_limit?: number;
           p_volume?: string | null;
+          p_lost_reason?: string | null;
         };
         Returns: Json;
       };
@@ -637,6 +655,7 @@ export interface Database {
           p_offset?: number;
           p_limit?: number;
           p_volume?: string | null;
+          p_lost_reason?: string | null;
         };
         Returns: Database["crm"]["Functions"]["pipeline_cards"]["Returns"];
       };

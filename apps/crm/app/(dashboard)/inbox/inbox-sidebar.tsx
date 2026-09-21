@@ -7,6 +7,7 @@ import {
 } from "@/app/actions/inbox";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ContactAvatar } from "@/components/contact-avatar";
+import { CategoryBadge } from "@/components/lead-identity";
 import { CrmIcon } from "@/components/crm-icon";
 import { PaginationNav } from "@/components/pagination-nav";
 import { brazilPhoneSearchVariants } from "@crm/shared/phone";
@@ -394,6 +395,7 @@ export function InboxSidebar({
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <span className="truncate text-sm font-bold text-[var(--vp-ink-body)]">{c.identityName}</span>
+                    <CategoryBadge category={c.clientCategory} size="sm" />
                     <ConversationElapsed lastAt={c.lastAt} awaiting={c.awaiting} nowMs={nowMs} />
                   </div>
                   <p className="truncate text-xs text-[var(--vp-ink-muted)]">{c.companyName ?? c.phone_e164}</p>

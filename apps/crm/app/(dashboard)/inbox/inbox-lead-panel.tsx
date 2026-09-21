@@ -7,6 +7,7 @@ import { CrmIcon, type CrmIconName } from "@/components/crm-icon";
 import { LeadFollowUp } from "@/components/lead-follow-up";
 import type { LeadFollowUpDTO } from "@/lib/follow-ups";
 import { useMemo, useRef, useState } from "react";
+import { displayPipelineStageName } from "@/lib/pipeline-canonical-stages";
 import { InboxTasksPanel, type InboxTaskRow } from "./inbox-tasks-panel";
 
 type StageOption = { id: string; name: string; sortOrder: number; isFinal?: boolean };
@@ -178,7 +179,7 @@ export function InboxLeadPanel(props: InboxLeadPanelProps) {
               <span className="text-[11px] font-bold uppercase tracking-[0.06em] text-[var(--vp-ink-soft)]">Etapa</span>
               <select className={controlClass} value={qualification.stageId} onChange={(event) => void saveQualification({ stageId: event.target.value }, "stage")}>
                 <option value="">Não definida</option>
-                {orderedStages.filter((stage) => !stage.isFinal).map((stage) => <option key={stage.id} value={stage.id}>{stage.name}</option>)}
+                {orderedStages.filter((stage) => !stage.isFinal).map((stage) => <option key={stage.id} value={stage.id}>{displayPipelineStageName(stage.name)}</option>)}
               </select>
             </label>
             <label className="flex min-h-11 items-center justify-between gap-2.5 rounded-[10px] border border-[var(--vp-ink-line)] bg-[var(--vp-paper)] px-3">
@@ -272,7 +273,7 @@ export function InboxLeadPanel(props: InboxLeadPanelProps) {
           disabled={!nextStage || !props.opportunityId || savingField === "nextStage"}
           onClick={() => void moveToNextStage()}
         >
-          {savingField === "nextStage" ? "Movendo…" : nextStage ? `Mover para ${nextStage.name}` : "Última etapa do funil"}
+          {savingField === "nextStage" ? "Movendo…" : nextStage ? `Mover para ${displayPipelineStageName(nextStage.name)}` : "Última etapa do funil"}
         </button>
       </footer>
     </aside>

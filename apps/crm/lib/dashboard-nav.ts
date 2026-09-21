@@ -31,4 +31,5 @@ export const dashboardNavItems: DashboardNavItem[] = [
     })),
   },
   { kind: "link", href: "/samples", label: "Amostras" },
+  { kind: "link", href: "/settings", label: "Configurações" },
 ];

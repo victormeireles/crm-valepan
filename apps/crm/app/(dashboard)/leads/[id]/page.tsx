@@ -17,6 +17,7 @@ import { LeadFollowUp } from "@/components/lead-follow-up";
 import { toFollowUpDTO } from "@/lib/follow-ups";
 import { formatCaptureZip, formatLeadSource } from "@/lib/lead-capture";
 import { formatCpfCnpj } from "@/lib/cpf-cnpj";
+import { selectCanonicalPipelineStages } from "@/lib/pipeline-canonical-stages";
 
 const TEAM_ROLE_LABEL: Record<string, string> = {
   admin: "Admin",
@@ -48,6 +49,7 @@ export default async function LeadDetailPage({
     { data: leadTasksRaw },
     { data: teamProfiles },
     { data: registrations },
+    { data: lostReasonRows },
   ] = await Promise.all([
     crm
       .from("leads")
@@ -61,7 +63,7 @@ export default async function LeadDetailPage({
       .select("*, pipeline_stages(name)")
       .eq("lead_id", id)
       .order("created_at", { ascending: false }),
-    crm.from("pipeline_stages").select("id, name, sort_order").order("sort_order", { ascending: true }),
+    crm.from("pipeline_stages").select("id, name, sort_order, is_final").order("sort_order", { ascending: true }),
     crm
       .from("timeline_events")
       .select("*")
@@ -77,6 +79,7 @@ export default async function LeadDetailPage({
     crm.from("profiles").select("id, full_name, role").order("full_name", { ascending: true }),
     crm.from("lead_registrations").select("id, source, cpf_cnpj")
       .eq("lead_id", id).not("cpf_cnpj", "is", null).order("created_at", { ascending: false }).limit(5),
+    crm.from("lost_reasons").select("id, name, sort_order, active").order("sort_order", { ascending: true }),
   ]);
 
   if (!lead) notFound();
@@ -131,6 +134,16 @@ export default async function LeadDetailPage({
               phoneTitle={lead.phone_e164}
               size="md"
               layout="stacked"
+              trailing={
+                opportunity?.lost_reason ? (
+                  <span
+                    className="rounded-full border border-[var(--vp-ink-line)] bg-[var(--vp-paper)] px-2 py-0.5 text-[10px] font-bold tracking-[0.04em] text-[var(--vp-wine)]"
+                    title="Subclassificação"
+                  >
+                    {opportunity.lost_reason}
+                  </span>
+                ) : null
+              }
             />
           </div>
           <p className="text-sm text-[var(--muted)]">
@@ -170,7 +183,13 @@ export default async function LeadDetailPage({
                 }
               : null
           }
-          stages={stages ?? []}
+          stages={selectCanonicalPipelineStages(stages ?? [])}
+          lostReasons={(lostReasonRows ?? []).map((reason) => ({
+            id: reason.id,
+            name: reason.name,
+            sort_order: reason.sort_order,
+            active: reason.active,
+          }))}
         />
       </div>
 

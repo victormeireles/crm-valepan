@@ -20,7 +20,7 @@ import {
 import type { PipelineSignal } from "@/lib/pipeline-signals";
 import { recordPipelineBrowserMetric } from "@/lib/pipeline-browser-performance";
 import { CrmIcon } from "@/components/crm-icon";
-import { formatBrazilPhoneForDisplay } from "@/lib/lead-identity";
+import { formatBrazilPhoneForDisplay, categoryLetter, categoryLabel } from "@/lib/lead-identity";
 import { LeadFollowUp } from "@/components/lead-follow-up";
 import type { LeadFollowUpDTO } from "@/lib/follow-ups";
 import Link from "next/link";
@@ -36,6 +36,9 @@ import {
   useState,
   type CSSProperties,
 } from "react";
+import { LostReasonSelect } from "@/components/lost-reason-select";
+import type { LostReasonDTO } from "@/lib/lost-reasons";
+import { displayPipelineStageName, findCanonicalPipelineStage, isCanonicalFinalStage, isLostPipelineStage, visiblePipelineBoardStages } from "@/lib/pipeline-canonical-stages";
 import { PipelineSignalBadges } from "./pipeline-signal-badges";
 
 export type PipelineStageDTO = {
@@ -78,10 +81,9 @@ function groupByStage(
 ): Map<string, PipelineCardDTO[]> {
   const m = new Map<string, PipelineCardDTO[]>();
   for (const s of stages) m.set(s.id, []);
-  const fallback = stages[0]?.id ?? null;
   for (const c of cards) {
-    const key = m.has(c.stage_id) ? c.stage_id : fallback;
-    if (key) m.get(key)!.push(c);
+    const list = m.get(c.stage_id);
+    if (list) list.push(c);
   }
   return m;
 }
@@ -234,6 +236,7 @@ type PipelineCardProps = {
   onOpenFollowUp: (card: PipelineCardDTO) => void;
   onMove: (opportunityId: string, fromStageId: string, toStageId: string) => void;
   onClose: (card: PipelineCardDTO, stageId: string) => void;
+  onResume: (card: PipelineCardDTO, stageId: string) => void;
 };
 
 type DraggableBinding = ReturnType<typeof useDraggable>;
@@ -263,6 +266,7 @@ function PipelineCardContent({
   onOpenFollowUp,
   onMove,
   onClose,
+  onResume,
   drag,
 }: PipelineCardProps & { drag: DraggableBinding | null }) {
   const [actionsOpen, setActionsOpen] = useState(false);
@@ -279,9 +283,13 @@ function PipelineCardContent({
     .slice(0, 2)
     .map((part) => part[0]?.toUpperCase())
     .join("");
-  const categoryLetter = card.client_category?.trim()[0]?.toLocaleUpperCase("pt-BR") ?? null;
+  const typeLetter = categoryLetter(card.client_category);
+  const typeLabel = categoryLabel(card.client_category);
   const formattedPhone = formatBrazilPhoneForDisplay(card.phone_e164);
   const regionLabel = [card.companyState, card.companyCity].filter(Boolean).join(" · ") || null;
+  const currentStage = stages.find((stage) => stage.id === stageId);
+  const isLost = isLostPipelineStage(currentStage?.name);
+  const isClosed = isCanonicalFinalStage(currentStage?.name);
   const borderSignal = card.signals.includes("awaiting_reply")
     ? "border-l-[var(--vp-error)]"
     : card.signals.includes("followup_overdue")
@@ -323,13 +331,17 @@ function PipelineCardContent({
             <p className="mt-0.5 line-clamp-2 text-xs leading-snug text-[var(--vp-ink-muted)] [overflow-wrap:anywhere]">{card.companyLine}</p>
           ) : null}
         </div>
-        {categoryLetter ? (
-          <span className="grid size-[22px] shrink-0 place-items-center rounded-[7px] border border-[var(--vp-ink-line)] bg-[var(--vp-surface)] text-[10px] font-extrabold text-[var(--vp-wine)]" aria-label={`Categoria: ${card.client_category}`}>
-            {categoryLetter}
+        {typeLetter ? (
+          <span
+            className="grid size-[22px] shrink-0 place-items-center rounded-[7px] border border-[var(--vp-ink-line)] bg-[var(--vp-surface)] text-[10px] font-extrabold text-[var(--vp-wine)]"
+            title={typeLabel ?? undefined}
+            aria-label={`Tipo de cliente: ${typeLabel}`}
+          >
+            {typeLetter}
           </span>
         ) : null}
       </div>
-      {regionLabel || card.weeklyBreadCount != null ? (
+      {regionLabel || card.weeklyBreadCount != null || card.lost_reason ? (
         <div className="mt-2 flex flex-wrap gap-1">
           {regionLabel ? (
             <span className="rounded-full bg-[var(--vp-surface)] px-2 py-0.5 text-[10px] font-bold tracking-[0.04em] text-[var(--vp-ink-muted)]">{regionLabel}</span>
@@ -339,9 +351,31 @@ function PipelineCardContent({
               {card.weeklyBreadCount.toLocaleString("pt-BR")} pães/sem
             </span>
           ) : null}
+          {card.lost_reason ? (
+            <span
+              className="rounded-full border border-[var(--vp-ink-line)] bg-[var(--vp-paper)] px-2 py-0.5 text-[10px] font-bold tracking-[0.04em] text-[var(--vp-wine)]"
+              title="Subclassificação"
+            >
+              {card.lost_reason}
+            </span>
+          ) : null}
         </div>
       ) : null}
       <CardSignalBadges card={card} />
+      {isLost ? (
+        <button
+          type="button"
+          className="mt-2 flex min-h-11 w-full items-center justify-center gap-1.5 rounded-lg border border-[var(--vp-wine)] bg-[var(--vp-wine)] px-3 text-[12px] font-bold text-[var(--vp-gold)] hover:opacity-90 md:min-h-8"
+          onPointerDown={stopPointer}
+          onClick={(event) => {
+            stopPointer(event);
+            onResume(card, stageId);
+          }}
+        >
+          <CrmIcon name="history" className="text-base" />
+          Retomar
+        </button>
+      ) : null}
       <div className="mt-2.5 flex flex-nowrap items-center gap-1.5 border-t border-[var(--vp-surface-high)] pt-2">
         <span className="inline-flex min-w-0 flex-1 items-center gap-1.5" title={card.ownerName ?? "Sem responsável"}>
           <span className="grid size-5 shrink-0 place-items-center rounded-full bg-[var(--vp-gold)] text-[9px] font-extrabold text-[var(--vp-wine)]">{ownerInitials || "—"}</span>
@@ -375,6 +409,7 @@ function PipelineCardContent({
               <CrmIcon name="event" className="text-[17px]" />
             </button>
           ) : null}
+          {isClosed && !isLost ? null : (
           <details
             className="group relative"
             open={actionsOpen}
@@ -388,7 +423,7 @@ function PipelineCardContent({
             {actionsOpen ? (
               <div className="absolute bottom-full right-0 z-30 mb-1 min-w-52 overflow-hidden rounded-xl border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] py-1 shadow-[var(--sh-md)]">
                 <p className="px-3 py-1 text-[10px] font-extrabold uppercase tracking-[0.1em] text-[var(--vp-ink-soft)] md:hidden">Mover para</p>
-                {stages.filter((stage) => !stage.is_final && stage.id !== stageId).map((stage) => (
+                {stages.filter((stage) => stage.id !== stageId && !stage.is_final).map((stage) => (
                   <button
                     key={stage.id}
                     type="button"
@@ -398,9 +433,23 @@ function PipelineCardContent({
                       onMove(card.id, stageId, stage.id);
                     }}
                   >
-                    {stage.name}
+                    {displayPipelineStageName(stage.name)}
                   </button>
                 ))}
+                {isLost ? (
+                  <button
+                    type="button"
+                    className="flex min-h-11 w-full items-center gap-2 px-3 text-left text-xs font-semibold text-[var(--vp-wine)] hover:bg-[var(--vp-surface)]"
+                    onClick={() => {
+                      setActionsOpen(false);
+                      onResume(card, stageId);
+                    }}
+                  >
+                    <CrmIcon name="history" className="text-base" />
+                    Retomar em Negociação
+                  </button>
+                ) : null}
+                {isClosed ? null : (
                 <button
                   type="button"
                   className="flex min-h-11 w-full items-center gap-2 px-3 text-left text-xs font-semibold text-[var(--vp-error)] hover:bg-[var(--vp-surface)]"
@@ -412,9 +461,11 @@ function PipelineCardContent({
                   <CrmIcon name="block" className="text-base" />
                   Encerrar oportunidade
                 </button>
+                )}
               </div>
             ) : null}
           </details>
+          )}
         </span>
       </div>
     </div>
@@ -460,6 +511,8 @@ export function PipelineBoard({
   nowMs,
   teamOptions,
   currentUserId,
+  lostReasons,
+  onReturnToOpenFunnel,
 }: {
   stages: PipelineStageDTO[];
   initialCards: PipelineCardDTO[];
@@ -469,15 +522,17 @@ export function PipelineBoard({
   nowMs: number;
   teamOptions: { id: string; label: string }[];
   currentUserId: string | null;
+  lostReasons: LostReasonDTO[];
+  onReturnToOpenFunnel?: () => void;
 }) {
   const router = useRouter();
   const dragEnabled = useDesktopDrag();
-  const activeStages = useMemo(() => stages.filter((stage) => !stage.is_final), [stages]);
-  const finalStages = useMemo(() => stages.filter((stage) => stage.is_final), [stages]);
-  const closedCards = useMemo(
-    () => initialCards.filter((card) => finalStages.some((stage) => stage.id === card.stage_id)),
-    [finalStages, initialCards],
+  const boardStages = useMemo(
+    () => visiblePipelineBoardStages(stages, filters.stageId),
+    [filters.stageId, stages],
   );
+  const finalStages = useMemo(() => stages.filter((stage) => stage.is_final), [stages]);
+  const closedCards = useMemo(() => [] as PipelineCardDTO[], []);
 
   const fingerprint = useMemo(
     () => initialCards.map((c) => [
@@ -491,7 +546,7 @@ export function PipelineBoard({
     [initialCards],
   );
 
-  const [columns, setColumns] = useState(() => groupByStage(activeStages, initialCards));
+  const [columns, setColumns] = useState(() => groupByStage(boardStages, initialCards));
   const [localStageTotals, setLocalStageTotals] = useState(stageTotals);
   const [localStageBreadCounts, setLocalStageBreadCounts] = useState(stageBreadCounts);
   const [loadingStageId, setLoadingStageId] = useState<string | null>(null);
@@ -503,6 +558,7 @@ export function PipelineBoard({
     opportunityId: string;
     fromStageId: string;
     personName: string;
+    targetStageId?: string;
   } | null>(null);
   const [closingStageId, setClosingStageId] = useState("");
   const [closingReason, setClosingReason] = useState("");
@@ -520,14 +576,14 @@ export function PipelineBoard({
   stagesRef.current = stages;
 
   useEffect(() => {
-    const next = groupByStage(activeStages, initialCards);
+    const next = groupByStage(boardStages, initialCards);
     setColumns(next);
     columnsRef.current = next;
     setLocalStageTotals(stageTotals);
     stageTotalsRef.current = stageTotals;
     setLocalStageBreadCounts(stageBreadCounts);
     stageBreadCountsRef.current = stageBreadCounts;
-  }, [fingerprint, activeStages, initialCards, stageTotals, stageBreadCounts]);
+  }, [fingerprint, boardStages, initialCards, stageTotals, stageBreadCounts]);
 
   const loadMore = useCallback(
     async (stageId: string) => {
@@ -560,7 +616,7 @@ export function PipelineBoard({
     const d = dialogRef.current;
     if (!d) return;
     if (pendingClose) {
-      setClosingStageId(finalStages[0]?.id ?? "");
+      setClosingStageId(pendingClose.targetStageId ?? finalStages[0]?.id ?? "");
       setClosingReason("");
       if (!d.open) d.showModal();
     } else if (d.open) {
@@ -734,6 +790,23 @@ export function PipelineBoard({
       const targetStage = stagesRef.current.find((s) => s.id === targetStageId);
       if (!targetStage) return;
 
+      if (targetStage.is_final) {
+        const list = columnsRef.current.get(fromStageId) ?? [];
+        const card = list.find((item) => item.id === activeData.opportunityId);
+        if (!card) return;
+        if (targetStage.name.toLowerCase().includes("convertido")) {
+          void commitMove(activeData.opportunityId, fromStageId, targetStageId, null);
+          return;
+        }
+        setPendingClose({
+          opportunityId: card.id,
+          fromStageId,
+          personName: card.personName,
+          targetStageId,
+        });
+        return;
+      }
+
       void commitMove(activeData.opportunityId, fromStageId, targetStageId, null);
     },
     [commitMove],
@@ -773,6 +846,18 @@ export function PipelineBoard({
     setFollowUpCardId(card.id);
   }, []);
   const moveCardFromMenu = useCallback((opportunityId: string, fromStageId: string, toStageId: string) => {
+    const targetStage = stagesRef.current.find((stage) => stage.id === toStageId);
+    if (targetStage?.is_final && !targetStage.name.toLowerCase().includes("convertido")) {
+      const card = (columnsRef.current.get(fromStageId) ?? []).find((item) => item.id === opportunityId);
+      if (!card) return;
+      setPendingClose({
+        opportunityId,
+        fromStageId,
+        personName: card.personName,
+        targetStageId: toStageId,
+      });
+      return;
+    }
     void commitMove(opportunityId, fromStageId, toStageId, null);
   }, [commitMove]);
   const requestClose = useCallback((card: PipelineCardDTO, fromStageId: string) => {
@@ -782,7 +867,19 @@ export function PipelineBoard({
       personName: card.personName,
     });
   }, []);
-  const maxWeeklyBreadCount = Math.max(0, ...activeStages.map((stage) => localStageBreadCounts[stage.id] ?? 0));
+  const resumeCard = useCallback((card: PipelineCardDTO, fromStageId: string) => {
+    const negociacao = findCanonicalPipelineStage(stagesRef.current, "NEGOCIAÇÃO");
+    if (!negociacao) {
+      setBannerError("Etapa Negociação não encontrada.");
+      return;
+    }
+    void commitMove(card.id, fromStageId, negociacao.id, null).then((ok) => {
+      if (!ok) return;
+      setBannerSuccess("Oportunidade retomada em Negociação.");
+      onReturnToOpenFunnel?.();
+    });
+  }, [commitMove, onReturnToOpenFunnel]);
+  const maxWeeklyBreadCount = Math.max(0, ...boardStages.map((stage) => localStageBreadCounts[stage.id] ?? 0));
 
   return (
     <PipelineClockContext.Provider value={nowMs}>
@@ -808,9 +905,9 @@ export function PipelineBoard({
       <div className="w-full min-w-0 overflow-x-auto pb-1 [scrollbar-gutter:stable]">
         <div
           className="grid w-max min-w-full snap-x snap-mandatory grid-flow-col auto-cols-[min(22rem,calc(100vw-2.5rem))] gap-3.5 md:grid-flow-row md:auto-cols-auto md:[grid-template-columns:repeat(var(--pipeline-stage-count),minmax(17.5rem,1fr))] md:[width:max(100%,calc(var(--pipeline-stage-count)*18.5rem))]"
-          style={{ "--pipeline-stage-count": activeStages.length } as CSSProperties}
+          style={{ "--pipeline-stage-count": boardStages.length } as CSSProperties}
         >
-          {activeStages.map((stage) => {
+          {boardStages.map((stage) => {
             const items = columns.get(stage.id) ?? [];
             const totalCount = localStageTotals[stage.id] ?? items.length;
             const hasMore = items.length < totalCount;
@@ -818,7 +915,7 @@ export function PipelineBoard({
               <DroppableColumn
                 key={stage.id}
                 stageId={stage.id}
-                stageName={stage.name}
+                stageName={displayPipelineStageName(stage.name)}
                 totalCount={totalCount}
                 weeklyBreadCount={localStageBreadCounts[stage.id] ?? 0}
                 maxWeeklyBreadCount={maxWeeklyBreadCount}
@@ -831,11 +928,12 @@ export function PipelineBoard({
                     <DraggableCard
                       card={card}
                       stageId={stage.id}
-                      stages={activeStages}
+                      stages={stages}
                       onOpen={openCard}
                       onOpenFollowUp={openCardFollowUp}
                       onMove={moveCardFromMenu}
                       onClose={requestClose}
+                      onResume={resumeCard}
                     />
                   </VirtualizedPipelineCard>
                 ))}
@@ -940,7 +1038,7 @@ export function PipelineBoard({
               >
                 {finalStages.map((stage) => (
                   <option key={stage.id} value={stage.id}>
-                    {stage.name}
+                    {displayPipelineStageName(stage.name)}
                   </option>
                 ))}
               </select>
@@ -951,23 +1049,24 @@ export function PipelineBoard({
               .includes("convertido") ? (
               <label className="block space-y-1 text-xs font-medium">
                 <span>Motivo</span>
-                <select
-                  className="w-full rounded border border-[var(--border)] bg-[var(--background)] px-2 py-2 text-sm"
-                  value={closingReason}
-                  onChange={(e) => setClosingReason(e.target.value)}
-                  disabled={closingBusy}
-                >
-                  <option value="">Selecione um motivo</option>
-                  <option value="Sem interesse">Sem interesse</option>
-                  <option value="Não responde">Não responde</option>
-                  <option value="Região não atendida">Região não atendida</option>
-                  <option value="Produto não disponível">Produto não disponível</option>
-                  <option value="Já era cliente">Já era cliente</option>
-                  <option value="Volume insuficiente">Volume insuficiente</option>
-                  <option value="Preço">Preço</option>
-                  <option value="Prazo">Prazo</option>
-                  <option value="Outro">Outro</option>
-                </select>
+                {lostReasons.some((reason) => reason.active) ? (
+                  <>
+                    <LostReasonSelect
+                      reasons={lostReasons}
+                      value={closingReason}
+                      onChange={setClosingReason}
+                      disabled={closingBusy}
+                      className="min-h-11 w-full rounded border border-[var(--border)] bg-[var(--background)] px-2 py-2 text-sm"
+                    />
+                    <Link href="/settings" className="inline-block text-[11px] font-semibold text-[var(--vp-wine)] underline-offset-2 hover:underline">
+                      Gerenciar motivos
+                    </Link>
+                  </>
+                ) : (
+                  <p className="text-xs text-[var(--vp-error)]">
+                    Cadastre um motivo ativo em Configurações para encerrar.
+                  </p>
+                )}
               </label>
             ) : null}
             <div className="flex justify-end gap-2">
@@ -1021,7 +1120,7 @@ export function PipelineBoard({
                     <span className="text-sm font-medium">{card.personName}</span>
                   )}
                   <p className="mt-1 text-xs text-[var(--muted)]">
-                    {stage?.name ?? "Encerrado"}
+                    {displayPipelineStageName(stage?.name) || "Encerrado"}
                     {card.lost_reason ? ` · ${card.lost_reason}` : ""}
                   </p>
                 </li>

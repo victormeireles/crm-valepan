@@ -14,6 +14,7 @@ import {
   isLeadExcludedFromPipeline,
   leadExclusionReasonLabel,
 } from "@/lib/lead-pipeline-exclusion";
+import { displayPipelineStageName } from "@/lib/pipeline-canonical-stages";
 import { getWeeklyBreadCount } from "@/lib/lead-signals";
 import type { Database } from "@/lib/database.types";
 import {
@@ -391,7 +392,9 @@ export default async function InboxPage({
     );
     const tail = tailById.get(c.id);
     const opportunity = nestOne(lead?.opportunities ?? null);
-    const stageName = (stages ?? []).find((stage) => stage.id === opportunity?.stage_id)?.name ?? null;
+    const stageName = displayPipelineStageName(
+      (stages ?? []).find((stage) => stage.id === opportunity?.stage_id)?.name ?? null,
+    ) || null;
 
     const company = nestOne(
       (lead?.companies ?? null) as

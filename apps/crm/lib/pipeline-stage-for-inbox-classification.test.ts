@@ -1,34 +1,40 @@
 import { describe, expect, it } from "vitest";
-import { pipelineStageForInboxClassification } from "./pipeline-stage-for-inbox-classification";
+import {
+  lostReasonForInboxClassification,
+  pipelineStageForInboxClassification,
+} from "./pipeline-stage-for-inbox-classification";
 
 describe("pipelineStageForInboxClassification", () => {
-  it("envia negociação para a etapa NEGOCIAÇÃO", () => {
+  it("envia chatbot para Novo (LEADS)", () => {
+    expect(pipelineStageForInboxClassification("CHATBOT")).toBe("LEADS");
+  });
+
+  it("envia sem retorno para Qualificação", () => {
+    expect(pipelineStageForInboxClassification("SEM RETORNO")).toBe("QUALIFICAÇÃO");
+  });
+
+  it("envia amostra e encaminhado para Negociação", () => {
+    expect(pipelineStageForInboxClassification("AMOSTRA")).toBe("NEGOCIAÇÃO");
     expect(pipelineStageForInboxClassification("NEGOCIAÇÃO")).toBe("NEGOCIAÇÃO");
+    expect(pipelineStageForInboxClassification("ENCAMINHADO PARA O DISTRIBUIDOR")).toBe("NEGOCIAÇÃO");
   });
 
-  it("mantém chatbot como uma etapa selecionável separada", () => {
-    expect(pipelineStageForInboxClassification("CHATBOT")).toBe("CHATBOT");
-  });
-
-  it("envia sem retorno para a etapa SEM RETORNO", () => {
-    expect(pipelineStageForInboxClassification("SEM RETORNO")).toBe("SEM RETORNO");
-  });
-
-  it.each(["JÁ É CLIENTE", "NÃO INAUGUROU", "SEM PEDIDO MÍNIMO"])(
-    "envia %s para a etapa de mesmo nome",
-    (classification) => {
-      expect(pipelineStageForInboxClassification(classification)).toBe(classification);
-    },
-  );
-
-  it("trata os nomes divergentes entre classificação e etapa", () => {
-    expect(pipelineStageForInboxClassification("ENCAMINHADO PARA O DISTRIBUIDOR")).toBe(
-      "ENCAMINHADO PARA DISTRIBUIDOR",
-    );
+  it("envia cliente para Convertido", () => {
+    expect(pipelineStageForInboxClassification("JÁ É CLIENTE")).toBe("CONVERTIDO");
     expect(pipelineStageForInboxClassification("CLIENTE")).toBe("CONVERTIDO");
+  });
+
+  it("envia perdas para Perdido com motivo", () => {
+    expect(pipelineStageForInboxClassification("NÃO INAUGUROU")).toBe("PERDIDO");
+    expect(pipelineStageForInboxClassification("SEM PEDIDO MÍNIMO")).toBe("PERDIDO");
+    expect(pipelineStageForInboxClassification("SEM INTERESSE")).toBe("PERDIDO");
+    expect(lostReasonForInboxClassification("NÃO INAUGUROU")).toBe("Não inaugurou");
+    expect(lostReasonForInboxClassification("SEM PEDIDO MÍNIMO")).toBe("Sem pedido mínimo");
+    expect(lostReasonForInboxClassification("NÃO RESPONDE")).toBe("Não responde");
   });
 
   it("não move o funil ao limpar a classificação", () => {
     expect(pipelineStageForInboxClassification(null)).toBeNull();
+    expect(lostReasonForInboxClassification("NEGOCIAÇÃO")).toBeNull();
   });
 });

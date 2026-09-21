@@ -30,9 +30,9 @@ vi.mock("@supabase/ssr", () => ({
   }),
 }));
 
-import { middleware } from "../../middleware";
+import { proxy } from "../../proxy";
 
-describe("middleware session continuity", () => {
+describe("proxy session continuity", () => {
   beforeEach(() => {
     process.env.NEXT_PUBLIC_SUPABASE_URL = "https://project.supabase.co";
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "anon-key";
@@ -49,7 +49,7 @@ describe("middleware session continuity", () => {
       { name: "sb-project-auth-token", value: "renewed", options: { path: "/" } },
     ];
 
-    const response = await middleware(
+    const response = await proxy(
       new NextRequest("https://crm.example.com/pipeline?owner=user-1"),
     );
 
@@ -60,7 +60,7 @@ describe("middleware session continuity", () => {
   it("preserves the full selected route if login is actually required", async () => {
     authMock.getClaims.mockResolvedValue({ data: null, error: null });
 
-    const response = await middleware(
+    const response = await proxy(
       new NextRequest("https://crm.example.com/inbox?tab=groups&cid=conversation-1"),
     );
     const location = new URL(response.headers.get("location") ?? "");
@@ -80,7 +80,7 @@ describe("middleware session continuity", () => {
       { name: "sb-project-auth-token", value: "renewed", options: { path: "/" } },
     ];
 
-    const response = await middleware(
+    const response = await proxy(
       new NextRequest(
         "https://crm.example.com/login?next=%2Finbox%3Ftab%3Dpipeline%26cid%3Dconversation-2",
       ),
@@ -98,7 +98,7 @@ describe("middleware session continuity", () => {
       error: new AuthRetryableFetchError("temporary outage", 503),
     });
 
-    const response = await middleware(
+    const response = await proxy(
       new NextRequest("https://crm.example.com/tasks?view=calendar"),
     );
 

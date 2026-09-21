@@ -21,7 +21,14 @@ import { isPhoneSearchQuery } from "@/lib/phone-search-query";
 import { brazilPhoneSearchVariants } from "@crm/shared/phone";
 import { isInboxClassification } from "@/lib/inbox-classifications";
 import { applyPipelineStageEntryAutomations } from "@/lib/pipeline-stage-automations";
-import { pipelineStageForInboxClassification } from "@/lib/pipeline-stage-for-inbox-classification";
+import {
+  lostReasonForInboxClassification,
+  pipelineStageForInboxClassification,
+} from "@/lib/pipeline-stage-for-inbox-classification";
+import {
+  displayPipelineStageName,
+  selectCanonicalPipelineStages,
+} from "@/lib/pipeline-canonical-stages";
 import {
   MAX_WHATSAPP_MEDIA_BYTES,
   storePrivateMedia,
@@ -137,7 +144,9 @@ export async function refreshInboxSidebar(input: {
   if (snapshotResult.error) return { ok: false as const, error: snapshotResult.error.message };
   const rows = (snapshotResult.data ?? []) as InboxSidebarSnapshotRow[];
   const meta = rows[0];
-  const stageNames = new Map((stagesResult.data ?? []).map((stage) => [stage.id, stage.name]));
+  const stageNames = new Map(
+    (stagesResult.data ?? []).map((stage) => [stage.id, displayPipelineStageName(stage.name) || stage.name]),
+  );
   const conversations: InboxSidebarRefreshRow[] = rows
     .filter((row) => row.conversation_id && row.phone_e164 && row.conversation_kind && row.created_at && row.updated_at)
     .map((row) => {
@@ -367,7 +376,12 @@ export async function loadInboxLeadPanel(conversationId: string) {
     initialBreadType: lead.bread_type ?? null,
     initialCnpj: company?.document ?? null,
     initialOwnerId: lead.owner_id ?? null,
-    stages: (stagesResult.data ?? []).map((stage) => ({ id: stage.id, name: stage.name, sortOrder: stage.sort_order, isFinal: stage.is_final })),
+    stages: selectCanonicalPipelineStages(stagesResult.data ?? []).map((stage) => ({
+      id: stage.id,
+      name: stage.name,
+      sortOrder: stage.sort_order,
+      isFinal: stage.is_final,
+    })),
     teamOptions,
     opportunityId: opportunity?.id ?? null,
     followUp: followUp ? toFollowUpDTO(followUp) : null,
@@ -1089,6 +1103,7 @@ export async function updateConversationClassification(input: {
         .update({
           stage_id: targetStageId,
           owner_id: opportunity?.owner_id ?? user.id,
+          lost_reason: lostReasonForInboxClassification(classification),
           updated_at: nowIso,
         })
         .eq("lead_id", conversation.lead_id);
@@ -1101,6 +1116,7 @@ export async function updateConversationClassification(input: {
           owner_id: user.id,
           stage_id: targetStageId,
           title: `Oportunidade ${conversation.phone_e164}`,
+          lost_reason: lostReasonForInboxClassification(classification),
         })
         .select("id")
         .single();

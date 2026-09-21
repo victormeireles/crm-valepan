@@ -6,13 +6,16 @@ import {
   updateOpportunityStage,
 } from "@/app/actions/opportunity";
 import { updateLeadClientCategory, updateLeadDistributor } from "@/app/actions/leads";
+import { LostReasonSelect } from "@/components/lost-reason-select";
 import { ExcludeLeadButton } from "../../inbox/exclude-lead-actions";
 import { isClientCategoryValue } from "@/lib/client-categories";
+import type { LostReasonDTO } from "@/lib/lost-reasons";
+import { displayPipelineStageName } from "@/lib/pipeline-canonical-stages";
 import { SEND_VIA_OPTIONS } from "@/lib/send-via-options";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
-type Stage = { id: string; name: string; sort_order: number };
+type Stage = { id: string; name: string; sort_order: number; is_final?: boolean };
 type Opp = {
   id: string;
   stage_id: string;
@@ -28,6 +31,7 @@ export function LeadActions({
   contact,
   opportunity,
   stages,
+  lostReasons,
 }: {
   leadId: string;
   clientCategory: string | null;
@@ -35,6 +39,7 @@ export function LeadActions({
   contact: { id: string; full_name: string | null } | null;
   opportunity: Opp;
   stages: Stage[];
+  lostReasons: LostReasonDTO[];
 }) {
   const router = useRouter();
   const [stageId, setStageId] = useState(opportunity?.stage_id ?? "");
@@ -233,7 +238,7 @@ export function LeadActions({
   return (
     <div className="flex min-w-[260px] max-w-sm flex-col gap-3 rounded-lg border border-[var(--border)] bg-[var(--card)] p-3 text-sm">
       <div className="text-xs text-[var(--muted)]">
-        Etapa atual: {opportunity.pipeline_stages?.name ?? "—"}
+        Etapa atual: {displayPipelineStageName(opportunity.pipeline_stages?.name) || "—"}
       </div>
       <label className="flex flex-col gap-1">
         Nome do contato
@@ -272,7 +277,7 @@ export function LeadActions({
         >
           {stages.map((s) => (
             <option key={s.id} value={s.id}>
-              {s.name}
+              {displayPipelineStageName(s.name)}
             </option>
           ))}
         </select>
@@ -280,12 +285,18 @@ export function LeadActions({
       {closingStage ? (
         <label className="flex flex-col gap-1">
           Motivo do encerramento
-          <input
-            className="rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1"
-            value={lost}
-            onChange={(e) => setLost(e.target.value)}
-            placeholder="Obrigatório para etapa Sem interesse"
-          />
+          {lostReasons.some((reason) => reason.active) || lost.trim() ? (
+            <LostReasonSelect
+              reasons={lostReasons}
+              value={lost}
+              onChange={setLost}
+              className="min-h-11 rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1"
+            />
+          ) : (
+            <p className="text-xs text-[var(--vp-error)]">
+              Cadastre um motivo ativo em Configurações para encerrar.
+            </p>
+          )}
         </label>
       ) : null}
       {err ? <p className="text-xs text-[var(--vp-error)]">{err}</p> : null}

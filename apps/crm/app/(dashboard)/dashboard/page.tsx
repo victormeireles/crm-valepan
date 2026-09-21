@@ -1,5 +1,6 @@
 import { LeadIdentity } from "@/components/lead-identity";
 import { formatRelativeShort } from "@/lib/format-relative";
+import { displayPipelineStageName, selectCanonicalPipelineStages } from "@/lib/pipeline-canonical-stages";
 import { displayCompanyName, displayPersonName } from "@/lib/lead-identity";
 import { nestOne } from "@/lib/supabase/nested";
 import { createServerSupabaseClient, crmTables } from "@/lib/supabase/server";
@@ -90,7 +91,7 @@ export default async function DashboardPage() {
       .limit(5),
   ]);
 
-  const stageRows = stages ?? [];
+  const stageRows = selectCanonicalPipelineStages(stages ?? []);
   const pipelineCountRows = (pipelineCountsError ? [] : (pipelineCounts ?? [])) as Array<{
     stage_id: string;
     opportunity_count: number | string;
@@ -101,7 +102,7 @@ export default async function DashboardPage() {
       num(row.opportunity_count),
     ]),
   );
-  const totalOpps = [...countByStage.values()].reduce((total, count) => total + count, 0);
+  const totalOpps = stageRows.reduce((total, stage) => total + (countByStage.get(stage.id) ?? 0), 0);
   const openPipelineCount = stageRows
     .filter((stage) => !stage.is_final)
     .reduce((total, stage) => total + (countByStage.get(stage.id) ?? 0), 0);
@@ -110,7 +111,7 @@ export default async function DashboardPage() {
     const c = countByStage.get(s.id) ?? 0;
     return {
       id: s.id,
-      name: s.name,
+      name: displayPipelineStageName(s.name),
       sort_order: s.sort_order,
       is_final: s.is_final,
       count: c,

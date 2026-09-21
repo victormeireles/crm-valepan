@@ -12,6 +12,7 @@ import {
   type PipelineVolumeFilter,
 } from "@/app/actions/pipeline";
 import { logPipelinePerformance } from "@/lib/pipeline-performance";
+import { selectCanonicalPipelineStages } from "@/lib/pipeline-canonical-stages";
 
 export const dynamic = "force-dynamic";
 const INITIAL_CARDS_PER_STAGE = 10;
@@ -46,6 +47,8 @@ export default async function PipelinePage({
   const volumeFilter: PipelineVolumeFilter = ["informado", "ate_100", "acima_100"].includes(volumeRaw)
     ? volumeRaw as Exclude<PipelineVolumeFilter, null>
     : null;
+  const lostReasonRaw = typeof sp.lost_reason === "string" ? sp.lost_reason.trim() : "";
+  const lostReasonFilter = lostReasonRaw.length > 0 && lostReasonRaw.length <= 80 ? lostReasonRaw : null;
   const supabase = await createServerSupabaseClient();
   const {
     data: { user },
@@ -66,6 +69,7 @@ export default async function PipelinePage({
   const [
     { data: stageRows },
     { data: teamProfiles },
+    { data: lostReasonRows },
     snapshot,
   ] = await Promise.all([
     crm
@@ -73,6 +77,7 @@ export default async function PipelinePage({
       .select("id, name, sort_order, is_final")
       .order("sort_order", { ascending: true }),
     crm.from("profiles").select("id, full_name, role").order("full_name", { ascending: true }),
+    crm.from("lost_reasons").select("id, name, sort_order, active").order("sort_order", { ascending: true }),
     loadPipelineFilterSnapshot({
       filters: {
         ownerUserId,
@@ -82,6 +87,7 @@ export default async function PipelinePage({
         query,
         stageId: stageFilter,
         volume: volumeFilter,
+        lostReason: lostReasonFilter,
       },
     }),
   ]);
@@ -94,24 +100,8 @@ export default async function PipelinePage({
     sort_order: s.sort_order,
     is_final: s.is_final,
   }));
-  const entryStages = rawStages.filter((stage) =>
-    ["LEADS", "ENTRADA"].includes(stage.name.trim().toUpperCase()),
-  );
-  const canonicalEntryStage =
-    entryStages.find((stage) => stage.name.trim().toUpperCase() === "LEADS") ??
-    entryStages[0] ??
-    null;
-  const entryStageIds = new Set(entryStages.map((stage) => stage.id));
-  const stages: PipelineStageDTO[] = rawStages
-    .filter((stage) => !entryStageIds.has(stage.id) || stage.id === canonicalEntryStage?.id)
-    .map((stage) =>
-      stage.id === canonicalEntryStage?.id
-        ? { ...stage, name: "LEADS", sort_order: Number.MIN_SAFE_INTEGER, is_final: false }
-        : stage,
-    )
-    .sort((a, b) => a.sort_order - b.sort_order);
-  const normalizeStage = (stageId: string) =>
-    canonicalEntryStage && entryStageIds.has(stageId) ? canonicalEntryStage.id : stageId;
+  const stages = selectCanonicalPipelineStages(rawStages);
+  const canonicalIds = new Set(stages.map((stage) => stage.id));
 
   const ownerNameById = new Map(
     (teamProfiles ?? []).map((profile) => [profile.id, formatTeamOption(profile).label]),
@@ -119,7 +109,6 @@ export default async function PipelinePage({
 
   const pagedCards: PipelineCardDTO[] = snapshot.cards.map((card) => ({
     ...card,
-    stage_id: normalizeStage(card.stage_id),
     ownerName: card.ownerId
       ? (ownerNameById.get(card.ownerId) ?? card.ownerName)
       : null,
@@ -128,18 +117,17 @@ export default async function PipelinePage({
   const stageTotals = Object.fromEntries(stages.map((stage) => [stage.id, 0]));
   const stageBreadCounts = Object.fromEntries(stages.map((stage) => [stage.id, 0]));
   for (const row of snapshot.visibleStageCounts) {
-    const stageId = normalizeStage(row.stage_id);
-    stageTotals[stageId] = (stageTotals[stageId] ?? 0) + Number(row.card_count);
+    if (!canonicalIds.has(row.stage_id)) continue;
+    stageTotals[row.stage_id] = (stageTotals[row.stage_id] ?? 0) + Number(row.card_count);
     // `volume_kg` é o nome legado do campo retornado pela RPC; o valor agora é pães/semana.
-    stageBreadCounts[stageId] = (stageBreadCounts[stageId] ?? 0) + Number(row.volume_kg);
+    stageBreadCounts[row.stage_id] = (stageBreadCounts[row.stage_id] ?? 0) + Number(row.volume_kg);
   }
   const initialCards = stages.flatMap((stage) =>
     pagedCards.filter((card) => card.stage_id === stage.id).slice(0, INITIAL_CARDS_PER_STAGE),
   );
-  const totalCount = snapshot.allStageCounts.reduce(
-    (total, row) => total + Number(row.card_count),
-    0,
-  );
+  const totalCount = snapshot.allStageCounts.reduce((total, row) => {
+    return canonicalIds.has(row.stage_id) ? total + Number(row.card_count) : total;
+  }, 0);
   const visibleCount = Object.values(stageTotals).reduce((total, count) => total + count, 0);
   const visibleBreadCount = Object.values(stageBreadCounts).reduce((total, count) => total + count, 0);
   const selectedOwnerName = ownerUserId
@@ -184,6 +172,7 @@ export default async function PipelinePage({
             query,
             stageFilter ?? "",
             volumeFilter ?? "",
+            lostReasonFilter ?? "",
           ].join("|")}
           stages={stages}
           initialCards={initialCards}
@@ -205,10 +194,17 @@ export default async function PipelinePage({
             query,
             stageId: stageFilter,
             volume: volumeFilter,
+            lostReason: lostReasonFilter,
           }}
           canViewTeam={canViewTeam}
           currentUserId={user?.id ?? null}
           renderNowMs={renderNowMs}
+          lostReasons={(lostReasonRows ?? []).map((reason) => ({
+            id: reason.id,
+            name: reason.name,
+            sort_order: reason.sort_order,
+            active: reason.active,
+          }))}
         />
       )}
     </div>

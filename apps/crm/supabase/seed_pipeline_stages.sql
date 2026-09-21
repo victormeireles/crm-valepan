@@ -8,17 +8,7 @@ begin
       ('LEADS', 10, false),
       ('QUALIFICAÇÃO', 20, false),
       ('NEGOCIAÇÃO', 30, false),
-      ('ENCAMINHADO PARA DISTRIBUIDOR', 40, false),
-      ('AMOSTRA', 50, false),
-      ('CHATBOT', 60, false),
-      ('SEM RETORNO', 70, false),
       ('CONVERTIDO', 80, true),
-      ('NÃO ATENDEMOS A REGIÃO', 150, false),
-      ('NÃO RESPONDE', 160, false),
-      ('NÃO TEMOS O PÃO', 170, false),
-      ('SEM INTERESSE', 190, true),
-      ('JÁ É CLIENTE', 200, false),
-      ('NÃO INAUGUROU', 210, false),
-      ('SEM PEDIDO MÍNIMO', 220, false);
+      ('PERDIDO', 90, true);
   end if;
 end $$;

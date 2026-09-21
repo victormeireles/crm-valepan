@@ -97,6 +97,7 @@ export type PipelinePageFilters = {
   query: string;
   stageId: string | null;
   volume: PipelineVolumeFilter;
+  lostReason: string | null;
 };
 
 export type PipelineVolumeFilter = "informado" | "ate_100" | "acima_100" | null;
@@ -142,6 +143,7 @@ async function loadBoardSnapshot(
     p_offset: 0,
     p_limit: limit,
     p_volume: filters.volume,
+    p_lost_reason: filters.lostReason,
   });
   if (error) return { ok: false, error: error.message };
   const snapshot = readBoardSnapshot(data);
@@ -218,6 +220,7 @@ export async function loadPipelineStagePage(input: {
       p_offset: Math.max(0, Math.trunc(input.offset)),
       p_limit: PAGE_SIZE,
       p_volume: input.filters.volume,
+      p_lost_reason: input.filters.lostReason,
     })),
     timePipelineOperation("profiles", crm.from("profiles").select("id, full_name")),
   ]);

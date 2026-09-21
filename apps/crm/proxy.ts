@@ -13,7 +13,7 @@ function redirectWithResponseCookies(destination: URL, response: NextResponse) {
   return redirectResponse;
 }
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   // Passar o `request` inteiro — não `{ headers }` só — para o Next preservar
   // headers internos (RSC / router state). Objeto parcial causa 500 em rotas dinâmicas.
   let response = NextResponse.next({ request });
@@ -53,7 +53,7 @@ export async function middleware(request: NextRequest) {
     const { data, error } = await supabase.auth.getClaims();
     if (error) {
       if (isAuthRetryableFetchError(error)) {
-        console.warn("[middleware] autenticação indisponível temporariamente; mantendo a rota.", error);
+        console.warn("[proxy] autenticação indisponível temporariamente; mantendo a rota.", error);
         return response;
       }
     } else {
@@ -62,7 +62,7 @@ export async function middleware(request: NextRequest) {
   } catch (e) {
     // Uma falha de rede não deve transformar uma atualização silenciosa em
     // troca de tela. A rota atual continua e pode tentar novamente depois.
-    console.warn("[middleware] validação da sessão falhou; mantendo a rota.", e);
+    console.warn("[proxy] validação da sessão falhou; mantendo a rota.", e);
     return response;
   }
 
