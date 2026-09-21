@@ -39,6 +39,8 @@ import {
 import { LostReasonSelect } from "@/components/lost-reason-select";
 import type { LostReasonDTO } from "@/lib/lost-reasons";
 import { displayPipelineStageName, findCanonicalPipelineStage, isCanonicalFinalStage, isLostPipelineStage, visiblePipelineBoardStages } from "@/lib/pipeline-canonical-stages";
+import { pipelineConversationPeekTarget, type PipelineConversationPeekTarget } from "@/lib/pipeline-conversation-peek";
+import { PipelineConversationPeek } from "./pipeline-conversation-peek";
 import { PipelineSignalBadges } from "./pipeline-signal-badges";
 
 export type PipelineStageDTO = {
@@ -234,6 +236,7 @@ type PipelineCardProps = {
   stages: PipelineStageDTO[];
   onOpen: (card: PipelineCardDTO) => void;
   onOpenFollowUp: (card: PipelineCardDTO) => void;
+  onOpenChat: (card: PipelineCardDTO) => void;
   onMove: (opportunityId: string, fromStageId: string, toStageId: string) => void;
   onClose: (card: PipelineCardDTO, stageId: string) => void;
   onResume: (card: PipelineCardDTO, stageId: string) => void;
@@ -264,6 +267,7 @@ function PipelineCardContent({
   stages,
   onOpen,
   onOpenFollowUp,
+  onOpenChat,
   onMove,
   onClose,
   onResume,
@@ -383,16 +387,20 @@ function PipelineCardContent({
         </span>
         <span className="relative ml-auto inline-flex shrink-0 items-center gap-0.5">
           {card.conversationId ? (
-            <Link
-              href={`/inbox?cid=${card.conversationId}`}
+            <button
+              type="button"
               title="Responder no chat"
               aria-label={`Responder ${card.personName} no chat`}
-              className="grid size-11 place-items-center rounded-lg bg-[var(--vp-surface)] text-[var(--vp-wine)] md:size-7"
+              aria-haspopup="dialog"
+              className="grid size-11 cursor-pointer place-items-center rounded-lg bg-[var(--vp-surface)] text-[var(--vp-wine)] md:size-7"
               onPointerDown={stopPointer}
-              onClick={stopPointer}
+              onClick={(event) => {
+                stopPointer(event);
+                onOpenChat(card);
+              }}
             >
               <CrmIcon name="chat" className="text-[17px]" />
-            </Link>
+            </button>
           ) : null}
           {card.lead_id ? (
             <button
@@ -564,6 +572,7 @@ export function PipelineBoard({
   const [closingReason, setClosingReason] = useState("");
   const [closingBusy, setClosingBusy] = useState(false);
   const [followUpCardId, setFollowUpCardId] = useState<string | null>(null);
+  const [chatPeek, setChatPeek] = useState<PipelineConversationPeekTarget | null>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
   const followUpDialogRef = useRef<HTMLDialogElement>(null);
   const columnsRef = useRef(columns);
@@ -843,7 +852,14 @@ export function PipelineBoard({
     if (card.lead_id) router.push(`/leads/${card.lead_id}`);
   }, [router]);
   const openCardFollowUp = useCallback((card: PipelineCardDTO) => {
+    setChatPeek(null);
     setFollowUpCardId(card.id);
+  }, []);
+  const openCardChat = useCallback((card: PipelineCardDTO) => {
+    const next = pipelineConversationPeekTarget(card.conversationId, card.personName);
+    if (!next) return;
+    setFollowUpCardId(null);
+    setChatPeek(next);
   }, []);
   const moveCardFromMenu = useCallback((opportunityId: string, fromStageId: string, toStageId: string) => {
     const targetStage = stagesRef.current.find((stage) => stage.id === toStageId);
@@ -931,6 +947,7 @@ export function PipelineBoard({
                       stages={stages}
                       onOpen={openCard}
                       onOpenFollowUp={openCardFollowUp}
+                      onOpenChat={openCardChat}
                       onMove={moveCardFromMenu}
                       onClose={requestClose}
                       onResume={resumeCard}
@@ -964,6 +981,8 @@ export function PipelineBoard({
       </div>
 
       <DragOverlay>{activeCard ? <CardPreview card={activeCard} /> : null}</DragOverlay>
+
+      <PipelineConversationPeek target={chatPeek} onClose={() => setChatPeek(null)} />
 
       <dialog
         ref={followUpDialogRef}

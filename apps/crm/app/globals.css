@@ -30,6 +30,11 @@ html:has([data-inbox-shell]) body {
   outline-offset: 2px;
 }
 
+@keyframes pipeline-peek-in {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

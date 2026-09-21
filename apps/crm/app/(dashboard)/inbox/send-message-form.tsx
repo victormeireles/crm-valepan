@@ -15,10 +15,12 @@ export function SendMessageForm({
   conversationId,
   phone,
   firstName,
+  compact = false,
 }: {
   conversationId: string;
   phone: string;
   firstName: string;
+  compact?: boolean;
 }) {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -172,7 +174,7 @@ export function SendMessageForm({
         </div>
       ) : null}
 
-      <div className="flex items-center gap-2 overflow-x-auto pb-1">
+      <div className={`flex items-center gap-2 overflow-x-auto pb-1 ${compact ? "[scrollbar-width:none] [&::-webkit-scrollbar]:hidden" : ""}`}>
         <span className="shrink-0 text-[10px] font-extrabold uppercase tracking-[0.14em] text-[var(--vp-ink-soft)]">Respostas rápidas</span>
         {QUICK_REPLIES.map((reply) => (
           <button
@@ -191,8 +193,8 @@ export function SendMessageForm({
         ))}
       </div>
 
-      <div className="flex items-end gap-2.5">
-        <div className="flex min-h-12 flex-1 items-end gap-0.5 rounded-[1.5rem] border border-[var(--border)] bg-[var(--vp-paper-pure)] px-1 py-1 shadow-[var(--sh-sm)]">
+      <div className="flex min-w-0 items-end gap-2.5">
+        <div className="flex min-h-12 min-w-0 flex-1 items-end gap-0.5 rounded-[1.5rem] border border-[var(--border)] bg-[var(--vp-paper-pure)] px-1 py-1 shadow-[var(--sh-sm)]">
           <div ref={attachRef} className="relative">
             <button
               type="button"
@@ -271,7 +273,8 @@ export function SendMessageForm({
             name="message"
             required
             rows={1}
-            placeholder={`Escreva para ${firstName} — Enter envia, Shift+Enter quebra linha`}
+            placeholder={compact ? `Mensagem para ${firstName}` : `Escreva para ${firstName} — Enter envia, Shift+Enter quebra linha`}
+            aria-label={compact ? `Escreva para ${firstName}. Enter envia, Shift+Enter quebra linha` : undefined}
             onChange={() => {
               if (err) setErr(null);
             }}
@@ -289,21 +292,24 @@ export function SendMessageForm({
               }
               event.currentTarget.form?.requestSubmit();
             }}
-            className="max-h-32 min-h-[42px] flex-1 resize-none border-0 bg-transparent py-2.5 pr-2 text-sm leading-snug text-[var(--foreground)] placeholder:text-[var(--muted)] focus:outline-none focus:ring-0"
+            className="max-h-32 min-h-[42px] min-w-0 flex-1 resize-none overflow-x-hidden overflow-y-auto border-0 bg-transparent py-2.5 pr-2 text-sm leading-snug text-[var(--foreground)] placeholder:text-[var(--muted)] focus:outline-none focus:ring-0"
           />
         </div>
 
         <button
           type="submit"
           disabled={loading || uploadingAttachment}
-          className="inline-flex h-[50px] shrink-0 items-center gap-2 rounded-full bg-[var(--vp-wine)] px-5 text-sm font-bold text-[var(--vp-gold)] shadow-[var(--sh-md)] transition-[transform,background-color,box-shadow] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] hover:bg-[var(--vp-wine-classic)] hover:shadow-[var(--sh-lg)] disabled:pointer-events-none disabled:opacity-50"
+          aria-label={compact ? (loading ? "Enviando" : "Enviar") : undefined}
+          className={`inline-flex h-[50px] shrink-0 items-center justify-center rounded-full bg-[var(--vp-wine)] text-sm font-bold text-[var(--vp-gold)] shadow-[var(--sh-md)] transition-[transform,background-color,box-shadow] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] hover:bg-[var(--vp-wine-classic)] hover:shadow-[var(--sh-lg)] disabled:pointer-events-none disabled:opacity-50 ${
+            compact ? "w-[50px] px-0" : "gap-2 px-5"
+          }`}
         >
           {loading ? (
             <CrmIcon name="progress_activity" className="animate-spin text-xl" />
           ) : (
             <CrmIcon name="send" className="text-xl" />
           )}
-          <span>{loading ? "Enviando…" : "Enviar"}</span>
+          {compact ? null : <span>{loading ? "Enviando…" : "Enviar"}</span>}
         </button>
       </div>
       {contactPickerOpen ? (
