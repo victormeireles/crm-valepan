@@ -40,6 +40,19 @@ export function afterFailedLeadFactsWrite(input: {
   };
 }
 
+/** Em falha do lote da IA: reabrir só ids que esta rodada já tinha marcado analisados. */
+export function resetIdsAfterAiBatchFailure(input: {
+  conversationIds: readonly string[];
+  markedAnalyzedThisRun: ReadonlySet<string>;
+}): string[] {
+  return input.conversationIds.filter(
+    (id) =>
+      afterFailedLeadFactsWrite({
+        markedAnalyzedThisRun: input.markedAnalyzedThisRun.has(id),
+      }).resetAnalyzed,
+  );
+}
+
 type LeadJoin = {
   excluded_from_pipeline_at: string | null;
   weekly_bread_consumption: number | null;
@@ -538,6 +551,12 @@ export async function runPipelineAdvanceJob(
         error,
       );
       errors += group.length;
+      resetAnalyzedIds.push(
+        ...resetIdsAfterAiBatchFailure({
+          conversationIds: group.map((item) => item.conversationId),
+          markedAnalyzedThisRun,
+        }),
+      );
     }
   }
 

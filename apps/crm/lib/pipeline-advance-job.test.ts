@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { afterFailedLeadFactsWrite } from "./pipeline-advance-job";
+import {
+  afterFailedLeadFactsWrite,
+  resetIdsAfterAiBatchFailure,
+} from "./pipeline-advance-job";
 
 describe("afterFailedLeadFactsWrite", () => {
   it("não marca a conversa como analisada quando a ficha falha ao gravar", () => {
@@ -14,5 +17,16 @@ describe("afterFailedLeadFactsWrite", () => {
       markAnalyzed: false,
       resetAnalyzed: true,
     });
+  });
+});
+
+describe("resetIdsAfterAiBatchFailure", () => {
+  it("reabre só as conversas que a regra automática marcou nesta rodada", () => {
+    expect(
+      resetIdsAfterAiBatchFailure({
+        conversationIds: ["a", "b", "c"],
+        markedAnalyzedThisRun: new Set(["b", "c", "z"]),
+      }),
+    ).toEqual(["b", "c"]);
   });
 });
