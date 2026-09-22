@@ -904,7 +904,7 @@ export async function updateConversationLeadQualification(input: {
         })
         .eq("id", opportunity.id);
       if (oppUpdateErr) return { ok: false as const, error: oppUpdateErr.message };
-    } else {
+    } else if (!opportunity?.id) {
       const { data: insertedOpp, error: oppInsertErr } = await crm
         .from("opportunities")
         .insert({

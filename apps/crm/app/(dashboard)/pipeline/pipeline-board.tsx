@@ -1068,22 +1068,22 @@ export function PipelineBoard({
               .includes("convertido") ? (
               <label className="block space-y-1 text-xs font-medium">
                 <span>Motivo</span>
-                {lostReasons.some((reason) => reason.active) ? (
+                {lostReasons.some((reason) => reason.active && reason.stage_key === "PERDIDO") ? (
                   <>
                     <LostReasonSelect
-                      reasons={lostReasons}
+                      reasons={lostReasons.filter((reason) => reason.stage_key === "PERDIDO")}
                       value={closingReason}
                       onChange={setClosingReason}
                       disabled={closingBusy}
                       className="min-h-11 w-full rounded border border-[var(--border)] bg-[var(--background)] px-2 py-2 text-sm"
                     />
-                    <Link href="/settings" className="inline-block text-[11px] font-semibold text-[var(--vp-wine)] underline-offset-2 hover:underline">
-                      Gerenciar motivos
+                    <Link href="/settings/subetapas" className="inline-block text-[11px] font-semibold text-[var(--vp-wine)] underline-offset-2 hover:underline">
+                      Gerenciar subetapas
                     </Link>
                   </>
                 ) : (
                   <p className="text-xs text-[var(--vp-error)]">
-                    Cadastre um motivo ativo em Configurações para encerrar.
+                    Cadastre um status de perda em Configurações → Subetapas para encerrar.
                   </p>
                 )}
               </label>

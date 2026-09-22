@@ -10,7 +10,12 @@ import { LostReasonSelect } from "@/components/lost-reason-select";
 import { ExcludeLeadButton } from "../../inbox/exclude-lead-actions";
 import { isClientCategoryValue } from "@/lib/client-categories";
 import type { LostReasonDTO } from "@/lib/lost-reasons";
-import { displayPipelineStageName } from "@/lib/pipeline-canonical-stages";
+import {
+  canonicalPipelineStageKey,
+  displayPipelineStageName,
+  isLostPipelineStage,
+} from "@/lib/pipeline-canonical-stages";
+import { substagesForStageKey } from "@/lib/pipeline-substages";
 import { SEND_VIA_OPTIONS } from "@/lib/send-via-options";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -56,13 +61,13 @@ export function LeadActions({
   const [err, setErr] = useState<string | null>(null);
   const [distributorMsg, setDistributorMsg] = useState<string | null>(null);
 
-  const closingStage = stages.find((s) => {
-    const n = s.name.toLowerCase();
-    return (
-      s.id === stageId &&
-      (n.includes("perdido") || n.includes("desqualificado") || n.includes("sem interesse"))
-    );
-  });
+  const selectedStage = stages.find((s) => s.id === stageId);
+  const closingStage = selectedStage && isLostPipelineStage(selectedStage.name) ? selectedStage : undefined;
+  const statusNames = substagesForStageKey(
+    lostReasons,
+    selectedStage ? canonicalPipelineStageKey(selectedStage.name) : null,
+    lost,
+  );
 
   useEffect(() => {
     setCategory(clientCategory ?? "");
@@ -113,7 +118,7 @@ export function LeadActions({
       const res = await updateOpportunityStage({
         opportunityId: opportunity.id,
         stageId,
-        lostReason: closingStage ? lost : null,
+        lostReason: lost.trim() || null,
       });
       if (!res.ok) {
         setErr(res.error ?? "Erro");
@@ -273,7 +278,17 @@ export function LeadActions({
         <select
           className="rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1"
           value={stageId}
-          onChange={(e) => setStageId(e.target.value)}
+          onChange={(e) => {
+            const next = e.target.value;
+            setStageId(next);
+            const stage = stages.find((item) => item.id === next);
+            const options = substagesForStageKey(
+              lostReasons,
+              stage ? canonicalPipelineStageKey(stage.name) : null,
+              "",
+            );
+            if (!options.includes(lost)) setLost("");
+          }}
         >
           {stages.map((s) => (
             <option key={s.id} value={s.id}>
@@ -282,19 +297,23 @@ export function LeadActions({
           ))}
         </select>
       </label>
-      {closingStage ? (
+      {statusNames.length > 0 || closingStage ? (
         <label className="flex flex-col gap-1">
-          Motivo do encerramento
-          {lostReasons.some((reason) => reason.active) || lost.trim() ? (
+          Status
+          {lostReasons.some((reason) => reason.active && (!selectedStage || reason.stage_key === canonicalPipelineStageKey(selectedStage.name))) || lost.trim() ? (
             <LostReasonSelect
-              reasons={lostReasons}
+              reasons={lostReasons.filter((reason) =>
+                selectedStage
+                  ? canonicalPipelineStageKey(reason.stage_key) === canonicalPipelineStageKey(selectedStage.name)
+                  : true,
+              )}
               value={lost}
               onChange={setLost}
               className="min-h-11 rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1"
             />
           ) : (
             <p className="text-xs text-[var(--vp-error)]">
-              Cadastre um motivo ativo em Configurações para encerrar.
+              Cadastre um status ativo em Configurações → Subetapas.
             </p>
           )}
         </label>

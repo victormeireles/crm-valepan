@@ -17,6 +17,7 @@ describe("pipelineStageForInboxClassification", () => {
     expect(pipelineStageForInboxClassification("AMOSTRA")).toBe("NEGOCIAÇÃO");
     expect(pipelineStageForInboxClassification("NEGOCIAÇÃO")).toBe("NEGOCIAÇÃO");
     expect(pipelineStageForInboxClassification("ENCAMINHADO PARA O DISTRIBUIDOR")).toBe("NEGOCIAÇÃO");
+    expect(pipelineStageForInboxClassification("ENCAMINHADO PARA DISTRIBUIDOR")).toBe("NEGOCIAÇÃO");
   });
 
   it("envia cliente para Convertido", () => {
@@ -36,5 +37,14 @@ describe("pipelineStageForInboxClassification", () => {
   it("não move o funil ao limpar a classificação", () => {
     expect(pipelineStageForInboxClassification(null)).toBeNull();
     expect(lostReasonForInboxClassification("NEGOCIAÇÃO")).toBeNull();
+  });
+
+  it("grava status de amostra a partir da classificação antiga", () => {
+    expect(lostReasonForInboxClassification("AMOSTRA")).toBe("Pediu amostra");
+    expect(lostReasonForInboxClassification("ENCAMINHADO PARA DISTRIBUIDOR")).toBe(
+      "Encaminhado para o distribuidor",
+    );
+    expect(lostReasonForInboxClassification("CHATBOT")).toBe("Chatbot");
+    expect(lostReasonForInboxClassification("SEM RETORNO")).toBe("Sem retorno");
   });
 });

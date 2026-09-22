@@ -79,7 +79,7 @@ export default async function LeadDetailPage({
     crm.from("profiles").select("id, full_name, role").order("full_name", { ascending: true }),
     crm.from("lead_registrations").select("id, source, cpf_cnpj")
       .eq("lead_id", id).not("cpf_cnpj", "is", null).order("created_at", { ascending: false }).limit(5),
-    crm.from("lost_reasons").select("id, name, sort_order, active").order("sort_order", { ascending: true }),
+    crm.from("lost_reasons").select("id, name, stage_key, sort_order, active").order("sort_order", { ascending: true }),
   ]);
 
   if (!lead) notFound();
@@ -187,6 +187,7 @@ export default async function LeadDetailPage({
           lostReasons={(lostReasonRows ?? []).map((reason) => ({
             id: reason.id,
             name: reason.name,
+            stage_key: reason.stage_key,
             sort_order: reason.sort_order,
             active: reason.active,
           }))}

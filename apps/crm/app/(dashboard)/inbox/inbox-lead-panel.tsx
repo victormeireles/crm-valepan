@@ -1,13 +1,20 @@
 "use client";
 
 import { updateConversationLeadQualification, updateLeadOwner } from "@/app/actions/leads";
-import { updateOpportunityStage } from "@/app/actions/opportunity";
+import { updateConversationPipelineClassification } from "@/app/actions/inbox";
 import { CityAutocompleteInput } from "@/components/city-autocomplete-input";
 import { CrmIcon, type CrmIconName } from "@/components/crm-icon";
 import { LeadFollowUp } from "@/components/lead-follow-up";
 import type { LeadFollowUpDTO } from "@/lib/follow-ups";
 import { useMemo, useRef, useState } from "react";
-import { displayPipelineStageName } from "@/lib/pipeline-canonical-stages";
+import {
+  displayPipelineStageName,
+  isLostPipelineStage,
+} from "@/lib/pipeline-canonical-stages";
+import {
+  substagesForStageKey,
+  type PipelineSubstageDTO,
+} from "@/lib/pipeline-substages";
 import { InboxTasksPanel, type InboxTaskRow } from "./inbox-tasks-panel";
 
 type StageOption = { id: string; name: string; sortOrder: number; isFinal?: boolean };
@@ -21,6 +28,7 @@ export type InboxLeadPanelProps = {
   companyName: string | null;
   initialCategory: string | null;
   initialStageId: string | null;
+  initialSubstage: string | null;
   initialState: string | null;
   initialCity: string | null;
   initialZipCode: string | null;
@@ -30,6 +38,7 @@ export type InboxLeadPanelProps = {
   initialCnpj: string | null;
   initialOwnerId: string | null;
   stages: StageOption[];
+  substages: PipelineSubstageDTO[];
   teamOptions: TeamOption[];
   opportunityId: string | null;
   followUp: LeadFollowUpDTO | null;
@@ -65,6 +74,7 @@ export function InboxLeadPanel(props: InboxLeadPanelProps) {
     companyName: props.companyName ?? "",
   });
   const [ownerId, setOwnerId] = useState(props.initialOwnerId ?? "");
+  const [substage, setSubstage] = useState(props.initialSubstage ?? "");
   const [savingField, setSavingField] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const qualificationRef = useRef(qualification);
@@ -137,29 +147,47 @@ export function InboxLeadPanel(props: InboxLeadPanelProps) {
     () => [...props.stages].sort((a, b) => a.sortOrder - b.sortOrder),
     [props.stages],
   );
+  const currentStage = orderedStages.find((stage) => stage.id === qualification.stageId) ?? null;
+  const statusOptions = substagesForStageKey(props.substages, currentStage?.name ?? null, substage);
+  const statusRequired = isLostPipelineStage(currentStage?.name);
   const currentIndex = orderedStages.findIndex((stage) => stage.id === qualification.stageId);
   const nextStage = orderedStages.slice(Math.max(0, currentIndex + 1)).find((stage) => !stage.isFinal) ?? null;
 
-  async function moveToNextStage() {
-    if (!props.opportunityId || !nextStage) return;
-    setSavingField("nextStage");
+  async function saveStageAndStatus(nextStageId: string, nextStatus: string) {
+    const stage = orderedStages.find((item) => item.id === nextStageId) ?? null;
+    const options = substagesForStageKey(props.substages, stage?.name ?? null, nextStatus);
+    const compatibleStatus = options.includes(nextStatus) ? nextStatus : "";
+    updateQualificationDraft({ stageId: nextStageId });
+    setSubstage(compatibleStatus);
+    if (isLostPipelineStage(stage?.name) && !compatibleStatus) {
+      return;
+    }
+    setSavingField("stage");
     setError(null);
     try {
-      const result = await updateOpportunityStage({
-        opportunityId: props.opportunityId,
-        stageId: nextStage.id,
-        lostReason: null,
+      const result = await updateConversationPipelineClassification({
+        conversationId: props.conversationId,
+        stageId: nextStageId || null,
+        substage: compatibleStatus || null,
       });
       if (!result.ok) {
-        setError(result.error ?? "Não foi possível mover a oportunidade.");
+        setError(result.error ?? "Não foi possível salvar.");
+        updateQualificationDraft({ stageId: props.initialStageId ?? "" });
+        setSubstage(props.initialSubstage ?? "");
         return;
       }
-      updateQualificationDraft({ stageId: nextStage.id });
+      updateQualificationDraft({ stageId: result.stageId ?? "" });
+      setSubstage(result.substage ?? "");
     } catch {
-      setError("Não foi possível mover a oportunidade. Tente novamente.");
+      setError("Não foi possível salvar. Tente novamente.");
     } finally {
       setSavingField(null);
     }
+  }
+
+  async function moveToNextStage() {
+    if (!nextStage) return;
+    await saveStageAndStatus(nextStage.id, substage);
   }
 
   const controlClass = "min-w-0 flex-1 border-0 bg-transparent text-right text-[13px] font-bold text-[var(--vp-ink-body)] outline-none";
@@ -177,9 +205,35 @@ export function InboxLeadPanel(props: InboxLeadPanelProps) {
           <div className="space-y-2">
             <label className="flex min-h-11 items-center justify-between gap-2.5 rounded-[10px] border border-[var(--vp-ink-line)] bg-[var(--vp-paper)] px-3">
               <span className="text-[11px] font-bold uppercase tracking-[0.06em] text-[var(--vp-ink-soft)]">Etapa</span>
-              <select className={controlClass} value={qualification.stageId} onChange={(event) => void saveQualification({ stageId: event.target.value }, "stage")}>
+              <select
+                className={controlClass}
+                value={qualification.stageId}
+                onChange={(event) => {
+                  const next = event.target.value;
+                  const stage = orderedStages.find((item) => item.id === next) ?? null;
+                  const nextOptions = substagesForStageKey(props.substages, stage?.name ?? null, "");
+                  const nextStatus = nextOptions.includes(substage) ? substage : "";
+                  void saveStageAndStatus(next, nextStatus);
+                }}
+              >
                 <option value="">Não definida</option>
-                {orderedStages.filter((stage) => !stage.isFinal).map((stage) => <option key={stage.id} value={stage.id}>{displayPipelineStageName(stage.name)}</option>)}
+                {orderedStages.map((stage) => (
+                  <option key={stage.id} value={stage.id}>{displayPipelineStageName(stage.name)}</option>
+                ))}
+              </select>
+            </label>
+            <label className="flex min-h-11 items-center justify-between gap-2.5 rounded-[10px] border border-[var(--vp-ink-line)] bg-[var(--vp-paper)] px-3">
+              <span className="text-[11px] font-bold uppercase tracking-[0.06em] text-[var(--vp-ink-soft)]">Status</span>
+              <select
+                className={controlClass}
+                value={substage}
+                disabled={!qualification.stageId || statusOptions.length === 0}
+                onChange={(event) => void saveStageAndStatus(qualification.stageId, event.target.value)}
+              >
+                <option value="">{statusRequired ? "Selecione o status" : "Sem status"}</option>
+                {statusOptions.map((name) => (
+                  <option key={name} value={name}>{name}</option>
+                ))}
               </select>
             </label>
             <label className="flex min-h-11 items-center justify-between gap-2.5 rounded-[10px] border border-[var(--vp-ink-line)] bg-[var(--vp-paper)] px-3">
@@ -270,10 +324,10 @@ export function InboxLeadPanel(props: InboxLeadPanelProps) {
         <button
           type="button"
           className="min-h-11 w-full rounded-full bg-[var(--vp-wine)] px-3 text-[13px] font-bold text-[var(--vp-gold)] disabled:opacity-50"
-          disabled={!nextStage || !props.opportunityId || savingField === "nextStage"}
+          disabled={!nextStage || savingField === "stage"}
           onClick={() => void moveToNextStage()}
         >
-          {savingField === "nextStage" ? "Movendo…" : nextStage ? `Mover para ${displayPipelineStageName(nextStage.name)}` : "Última etapa do funil"}
+          {savingField === "stage" && nextStage ? "Movendo…" : nextStage ? `Mover para ${displayPipelineStageName(nextStage.name)}` : "Última etapa do funil"}
         </button>
       </footer>
     </aside>

@@ -118,6 +118,7 @@ export interface Database {
         Row: {
           id: string;
           name: string;
+          stage_key: "LEADS" | "QUALIFICAÇÃO" | "NEGOCIAÇÃO" | "CONVERTIDO" | "PERDIDO";
           sort_order: number;
           active: boolean;
           created_at: string;
@@ -126,10 +127,56 @@ export interface Database {
         Insert: {
           id?: string;
           name: string;
+          stage_key?: "LEADS" | "QUALIFICAÇÃO" | "NEGOCIAÇÃO" | "CONVERTIDO" | "PERDIDO";
           sort_order?: number;
           active?: boolean;
         };
         Update: Partial<Database["crm"]["Tables"]["lost_reasons"]["Insert"]>;
+      };
+      pipeline_advance_suggestions: {
+        Row: {
+          id: string;
+          lead_id: string;
+          conversation_id: string;
+          opportunity_id: string;
+          from_stage_id: string;
+          to_stage_id: string;
+          from_classification: string | null;
+          to_classification: string;
+          from_substage: string | null;
+          to_substage: string | null;
+          confidence: number;
+          rationale: string;
+          evidence_quote: string;
+          status: "pending" | "accepted" | "dismissed" | "expired";
+          fingerprint: string;
+          model: string | null;
+          created_at: string;
+          updated_at: string;
+          resolved_at: string | null;
+          resolved_by: string | null;
+        };
+        Insert: {
+          id?: string;
+          lead_id: string;
+          conversation_id: string;
+          opportunity_id: string;
+          from_stage_id: string;
+          to_stage_id: string;
+          from_classification?: string | null;
+          to_classification: string;
+          from_substage?: string | null;
+          to_substage?: string | null;
+          confidence: number;
+          rationale?: string;
+          evidence_quote?: string;
+          status?: "pending" | "accepted" | "dismissed" | "expired";
+          fingerprint: string;
+          model?: string | null;
+          resolved_at?: string | null;
+          resolved_by?: string | null;
+        };
+        Update: Partial<Database["crm"]["Tables"]["pipeline_advance_suggestions"]["Insert"]>;
       };
       pipeline_stage_task_templates: {
         Row: {
@@ -203,6 +250,7 @@ export interface Database {
           conversation_kind: "lead" | "group";
           group_display_name: string | null;
           classification: string | null;
+          pipeline_ai_analyzed: boolean;
           last_read_at: string | null;
           last_message_at: string | null;
           last_direction: "in" | "out" | null;
@@ -222,6 +270,7 @@ export interface Database {
           conversation_kind?: "lead" | "group";
           group_display_name?: string | null;
           classification?: string | null;
+          pipeline_ai_analyzed?: boolean;
           last_read_at?: string | null;
           last_message_at?: string | null;
           last_direction?: "in" | "out" | null;
@@ -760,6 +809,21 @@ export interface Database {
           document_type: string | null;
           processed_at: string | null;
           rank: number;
+        }[];
+      };
+      pipeline_advance_recent_messages: {
+        Args: {
+          p_conversation_ids: string[];
+          p_limit: number;
+        };
+        Returns: {
+          id: string;
+          conversation_id: string;
+          direction: string;
+          body: string | null;
+          media_kind: string | null;
+          event_kind: string | null;
+          sent_at: string;
         }[];
       };
     };

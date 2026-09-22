@@ -7,17 +7,28 @@ import { getCustomerWaitSignal } from "@/lib/lead-signals";
 import { recordInboxBrowserMetric } from "@/lib/inbox-browser-performance";
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { ChatThread } from "./chat-thread";
+import { ConversationPipelineSelect } from "./conversation-classification-select";
 import { ExcludeLeadButton, RestoreLeadButton } from "./exclude-lead-actions";
 import { pushInboxClientUrl, readInboxLocation } from "./inbox-location";
 import { InboxLeadPanel, InboxLeadPanelDrawer } from "./inbox-lead-panel";
 import { MarkConversationRead } from "./mark-conversation-read";
 import { SendMessageForm } from "./send-message-form";
+import type { PipelineSubstageDTO } from "@/lib/pipeline-substages";
 
 export const INBOX_SELECT_CONVERSATION_EVENT = "crm:inbox-select-conversation";
 
 type SelectConversationDetail = { conversationId: string; href: string };
+type CatalogStage = { id: string; name: string; sortOrder: number; isFinal?: boolean };
 
-export function InboxConversationPane({ initialView }: { initialView: InboxConversationView | null }) {
+export function InboxConversationPane({
+  initialView,
+  stages,
+  substages,
+}: {
+  initialView: InboxConversationView | null;
+  stages: CatalogStage[];
+  substages: PipelineSubstageDTO[];
+}) {
   const [view, setView] = useState(initialView);
   const [panelLoading, setPanelLoading] = useState(false);
   const [mobilePanelOpen, setMobilePanelOpen] = useState(false);
@@ -152,8 +163,41 @@ export function InboxConversationPane({ initialView }: { initialView: InboxConve
                       {panelLoading ? "Carregando…" : "Ficha"}
                     </button>
                   ) : null}
-                  {view.leadPanel ? <InboxLeadPanelDrawer key={conversation.id} {...view.leadPanel} hideTrigger open={mobilePanelOpen} onOpenChange={setMobilePanelOpen} /> : null}
+                  {view.leadPanel ? (
+                    <InboxLeadPanelDrawer
+                      key={conversation.id}
+                      {...view.leadPanel}
+                      stages={stages}
+                      substages={substages}
+                      hideTrigger
+                      open={mobilePanelOpen}
+                      onOpenChange={setMobilePanelOpen}
+                    />
+                  ) : null}
                   <a href={`tel:${conversation.phone}`} className="grid size-[34px] place-items-center rounded-full border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] text-[var(--vp-wine)]" aria-label={`Ligar para ${conversation.headerName}`}><CrmIcon name="call" className="text-lg" /></a>
+                  {conversation.leadId ? (
+                    <ConversationPipelineSelect
+                      conversationId={conversation.id}
+                      stages={stages}
+                      substages={substages}
+                      stageId={conversation.stageId}
+                      substage={conversation.substage}
+                      onSaved={(next) => {
+                        setView((current) =>
+                          current
+                            ? {
+                                ...current,
+                                conversation: {
+                                  ...current.conversation,
+                                  stageId: next.stageId,
+                                  substage: next.substage,
+                                },
+                              }
+                            : current,
+                        );
+                      }}
+                    />
+                  ) : null}
                   {conversation.leadExcluded && conversation.leadId ? <RestoreLeadButton leadId={conversation.leadId} /> : conversation.leadId ? <ExcludeLeadButton leadId={conversation.leadId} iconOnly /> : null}
                 </div>
               </div>
@@ -163,10 +207,27 @@ export function InboxConversationPane({ initialView }: { initialView: InboxConve
           </>
         ) : <div className="flex flex-1 items-center justify-center px-4 py-12"><p className="text-center text-sm text-[var(--muted)]">Nenhuma conversa para mostrar.</p></div>}
       </section>
-      {view?.leadPanel ? <div className="hidden h-full min-h-0 overflow-hidden xl:flex xl:flex-col"><InboxLeadPanel key={view.conversation.id} {...view.leadPanel} /></div> : <aside className="hidden h-full min-h-0 flex-col items-center justify-center gap-3 overflow-y-auto rounded-[14px] border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] px-5 text-center text-xs text-[var(--vp-ink-muted)] xl:flex">
-        <span>{conversation?.leadId ? "A ficha será carregada somente quando necessária." : "Esta conversa não possui uma ficha de lead."}</span>
-        {conversation?.leadId ? <button type="button" disabled={panelLoading} onClick={() => void loadLeadPanel()} className="min-h-9 rounded-full bg-[var(--vp-wine)] px-4 font-bold text-[var(--vp-gold)] disabled:opacity-60">{panelLoading ? "Carregando ficha…" : "Carregar ficha"}</button> : null}
-      </aside>}
+      {view?.leadPanel ? (
+        <div className="hidden h-full min-h-0 overflow-hidden xl:flex xl:flex-col">
+          <InboxLeadPanel
+            key={view.conversation.id}
+            {...view.leadPanel}
+            stages={stages}
+            substages={substages}
+            initialStageId={view.conversation.stageId ?? view.leadPanel.initialStageId}
+            initialSubstage={view.conversation.substage ?? view.leadPanel.initialSubstage}
+          />
+        </div>
+      ) : (
+        <aside className="hidden h-full min-h-0 flex-col items-center justify-center gap-3 overflow-y-auto rounded-[14px] border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] px-5 text-center text-xs text-[var(--vp-ink-muted)] xl:flex">
+          <span>{conversation?.leadId ? "A ficha será carregada somente quando necessária." : "Esta conversa não possui uma ficha de lead."}</span>
+          {conversation?.leadId ? (
+            <button type="button" disabled={panelLoading} onClick={() => void loadLeadPanel()} className="min-h-9 rounded-full bg-[var(--vp-wine)] px-4 font-bold text-[var(--vp-gold)] disabled:opacity-60">
+              {panelLoading ? "Carregando ficha…" : "Carregar ficha"}
+            </button>
+          ) : null}
+        </aside>
+      )}
     </>
   );
 }

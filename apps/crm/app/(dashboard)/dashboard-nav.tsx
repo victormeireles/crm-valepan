@@ -40,7 +40,9 @@ export function DashboardNav() {
         }
 
         const dropdownActive =
-          pathname === "/leads" && isClientCategoryValue(categoryFilter);
+          n.id === "client-categories"
+            ? pathname === "/leads" && isClientCategoryValue(categoryFilter)
+            : n.items.some((item) => pathname === item.href || pathname.startsWith(`${item.href}/`));
 
         return (
           <details key={n.id} className="group relative">
@@ -56,7 +58,9 @@ export function DashboardNav() {
             <div className="absolute left-0 z-50 mt-1 min-w-[12rem] rounded-md border border-[rgba(199,166,77,0.35)] bg-[var(--vp-wine)] py-1 text-[0.7rem] font-semibold uppercase tracking-[0.08em] shadow-lg md:text-xs">
               {n.items.map((item) => {
                 const itemActive =
-                  pathname === "/leads" && categoryFilter === item.label && isClientCategoryValue(item.label);
+                  n.id === "client-categories"
+                    ? pathname === "/leads" && categoryFilter === item.label && isClientCategoryValue(item.label)
+                    : pathname === item.href || pathname.startsWith(`${item.href}/`);
                 return (
                   <Link
                     key={item.href}

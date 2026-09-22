@@ -4,10 +4,11 @@ import type { PipelinePageFilters, PipelineVolumeFilter } from "@/app/actions/pi
 import type { ClientCategoryValue } from "@/lib/client-categories";
 import type { PipelineRegion } from "@/lib/pipeline-signals";
 import { CrmIcon } from "@/components/crm-icon";
+import Link from "next/link";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { LostReasonDTO } from "@/lib/lost-reasons";
-import { lostReasonNamesForSelect } from "@/lib/lost-reasons";
-import { displayPipelineStageName, findCanonicalPipelineStage } from "@/lib/pipeline-canonical-stages";
+import { substagesForStageKey } from "@/lib/pipeline-substages";
+import { canonicalPipelineStageKey, displayPipelineStageName, findCanonicalPipelineStage } from "@/lib/pipeline-canonical-stages";
 import type { PipelineStageDTO } from "./pipeline-board";
 
 const SEARCH_DEBOUNCE_MS = 500;
@@ -269,6 +270,7 @@ export function PipelineHeader({
   totalCount,
   lostReasons,
   stageTotals,
+  suggestionCount,
   onFilterChange,
 }: {
   stages: PipelineStageDTO[];
@@ -282,6 +284,7 @@ export function PipelineHeader({
   totalCount: number;
   lostReasons: LostReasonDTO[];
   stageTotals: Record<string, number>;
+  suggestionCount: number;
   onFilterChange: FilterChangeHandler;
 }) {
   const handleSearch = useCallback(
@@ -292,6 +295,17 @@ export function PipelineHeader({
   );
 
   const selectedStage = stages.find((stage) => stage.id === filters.stageId);
+  const selectedStageKey = selectedStage ? canonicalPipelineStageKey(selectedStage.name) : null;
+  const statusNames = selectedStageKey
+    ? substagesForStageKey(lostReasons, selectedStageKey, filters.lostReason)
+    : Array.from(
+        new Set(
+          lostReasons
+            .filter((reason) => reason.active)
+            .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name, "pt-BR"))
+            .map((reason) => reason.name),
+        ),
+      );
   const clientStage = findCanonicalPipelineStage(stages, "CONVERTIDO");
   const lostStage = findCanonicalPipelineStage(stages, "PERDIDO");
   const clientCount = clientStage ? stageTotals[clientStage.id] ?? 0 : 0;
@@ -382,11 +396,11 @@ export function PipelineHeader({
         </ToolbarMenu>
         <ToolbarMenu
           active={Boolean(filters.lostReason)}
-          ariaLabel={`Subclassificação: ${filters.lostReason ?? "todas"}`}
-          label={filters.lostReason ?? "Motivo"}
+          ariaLabel={`Status: ${filters.lostReason ?? "todos"}`}
+          label={filters.lostReason ?? "Status"}
         >
-          <MenuOption selected={!filters.lostReason} onSelect={() => onFilterChange({ lost_reason: null })}>Todas</MenuOption>
-          {lostReasonNamesForSelect(lostReasons, filters.lostReason).map((name) => (
+          <MenuOption selected={!filters.lostReason} onSelect={() => onFilterChange({ lost_reason: null })}>Todos</MenuOption>
+          {statusNames.map((name) => (
             <MenuOption
               key={name}
               selected={filters.lostReason === name}
@@ -418,6 +432,14 @@ export function PipelineHeader({
             })}
           />
         ) : null}
+        <Link
+          href="/pipeline/sugestoes"
+          className={triggerClass(suggestionCount > 0)}
+          aria-label={`Sugestões de avanço: ${suggestionCount}`}
+        >
+          <span>Sugestões</span>
+          <span className="tabular-nums opacity-80">{new Intl.NumberFormat("pt-BR").format(suggestionCount)}</span>
+        </Link>
         {hasAnyFilter ? (
           <button
             type="button"

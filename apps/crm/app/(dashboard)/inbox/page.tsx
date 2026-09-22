@@ -14,7 +14,7 @@ import {
   isLeadExcludedFromPipeline,
   leadExclusionReasonLabel,
 } from "@/lib/lead-pipeline-exclusion";
-import { displayPipelineStageName } from "@/lib/pipeline-canonical-stages";
+import { displayPipelineStageName, selectCanonicalPipelineStages } from "@/lib/pipeline-canonical-stages";
 import { getWeeklyBreadCount } from "@/lib/lead-signals";
 import type { Database } from "@/lib/database.types";
 import {
@@ -99,7 +99,7 @@ export default async function InboxPage({
   const supabase = await timed("supabase_client", createServerSupabaseClient());
   const crm = crmTables(supabase);
   const conversationSelect =
-    "id, phone_e164, conversation_kind, group_display_name, classification, last_message_at, created_at, updated_at, last_read_at, leads(id, client_category, excluded_from_pipeline_at, excluded_reason, contacts(full_name, avatar_url), companies(name, city, state), distributors(name))";
+    "id, phone_e164, conversation_kind, group_display_name, classification, last_message_at, created_at, updated_at, last_read_at, leads(id, client_category, excluded_from_pipeline_at, excluded_reason, contacts(full_name, avatar_url), companies(name, city, state), distributors(name), opportunities(id, stage_id, lost_reason, updated_at))";
   // A conversa solicitada já vem na URL; carregue suas mensagens enquanto a
   // barra lateral e a etapa inicial são consultadas.
   const requestedMessagesPromise = cid ? timed("messages_initial", loadRecentConversationMessages(crm, cid)) : null;
@@ -117,10 +117,15 @@ export default async function InboxPage({
     p_limit: PAGE_SIZE,
     p_query: isPhoneSearch ? inboxQuery : null,
   }));
-  const [{ data: stages }, snapshotResult, requestedConversationResult] = await Promise.all([
+  const substagesPromise = timed("pipeline_substages", crm
+    .from("lost_reasons")
+    .select("id, name, stage_key, sort_order, active")
+    .order("sort_order", { ascending: true }));
+  const [{ data: stages }, snapshotResult, requestedConversationResult, substagesResult] = await Promise.all([
     stagesPromise,
     snapshotPromise,
     requestedConversationPromise,
+    substagesPromise,
   ]);
   const snapshotRows = (snapshotResult.data ?? []) as InboxSidebarSnapshotRow[];
   const snapshotMeta = snapshotRows[0];
@@ -254,8 +259,8 @@ export default async function InboxPage({
                   }[]
                 | null;
               opportunities?:
-                | { id: string; stage_id: string; title: string | null; next_action_at: string | null; owner_id: string | null; updated_at: string }
-                | { id: string; stage_id: string; title: string | null; next_action_at: string | null; owner_id: string | null; updated_at: string }[]
+                | { id?: string; stage_id: string; lost_reason?: string | null; title?: string | null; next_action_at?: string | null; owner_id?: string | null; updated_at?: string }
+                | { id?: string; stage_id: string; lost_reason?: string | null; title?: string | null; next_action_at?: string | null; owner_id?: string | null; updated_at?: string }[]
                 | null;
               contacts?:
                 | { full_name: string | null; avatar_url?: string | null }
@@ -293,8 +298,8 @@ export default async function InboxPage({
                   }[]
                 | null;
               opportunities?:
-                | { id: string; stage_id: string; title: string | null; next_action_at: string | null; owner_id: string | null; updated_at: string }
-                | { id: string; stage_id: string; title: string | null; next_action_at: string | null; owner_id: string | null; updated_at: string }[]
+                | { id?: string; stage_id: string; lost_reason?: string | null; title?: string | null; next_action_at?: string | null; owner_id?: string | null; updated_at?: string }
+                | { id?: string; stage_id: string; lost_reason?: string | null; title?: string | null; next_action_at?: string | null; owner_id?: string | null; updated_at?: string }[]
                 | null;
               contacts?:
                 | { full_name: string | null; avatar_url?: string | null }
@@ -482,6 +487,34 @@ export default async function InboxPage({
     : null;
   const selectedAvatarUrl = validAvatarUrl(selectedContact?.avatar_url);
   const firstName = selectedHeaderName.trim().split(/\s+/)[0] || "cliente";
+  const selectedOpportunities = Array.isArray(selectedLead?.opportunities)
+    ? selectedLead.opportunities
+    : selectedLead?.opportunities
+      ? [selectedLead.opportunities]
+      : [];
+  const selectedOpportunity = [...selectedOpportunities].sort((a, b) =>
+    String(b.updated_at ?? "").localeCompare(String(a.updated_at ?? "")),
+  )[0] ?? null;
+  const catalogStages = selectCanonicalPipelineStages(
+    (stages ?? []).map((stage) => ({
+      id: stage.id,
+      name: stage.name,
+      sort_order: stage.sort_order,
+      is_final: stage.is_final,
+    })),
+  ).map((stage) => ({
+    id: stage.id,
+    name: stage.name,
+    sortOrder: stage.sort_order,
+    isFinal: stage.is_final,
+  }));
+  const catalogSubstages = (substagesResult.data ?? []).map((row) => ({
+    id: row.id,
+    name: row.name,
+    stage_key: row.stage_key,
+    sort_order: row.sort_order,
+    active: row.active,
+  }));
   const initialConversationView: InboxConversationView | null = selected
     ? {
         conversation: {
@@ -498,6 +531,8 @@ export default async function InboxPage({
           lastBodyPreview: selectedTail?.last_body_preview ?? null,
           leadId: selectedLead?.id ?? null,
           leadExcluded: selectedLeadExcluded,
+          stageId: selectedOpportunity?.stage_id ?? null,
+          substage: selectedOpportunity?.lost_reason ?? null,
         },
         messages,
         hasMoreOlder,
@@ -543,7 +578,11 @@ export default async function InboxPage({
           </div>
         </div>
 
-        <InboxConversationPane initialView={initialConversationView} />
+        <InboxConversationPane
+          initialView={initialConversationView}
+          stages={catalogStages}
+          substages={catalogSubstages}
+        />
       </div>
     </div>
   );

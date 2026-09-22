@@ -31,5 +31,10 @@ export const dashboardNavItems: DashboardNavItem[] = [
     })),
   },
   { kind: "link", href: "/samples", label: "Amostras" },
-  { kind: "link", href: "/settings", label: "Configurações" },
+  {
+    kind: "dropdown",
+    id: "settings",
+    label: "Configurações",
+    items: [{ href: "/settings/subetapas", label: "Subetapas" }],
+  },
 ];

@@ -21,14 +21,20 @@ import { isPhoneSearchQuery } from "@/lib/phone-search-query";
 import { brazilPhoneSearchVariants } from "@crm/shared/phone";
 import { isInboxClassification } from "@/lib/inbox-classifications";
 import { applyPipelineStageEntryAutomations } from "@/lib/pipeline-stage-automations";
+import { updateOpportunityStage } from "@/app/actions/opportunity";
 import {
   lostReasonForInboxClassification,
   pipelineStageForInboxClassification,
 } from "@/lib/pipeline-stage-for-inbox-classification";
 import {
+  canonicalPipelineStageKey,
   displayPipelineStageName,
+  isLostPipelineStage,
   selectCanonicalPipelineStages,
 } from "@/lib/pipeline-canonical-stages";
+import {
+  conversationClassificationForStageAndSubstage,
+} from "@/lib/pipeline-substages";
 import {
   MAX_WHATSAPP_MEDIA_BYTES,
   storePrivateMedia,
@@ -74,6 +80,8 @@ export type InboxConversationView = {
     lastBodyPreview: string | null;
     leadId: string | null;
     leadExcluded: boolean;
+    stageId: string | null;
+    substage: string | null;
   };
   messages: Awaited<ReturnType<typeof loadRecentConversationMessages>>["messages"];
   hasMoreOlder: boolean;
@@ -247,7 +255,8 @@ export async function loadInboxConversationView(conversationId: string) {
       leads(id, client_category, excluded_from_pipeline_at,
         contacts(full_name, avatar_url),
         companies(name, city, state),
-        distributors(name)
+        distributors(name),
+        opportunities(id, stage_id, lost_reason, updated_at)
       )
     `).eq("id", id).maybeSingle()),
     timeInboxOperation("last_message", crm.from("v_conversation_last_message")
@@ -283,6 +292,15 @@ export async function loadInboxConversationView(conversationId: string) {
       })
     : null;
 
+  const opportunities = Array.isArray(lead?.opportunities)
+    ? lead.opportunities
+    : lead?.opportunities
+      ? [lead.opportunities]
+      : [];
+  const opportunity = [...opportunities].sort((a, b) =>
+    String(b.updated_at ?? "").localeCompare(String(a.updated_at ?? "")),
+  )[0] ?? null;
+
   const view: InboxConversationView = {
     conversation: {
       id: conversation.id,
@@ -298,6 +316,8 @@ export async function loadInboxConversationView(conversationId: string) {
       lastBodyPreview: tailResult.data?.last_body_preview ?? null,
       leadId: lead?.id ?? null,
       leadExcluded: isLeadExcludedFromPipeline(lead),
+      stageId: opportunity?.stage_id ?? null,
+      substage: opportunity?.lost_reason ?? null,
     },
     messages: messagesResult.messages,
     hasMoreOlder: messagesResult.hasMoreOlder,
@@ -325,7 +345,7 @@ export async function loadInboxLeadPanel(conversationId: string) {
       leads(id, owner_id, client_category, zip_code, weekly_bread_consumption,
         bread_type, bread_weight_grams,
         contacts(full_name), companies(name, document, city, state), distributors(name),
-        opportunities(id, stage_id, updated_at)
+        opportunities(id, stage_id, lost_reason, updated_at)
       )
     `).eq("id", id).maybeSingle()),
     timeInboxOperation("pipeline_stages", crm.from("pipeline_stages").select("id, name, sort_order, is_final").order("sort_order")),
@@ -368,6 +388,7 @@ export async function loadInboxLeadPanel(conversationId: string) {
     companyName,
     initialCategory: lead.client_category ?? null,
     initialStageId: opportunity?.stage_id ?? null,
+    initialSubstage: opportunity?.lost_reason ?? null,
     initialState: company?.state ?? null,
     initialCity: company?.city ?? null,
     initialZipCode: lead.zip_code ?? null,
@@ -382,6 +403,7 @@ export async function loadInboxLeadPanel(conversationId: string) {
       sortOrder: stage.sort_order,
       isFinal: stage.is_final,
     })),
+    substages: [],
     teamOptions,
     opportunityId: opportunity?.id ?? null,
     followUp: followUp ? toFollowUpDTO(followUp) : null,
@@ -1087,6 +1109,7 @@ export async function updateConversationClassification(input: {
 
   if (targetStageId && conversation.lead_id) {
     const nowIso = new Date().toISOString();
+    const substage = lostReasonForInboxClassification(classification);
     const { data: opportunity, error: opportunityError } = await crm
       .from("opportunities")
       .select("id, stage_id, owner_id")
@@ -1103,7 +1126,7 @@ export async function updateConversationClassification(input: {
         .update({
           stage_id: targetStageId,
           owner_id: opportunity?.owner_id ?? user.id,
-          lost_reason: lostReasonForInboxClassification(classification),
+          lost_reason: substage,
           updated_at: nowIso,
         })
         .eq("lead_id", conversation.lead_id);
@@ -1116,7 +1139,7 @@ export async function updateConversationClassification(input: {
           owner_id: user.id,
           stage_id: targetStageId,
           title: `Oportunidade ${conversation.phone_e164}`,
-          lost_reason: lostReasonForInboxClassification(classification),
+          lost_reason: substage,
         })
         .select("id")
         .single();
@@ -1140,6 +1163,146 @@ export async function updateConversationClassification(input: {
   revalidatePath("/inbox");
   revalidatePath("/pipeline");
   return { ok: true as const };
+}
+
+export async function updateConversationPipelineClassification(input: {
+  conversationId: string;
+  stageId: string | null;
+  substage: string | null;
+}): Promise<
+  | { ok: true; stageId: string | null; substage: string | null }
+  | { ok: false; error: string }
+> {
+  const conversationId = input.conversationId.trim();
+  if (!conversationId) return { ok: false, error: "Conversa inválida." };
+
+  const supabase = await createServerSupabaseClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Não autenticado" };
+  const crm = crmTables(supabase);
+
+  const { data: conversation, error: conversationError } = await crm
+    .from("conversations")
+    .select("id, lead_id, phone_e164")
+    .eq("id", conversationId)
+    .maybeSingle();
+  if (conversationError) return { ok: false, error: conversationError.message };
+  if (!conversation) return { ok: false, error: "Conversa não encontrada." };
+  if (!conversation.lead_id) return { ok: false, error: "Conversa sem lead vinculado." };
+
+  const stageId = (input.stageId ?? "").trim() || null;
+  const requestedSubstage = (input.substage ?? "").trim() || null;
+
+  if (!stageId) {
+    const { error } = await crm
+      .from("conversations")
+      .update({ classification: null, updated_at: new Date().toISOString() })
+      .eq("id", conversationId);
+    if (error) return { ok: false, error: error.message };
+    revalidatePath("/inbox");
+    revalidatePath("/pipeline");
+    return { ok: true, stageId: null, substage: null };
+  }
+
+  const { data: stage, error: stageError } = await crm
+    .from("pipeline_stages")
+    .select("id, name")
+    .eq("id", stageId)
+    .maybeSingle();
+  if (stageError) return { ok: false, error: stageError.message };
+  if (!stage?.id) return { ok: false, error: "Etapa inválida." };
+  const stageKey = canonicalPipelineStageKey(stage.name);
+
+  const { data: catalog, error: catalogError } = await crm
+    .from("lost_reasons")
+    .select("name, active, stage_key");
+  if (catalogError) return { ok: false, error: catalogError.message };
+
+  const allowed = (catalog ?? []).filter(
+    (row) => row.active && canonicalPipelineStageKey(row.stage_key) === stageKey,
+  );
+  const nextSubstage =
+    requestedSubstage && allowed.some((row) => row.name === requestedSubstage)
+      ? requestedSubstage
+      : null;
+
+  if (requestedSubstage && !nextSubstage) {
+    return { ok: false, error: "Status inválido para esta etapa." };
+  }
+  if (isLostPipelineStage(stage.name) && !nextSubstage) {
+    return { ok: false, error: "Escolha o status de perda." };
+  }
+
+  const classification = conversationClassificationForStageAndSubstage(stageKey, nextSubstage);
+
+  const { error: claimLeadError } = await crm
+    .from("leads")
+    .update({ owner_id: user.id, updated_at: new Date().toISOString() })
+    .eq("id", conversation.lead_id)
+    .is("owner_id", null);
+  if (claimLeadError) return { ok: false, error: claimLeadError.message };
+
+  const { data: updated, error: classificationError } = await crm
+    .from("conversations")
+    .update({
+      classification,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", conversationId)
+    .select("id")
+    .maybeSingle();
+  if (classificationError) return { ok: false, error: classificationError.message };
+  if (!updated) return { ok: false, error: "Não foi possível salvar a classificação." };
+
+  const { data: opportunity, error: opportunityError } = await crm
+    .from("opportunities")
+    .select("id, stage_id, owner_id")
+    .eq("lead_id", conversation.lead_id)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (opportunityError) return { ok: false, error: opportunityError.message };
+
+  let opportunityId = opportunity?.id ?? null;
+  if (!opportunityId) {
+    const { data: inserted, error: insertError } = await crm
+      .from("opportunities")
+      .insert({
+        lead_id: conversation.lead_id,
+        owner_id: user.id,
+        stage_id: stage.id,
+        title: `Oportunidade ${conversation.phone_e164}`,
+        lost_reason: nextSubstage,
+      })
+      .select("id")
+      .single();
+    if (insertError || !inserted) {
+      return { ok: false, error: insertError?.message ?? "Erro ao criar oportunidade." };
+    }
+    opportunityId = inserted.id;
+  }
+
+  const moved = await updateOpportunityStage({
+    opportunityId,
+    stageId: stage.id,
+    lostReason: nextSubstage,
+  });
+  if (!moved.ok) return moved;
+
+  const { error: substageError } = await crm
+    .from("opportunities")
+    .update({
+      lost_reason: nextSubstage,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("lead_id", conversation.lead_id);
+  if (substageError) return { ok: false, error: substageError.message };
+
+  revalidatePath("/inbox");
+  revalidatePath("/pipeline");
+  return { ok: true, stageId: stage.id, substage: nextSubstage };
 }
 
 export async function updateConversationContactName(input: {

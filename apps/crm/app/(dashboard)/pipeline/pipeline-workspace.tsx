@@ -40,6 +40,7 @@ export function PipelineWorkspace(props: {
   currentUserId: string | null;
   renderNowMs: number;
   lostReasons: LostReasonDTO[];
+  suggestionCount: number;
 }) {
   const [cards, setCards] = useState(props.initialCards);
   const [stageTotals, setStageTotals] = useState(props.initialStageTotals);
@@ -227,6 +228,7 @@ export function PipelineWorkspace(props: {
         hasAnyFilter={hasAnyFilter}
         lostReasons={props.lostReasons}
         stageTotals={headerStageTotals}
+        suggestionCount={props.suggestionCount}
         onFilterChange={changeFilters}
       />
       <PipelineKpiStrip

@@ -4,6 +4,7 @@ const PIPELINE_STAGE_BY_CLASSIFICATION: Readonly<Record<string, string>> = {
   NEGOCIAÇÃO: "NEGOCIAÇÃO",
   "SEM INTERESSE": "PERDIDO",
   "ENCAMINHADO PARA O DISTRIBUIDOR": "NEGOCIAÇÃO",
+  "ENCAMINHADO PARA DISTRIBUIDOR": "NEGOCIAÇÃO",
   "NÃO ATENDEMOS A REGIÃO": "PERDIDO",
   "NÃO TEMOS O PÃO": "PERDIDO",
   "NÃO RESPONDE": "PERDIDO",
@@ -14,7 +15,12 @@ const PIPELINE_STAGE_BY_CLASSIFICATION: Readonly<Record<string, string>> = {
   CLIENTE: "CONVERTIDO",
 };
 
-const LOST_REASON_BY_CLASSIFICATION: Readonly<Record<string, string>> = {
+const SUBSTAGE_BY_CLASSIFICATION: Readonly<Record<string, string>> = {
+  CHATBOT: "Chatbot",
+  "SEM RETORNO": "Sem retorno",
+  AMOSTRA: "Pediu amostra",
+  "ENCAMINHADO PARA O DISTRIBUIDOR": "Encaminhado para o distribuidor",
+  "ENCAMINHADO PARA DISTRIBUIDOR": "Encaminhado para o distribuidor",
   "SEM INTERESSE": "Sem interesse",
   "NÃO ATENDEMOS A REGIÃO": "Não atendemos a região",
   "NÃO TEMOS O PÃO": "Não temos o pão",
@@ -34,5 +40,5 @@ export function lostReasonForInboxClassification(
   classification: string | null,
 ): string | null {
   if (!classification) return null;
-  return LOST_REASON_BY_CLASSIFICATION[classification.trim().toUpperCase()] ?? null;
+  return SUBSTAGE_BY_CLASSIFICATION[classification.trim().toUpperCase()] ?? null;
 }

@@ -1,139 +1,150 @@
 "use client";
 
-import { updateConversationClassification } from "@/app/actions/inbox";
-import { updateConversationLeadClientCategory } from "@/app/actions/leads";
+import { updateConversationPipelineClassification } from "@/app/actions/inbox";
 import {
-  INBOX_CLASSIFICATION_OPTIONS,
-  isInboxClassification,
-} from "@/lib/inbox-classifications";
+  canonicalPipelineStageKey,
+  displayPipelineStageName,
+  isLostPipelineStage,
+} from "@/lib/pipeline-canonical-stages";
+import {
+  substagesForStageKey,
+  type PipelineSubstageDTO,
+} from "@/lib/pipeline-substages";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-function normalizeValue(v: string | null | undefined): string {
-  const t = (v ?? "").trim();
-  const u = t.toUpperCase();
-  return u && isInboxClassification(u) ? u : "";
-}
+type StageOption = { id: string; name: string; sortOrder: number; isFinal?: boolean };
 
-export function ConversationClassificationSelect({
+export function ConversationPipelineSelect({
   conversationId,
-  classification,
-  clientCategory,
+  stages,
+  substages,
+  stageId,
+  substage,
+  onSaved,
 }: {
   conversationId: string;
-  classification: string | null;
-  clientCategory: string | null;
+  stages: StageOption[];
+  substages: PipelineSubstageDTO[];
+  stageId: string | null;
+  substage: string | null;
+  onSaved?: (next: { stageId: string | null; substage: string | null }) => void;
 }) {
   const router = useRouter();
-  const [value, setValue] = useState(normalizeValue(classification));
-  const [loading, setLoading] = useState(false);
-  const [clientCategoryValue, setClientCategoryValue] = useState(
-    normalizeClientCategory(clientCategory),
+  const orderedStages = useMemo(
+    () => [...stages].sort((a, b) => a.sortOrder - b.sortOrder),
+    [stages],
   );
-  const [loadingClientCategory, setLoadingClientCategory] = useState(false);
+  const [stageValue, setStageValue] = useState(stageId ?? "");
+  const [statusValue, setStatusValue] = useState(substage ?? "");
+  const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
-    setValue(normalizeValue(classification));
-  }, [classification]);
+    setStageValue(stageId ?? "");
+  }, [stageId]);
   useEffect(() => {
-    setClientCategoryValue(normalizeClientCategory(clientCategory));
-  }, [clientCategory]);
+    setStatusValue(substage ?? "");
+  }, [substage]);
+
+  const selectedStage = orderedStages.find((stage) => stage.id === stageValue) ?? null;
+  const statusOptions = substagesForStageKey(substages, selectedStage?.name ?? null, statusValue);
+  const statusRequired = isLostPipelineStage(selectedStage?.name);
+
+  async function persist(nextStageId: string, nextStatus: string) {
+    const stage = orderedStages.find((item) => item.id === nextStageId) ?? null;
+    const options = substagesForStageKey(substages, stage?.name ?? null, nextStatus);
+    const compatibleStatus = options.includes(nextStatus) ? nextStatus : "";
+    if (isLostPipelineStage(stage?.name) && !compatibleStatus) {
+      setStatusValue("");
+      return;
+    }
+    setLoading(true);
+    setErr(null);
+    try {
+      const res = await updateConversationPipelineClassification({
+        conversationId,
+        stageId: nextStageId || null,
+        substage: compatibleStatus || null,
+      });
+      if (!res.ok) {
+        setErr(res.error ?? "Erro");
+        setStageValue(stageId ?? "");
+        setStatusValue(substage ?? "");
+        return;
+      }
+      setStageValue(res.stageId ?? "");
+      setStatusValue(res.substage ?? "");
+      onSaved?.({ stageId: res.stageId, substage: res.substage });
+      router.refresh();
+    } catch {
+      setErr("Não foi possível salvar. Tente novamente.");
+      setStageValue(stageId ?? "");
+      setStatusValue(substage ?? "");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const controlClass =
+    "min-w-[9.5rem] rounded border border-[var(--border)] bg-[var(--vp-paper-pure)] px-2 py-1.5 text-xs text-[var(--foreground)]";
 
   return (
-    <div className="flex flex-col items-end gap-1">
-      <label className="text-[11px] font-medium uppercase tracking-[0.06em] text-[var(--muted)]">
-        Status
+    <div className="flex flex-wrap items-end justify-end gap-2">
+      <label className="flex flex-col items-end gap-1">
+        <span className="text-[11px] font-medium uppercase tracking-[0.06em] text-[var(--muted)]">
+          Etapa
+        </span>
+        <select
+          value={stageValue}
+          disabled={loading}
+          onChange={(event) => {
+            const next = event.target.value;
+            const stage = orderedStages.find((item) => item.id === next) ?? null;
+            const nextOptions = substagesForStageKey(substages, stage?.name ?? null, "");
+            const nextStatus = nextOptions.includes(statusValue) ? statusValue : "";
+            setStageValue(next);
+            setStatusValue(nextStatus);
+            void persist(next, nextStatus);
+          }}
+          className={controlClass}
+        >
+          <option value="">Não definida</option>
+          {orderedStages.map((stage) => (
+            <option key={stage.id} value={stage.id}>
+              {displayPipelineStageName(stage.name)}
+            </option>
+          ))}
+        </select>
       </label>
-      <select
-        value={value}
-        disabled={loading}
-        onChange={(e) => {
-          const next = e.target.value;
-          setValue(next);
-          void (async () => {
-            setLoading(true);
-            setErr(null);
-            try {
-              const res = await updateConversationClassification({
-                conversationId,
-                classification: next.length > 0 ? next : null,
-              });
-              if (!res.ok) {
-                setErr(res.error ?? "Erro");
-                setValue(normalizeValue(classification));
-                return;
-              }
-              router.refresh();
-            } catch {
-              setErr("Não foi possível salvar a classificação. Tente novamente.");
-              setValue(normalizeValue(classification));
-            } finally {
-              setLoading(false);
-            }
-          })();
-        }}
-        className="min-w-[16rem] rounded border border-[var(--border)] bg-[var(--vp-paper-pure)] px-2 py-1.5 text-xs text-[var(--foreground)]"
-      >
-        <option value="">— SEM MARCAÇÃO —</option>
-        {INBOX_CLASSIFICATION_OPTIONS.map((opt) => (
-          <option key={opt} value={opt}>
-            {opt}
-          </option>
-        ))}
-      </select>
-      <label className="mt-1 text-[11px] font-medium uppercase tracking-[0.06em] text-[var(--muted)]">
-        Categoria de cliente
+      <label className="flex flex-col items-end gap-1">
+        <span className="text-[11px] font-medium uppercase tracking-[0.06em] text-[var(--muted)]">
+          Status
+        </span>
+        <select
+          value={statusValue}
+          disabled={loading || !stageValue || statusOptions.length === 0}
+          onChange={(event) => {
+            const next = event.target.value;
+            setStatusValue(next);
+            void persist(stageValue, next);
+          }}
+          className={controlClass}
+        >
+          <option value="">{statusRequired ? "Selecione o status" : "Sem status"}</option>
+          {statusOptions.map((name) => (
+            <option key={name} value={name}>
+              {name}
+            </option>
+          ))}
+        </select>
       </label>
-      <select
-        value={clientCategoryValue}
-        disabled={loadingClientCategory}
-        onChange={(e) => {
-          const next = e.target.value as
-            | ""
-            | "hamburgueria"
-            | "distribuidor"
-            | "parceiros"
-            | "outros";
-          setClientCategoryValue(next);
-          void (async () => {
-            setLoadingClientCategory(true);
-            setErr(null);
-            const res = await updateConversationLeadClientCategory({
-              conversationId,
-              category: next.length > 0 ? next : null,
-            });
-            setLoadingClientCategory(false);
-            if (!res.ok) {
-              setErr(res.error ?? "Erro");
-              setClientCategoryValue(normalizeClientCategory(clientCategory));
-              return;
-            }
-            // Garante que o RSC reflita os dados persistidos antes da navegação (evita lista “fantasma”).
-            if (next.length > 0) {
-              router.push(`/leads?client_category=${encodeURIComponent(next)}`);
-              return;
-            }
-            router.push("/leads");
-          })();
-        }}
-        className="min-w-[16rem] rounded border border-[var(--border)] bg-[var(--vp-paper-pure)] px-2 py-1.5 text-xs text-[var(--foreground)]"
-      >
-        <option value="">— SEM MARCAÇÃO —</option>
-        <option value="hamburgueria">HAMBURGUERIA</option>
-        <option value="distribuidor">DISTRIBUIDOR</option>
-        <option value="parceiros">PARCEIROS</option>
-        <option value="outros">OUTROS</option>
-      </select>
-      {err ? <p className="text-[11px] text-[var(--vp-error)]">{err}</p> : null}
+      {err ? <p className="basis-full text-right text-[11px] text-[var(--vp-error)]">{err}</p> : null}
     </div>
   );
 }
 
-function normalizeClientCategory(
-  v: string | null | undefined,
-): "" | "hamburgueria" | "distribuidor" | "parceiros" | "outros" {
-  const t = (v ?? "").trim().toLowerCase();
-  if (t === "hamburgueria" || t === "distribuidor" || t === "parceiros" || t === "outros") return t;
-  return "";
+export function stageKeyOf(stages: StageOption[], stageId: string | null | undefined) {
+  const stage = stages.find((item) => item.id === stageId);
+  return stage ? canonicalPipelineStageKey(stage.name) : "";
 }

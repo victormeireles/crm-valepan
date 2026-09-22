@@ -13,6 +13,7 @@ import {
 } from "@/app/actions/pipeline";
 import { logPipelinePerformance } from "@/lib/pipeline-performance";
 import { selectCanonicalPipelineStages } from "@/lib/pipeline-canonical-stages";
+import { countPendingPipelineAdvanceSuggestions } from "@/app/actions/pipeline-advance";
 
 export const dynamic = "force-dynamic";
 const INITIAL_CARDS_PER_STAGE = 10;
@@ -71,13 +72,14 @@ export default async function PipelinePage({
     { data: teamProfiles },
     { data: lostReasonRows },
     snapshot,
+    suggestionCount,
   ] = await Promise.all([
     crm
       .from("pipeline_stages")
       .select("id, name, sort_order, is_final")
       .order("sort_order", { ascending: true }),
     crm.from("profiles").select("id, full_name, role").order("full_name", { ascending: true }),
-    crm.from("lost_reasons").select("id, name, sort_order, active").order("sort_order", { ascending: true }),
+    crm.from("lost_reasons").select("id, name, stage_key, sort_order, active").order("sort_order", { ascending: true }),
     loadPipelineFilterSnapshot({
       filters: {
         ownerUserId,
@@ -90,6 +92,7 @@ export default async function PipelinePage({
         lostReason: lostReasonFilter,
       },
     }),
+    countPendingPipelineAdvanceSuggestions(),
   ]);
   const databaseDurationMs = performance.now() - databaseStartedAt;
   if (!snapshot.ok) throw new Error(snapshot.error);
@@ -202,9 +205,11 @@ export default async function PipelinePage({
           lostReasons={(lostReasonRows ?? []).map((reason) => ({
             id: reason.id,
             name: reason.name,
+            stage_key: reason.stage_key,
             sort_order: reason.sort_order,
             active: reason.active,
           }))}
+          suggestionCount={suggestionCount}
         />
       )}
     </div>

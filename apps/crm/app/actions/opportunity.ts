@@ -1,6 +1,11 @@
 "use server";
 
 import { applyPipelineStageEntryAutomations } from "@/lib/pipeline-stage-automations";
+import {
+  canonicalPipelineStageKey,
+  isLostPipelineStage,
+} from "@/lib/pipeline-canonical-stages";
+import { isSampleSubstage } from "@/lib/pipeline-substages";
 import { createAdminSupabaseClient, crmTables as crmAdminTables } from "@/lib/supabase/admin";
 import { createServerSupabaseClient, crmTables as crmServerTables } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
@@ -44,11 +49,11 @@ export async function updateOpportunityStage(input: {
 
   if (!stage) return { ok: false as const, error: "Etapa inválida" };
 
-  const normalizedStageName = normalizeText(stage.name);
-  const isConverted = normalizedStageName.includes("convertido");
-  const needsClosingReason = stage.is_final && !isConverted;
-  if (needsClosingReason && (!input.lostReason || !input.lostReason.trim())) {
-    return { ok: false as const, error: "Informe o motivo do encerramento." };
+  const stageKey = canonicalPipelineStageKey(stage.name);
+  const needsClosingReason = isLostPipelineStage(stage.name);
+  const requestedReason = (input.lostReason ?? "").trim();
+  if (needsClosingReason && !requestedReason) {
+    return { ok: false as const, error: "Informe o status de perda." };
   }
 
   const { data: oppRow } = await crm
@@ -59,21 +64,33 @@ export async function updateOpportunityStage(input: {
     .eq("id", input.opportunityId)
     .maybeSingle();
 
-  if (needsClosingReason) {
-    const trimmedReason = (input.lostReason ?? "").trim();
-    const { data: catalog, error: catalogError } = await crm
-      .from("lost_reasons")
-      .select("name, active");
-    if (catalogError) return { ok: false as const, error: catalogError.message };
-    const allowed =
-      (catalog ?? []).some((reason) => reason.active && reason.name === trimmedReason) ||
-      oppRow?.lost_reason === trimmedReason;
-    if (!allowed) {
-      return {
-        ok: false as const,
-        error: "Motivo inválido. Cadastre ou ative este motivo em Configurações.",
-      };
-    }
+  const { data: catalog, error: catalogError } = await crm
+    .from("lost_reasons")
+    .select("name, active, stage_key");
+  if (catalogError) return { ok: false as const, error: catalogError.message };
+
+  const existingReason = (oppRow?.lost_reason ?? "").trim();
+  const candidateReason = requestedReason || existingReason;
+  const matchesStage = (name: string) =>
+    (catalog ?? []).some(
+      (reason) =>
+        reason.name === name &&
+        canonicalPipelineStageKey(reason.stage_key) === stageKey &&
+        (reason.active || name === existingReason),
+    );
+  const nextReason = candidateReason && matchesStage(candidateReason) ? candidateReason : null;
+
+  if (needsClosingReason && !nextReason) {
+    return {
+      ok: false as const,
+      error: "Status inválido. Cadastre ou ative este status em Configurações → Subetapas.",
+    };
+  }
+  if (requestedReason && !nextReason) {
+    return {
+      ok: false as const,
+      error: "Status inválido para esta etapa. Cadastre em Configurações → Subetapas.",
+    };
   }
 
   const previousStageId = oppRow?.stage_id ?? null;
@@ -102,7 +119,7 @@ export async function updateOpportunityStage(input: {
     }
   }
 
-  const enteringSampleStage = isSampleStageName(stage.name);
+  const enteringSampleStage = isSampleStageName(stage.name) || isSampleSubstage(nextReason);
   if (enteringSampleStage && !oppRow?.lead_id) {
     return {
       ok: false as const,
@@ -185,7 +202,7 @@ export async function updateOpportunityStage(input: {
     .from("opportunities")
     .update({
       stage_id: input.stageId,
-      lost_reason: stage.is_final ? input.lostReason : null,
+      lost_reason: nextReason,
       updated_at: new Date().toISOString(),
     })
     // Dados historicos podem ter mais de um card para o mesmo lead. Enquanto a
