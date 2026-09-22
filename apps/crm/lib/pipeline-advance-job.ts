@@ -499,7 +499,7 @@ export async function runPipelineAdvanceJob(
 
         let factsWriteFailed = false;
         try {
-          const { applied } = await applyLeadFacts(crm, {
+          const { applied } = await applyLeadFacts(crm as never, {
             leadId: item.leadId,
             phoneE164: leadFactsById.get(item.leadId)?.phoneE164 ?? null,
             facts,

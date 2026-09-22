@@ -9,7 +9,7 @@ import {
 } from "@/lib/inbox/load-messages";
 import { displayCompanyName, displayPersonName } from "@/lib/lead-identity";
 import { isLeadExcludedFromPipeline } from "@/lib/lead-pipeline-exclusion";
-import { leadExclusionReasonLabel } from "@/lib/lead-pipeline-exclusion";
+import type { InboxTab, InboxTabCounts } from "@/app/(dashboard)/inbox/inbox-location";
 import { getWeeklyBreadCount } from "@/lib/lead-signals";
 import { logInboxPerformance, timeInboxOperation } from "@/lib/inbox-performance";
 import { timelineActivityLabel } from "@/lib/timeline-labels";
@@ -122,7 +122,7 @@ function inboxPreview(body: string | null) {
 }
 
 export async function refreshInboxSidebar(input: {
-  tab: "qualify" | "archived" | "groups" | "pipeline";
+  tab: InboxTab;
   page: number;
 }) {
   const startedAt = performance.now();
@@ -188,14 +188,18 @@ export async function refreshInboxSidebar(input: {
         lastAt,
         leadLine: group
           ? "Conversa em grupo"
-          : row.excluded_from_pipeline_at
-            ? `Arquivado · ${leadExclusionReasonLabel(null)}`
-            : input.tab === "pipeline" ? "No funil" : "Para qualificar",
+          : row.lead_id
+            ? "Conversa"
+            : "Sem lead",
         awaiting: lastDirection === "in",
         identityName,
         companyName,
         clientCategory: row.client_category,
-        stageName: row.stage_id ? stageNames.get(row.stage_id) ?? null : null,
+        stageName: row.excluded_from_pipeline_at
+          ? "Cliente"
+          : row.stage_id
+            ? stageNames.get(row.stage_id) ?? null
+            : null,
         weeklyBreadCount: getWeeklyBreadCount(row.weekly_bread_consumption),
         lastDirection,
         unread: Boolean(row.last_inbound_sent_at && (!row.last_read_at || row.last_inbound_sent_at > row.last_read_at)),
@@ -206,11 +210,12 @@ export async function refreshInboxSidebar(input: {
     ok: true as const,
     conversations,
     tabCounts: {
-      qualify: Number(meta?.qualify_count ?? 0),
-      archived: Number(meta?.archived_count ?? 0),
+      novos: Number(meta?.novos_count ?? 0),
+      leads: Number(meta?.leads_count ?? 0),
       groups: Number(meta?.groups_count ?? 0),
-      pipeline: Number(meta?.pipeline_count ?? 0),
-    },
+      clientes: Number(meta?.clientes_count ?? 0),
+      perdidos: Number(meta?.perdidos_count ?? 0),
+    } satisfies InboxTabCounts,
   };
 }
 

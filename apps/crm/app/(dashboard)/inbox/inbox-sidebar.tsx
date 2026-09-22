@@ -9,6 +9,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ContactAvatar } from "@/components/contact-avatar";
 import { CategoryBadge } from "@/components/lead-identity";
 import { CrmIcon } from "@/components/crm-icon";
+import { CrmMenuSelect } from "@/components/crm-menu-select";
 import { PaginationNav } from "@/components/pagination-nav";
 import { brazilPhoneSearchVariants } from "@crm/shared/phone";
 import { isPhoneSearchQuery } from "@/lib/phone-search-query";
@@ -21,6 +22,7 @@ import {
   readInboxLocation,
   replaceInboxClientUrl,
   type InboxTab,
+  type InboxTabCounts,
 } from "./inbox-location";
 import { recordInboxBrowserMetric } from "@/lib/inbox-browser-performance";
 
@@ -46,6 +48,14 @@ export type InboxSidebarRow = {
 };
 
 const PAGE_SIZE = 20;
+
+const INBOX_LISTS: { tab: InboxTab; label: string }[] = [
+  { tab: "novos", label: "Novos" },
+  { tab: "leads", label: "Leads" },
+  { tab: "groups", label: "Grupos" },
+  { tab: "clientes", label: "Clientes" },
+  { tab: "perdidos", label: "Perdidos" },
+];
 
 function norm(s: string) {
   return s
@@ -102,7 +112,7 @@ export function InboxSidebar({
   page: number;
   initialQuery: string;
   renderNowMs: number;
-  tabCounts: { qualify: number; archived: number; groups: number; pipeline: number };
+  tabCounts: InboxTabCounts;
 }) {
   const [nowMs, setNowMs] = useState(renderNowMs);
   const [searchPending, setSearchPending] = useState(false);
@@ -295,29 +305,20 @@ export function InboxSidebar({
       className="relative flex h-full min-h-0 flex-1 flex-col overflow-hidden"
     >
       <div className="shrink-0 border-b border-[var(--vp-ink-line)] p-3">
-        <div className="mb-2.5 grid grid-cols-2 gap-1 rounded-[18px] bg-[rgba(35,0,4,0.06)] p-[3px]">
-          {([
-            ["qualify", "Qualificar", liveTabCounts.qualify],
-            ["archived", "Arquivados", liveTabCounts.archived],
-            ["groups", "Grupos", liveTabCounts.groups],
-            ["pipeline", "No funil", liveTabCounts.pipeline],
-          ] as const).map(([tab, label, count]) => (
-            <button
-              key={tab}
-              type="button"
-              onClick={() => {
-                if (tab === liveTab && livePage === 1) return;
-                loadList(tab, 1);
-              }}
-              className={`min-h-8 rounded-[14px] px-2 py-1.5 text-center text-xs font-bold ${
-                liveTab === tab
-                  ? "bg-[var(--vp-wine)] text-[var(--vp-gold)]"
-                  : "text-[var(--vp-ink-muted)] hover:bg-[rgba(35,0,4,0.04)]"
-              }`}
-            >
-              {label} {formatIntegerPt(count)}
-            </button>
-          ))}
+        <div className="mb-2.5">
+          <CrmMenuSelect
+            label="Lista de conversas"
+            value={liveTab}
+            options={INBOX_LISTS.map(({ tab, label }) => ({
+              value: tab,
+              label,
+              meta: formatIntegerPt(liveTabCounts[tab]),
+            }))}
+            onChange={(tab) => {
+              if (tab === liveTab && livePage === 1) return;
+              loadList(tab as InboxTab, 1);
+            }}
+          />
         </div>
         <label htmlFor="inbox-search" className="flex min-h-10 items-center gap-2 rounded-full border border-[var(--vp-ink-line)] bg-[var(--vp-paper)] px-3">
           <CrmIcon name="search" className="text-[17px] text-[var(--vp-ink-soft)]" />

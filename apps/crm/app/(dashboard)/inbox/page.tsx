@@ -10,11 +10,9 @@ import { createServerSupabaseClient, crmTables } from "@/lib/supabase/server";
 import { InboxLiveRefresh } from "./inbox-live-refresh";
 import { InboxSidebar, type InboxSidebarRow } from "./inbox-sidebar";
 import { InboxConversationPane } from "./inbox-conversation-pane";
+import { inboxTabFromParam, type InboxTab } from "./inbox-location";
 import type { InboxConversationView } from "@/app/actions/inbox";
-import {
-  isLeadExcludedFromPipeline,
-  leadExclusionReasonLabel,
-} from "@/lib/lead-pipeline-exclusion";
+import { isLeadExcludedFromPipeline } from "@/lib/lead-pipeline-exclusion";
 import { displayPipelineStageName, selectCanonicalPipelineStages } from "@/lib/pipeline-canonical-stages";
 import { getWeeklyBreadCount } from "@/lib/lead-signals";
 import type { Database } from "@/lib/database.types";
@@ -30,7 +28,6 @@ export const revalidate = 0;
 
 const PREVIEW_MAX = 80;
 const PAGE_SIZE = 20;
-type InboxTab = "qualify" | "archived" | "groups" | "pipeline";
 type ConversationRow = {
   id: string;
   phone_e164: string;
@@ -89,14 +86,7 @@ export default async function InboxPage({
   const isPhoneSearch = inboxQueryDigits.length >= 4;
   const requestedPage = params.page ? Number.parseInt(params.page, 10) : 1;
   const page = Number.isFinite(requestedPage) && requestedPage > 0 ? requestedPage : 1;
-  const activeTab: InboxTab =
-    tab === "groups"
-      ? "groups"
-      : tab === "archived"
-        ? "archived"
-        : tab === "pipeline"
-          ? "pipeline"
-          : "qualify";
+  const activeTab: InboxTab = inboxTabFromParam(tab);
   const supabase = await timed("supabase_client", createServerSupabaseClient());
   const crm = crmTables(supabase);
   const conversationSelect =
@@ -168,10 +158,11 @@ export default async function InboxPage({
   }));
   const conversationsError = snapshotResult.error;
   const tabCounts = {
-    qualify: Number(snapshotMeta?.qualify_count ?? 0),
-    archived: Number(snapshotMeta?.archived_count ?? 0),
+    novos: Number(snapshotMeta?.novos_count ?? 0),
+    leads: Number(snapshotMeta?.leads_count ?? 0),
     groups: Number(snapshotMeta?.groups_count ?? 0),
-    pipeline: Number(snapshotMeta?.pipeline_count ?? 0),
+    clientes: Number(snapshotMeta?.clientes_count ?? 0),
+    perdidos: Number(snapshotMeta?.perdidos_count ?? 0),
   };
   const tailById = new Map(compactRows.map((row) => [row.conversation_id!, {
     conversation_id: row.conversation_id!,
@@ -185,15 +176,6 @@ export default async function InboxPage({
   }]));
 
   const conversationsSorted = [...(conversations ?? [])]
-    .filter((c) => {
-      if (activeTab === "groups") return true;
-      const lead = nestOne(
-        c.leads as { excluded_from_pipeline_at?: string | null } | { excluded_from_pipeline_at?: string | null }[] | null,
-      );
-      const archived = isLeadExcludedFromPipeline(lead);
-      if (activeTab === "archived") return archived;
-      return !archived;
-    })
     .sort((a, b) => {
       const ta = tailById.get(a.id)?.last_sent_at ?? a.last_message_at ?? a.created_at;
       const tb = tailById.get(b.id)?.last_sent_at ?? b.last_message_at ?? b.created_at;
@@ -405,9 +387,11 @@ export default async function InboxPage({
     );
     const tail = tailById.get(c.id);
     const opportunity = nestOne(lead?.opportunities ?? null);
-    const stageName = displayPipelineStageName(
-      (stages ?? []).find((stage) => stage.id === opportunity?.stage_id)?.name ?? null,
-    ) || null;
+    const stageName = isLeadExcludedFromPipeline(lead)
+      ? "Cliente"
+      : displayPipelineStageName(
+          (stages ?? []).find((stage) => stage.id === opportunity?.stage_id)?.name ?? null,
+        ) || null;
 
     const company = nestOne(
       (lead?.companies ?? null) as
@@ -448,11 +432,7 @@ export default async function InboxPage({
         c.conversation_kind === "group"
           ? "Conversa em grupo"
           : lead
-            ? isLeadExcludedFromPipeline(lead)
-              ? `Arquivado · ${leadExclusionReasonLabel(lead.excluded_reason)}`
-              : activeTab === "pipeline"
-                ? "No funil"
-                : "Para qualificar"
+            ? "Conversa"
             : "Sem lead",
       awaiting: tail?.last_direction === "in",
       identityName,

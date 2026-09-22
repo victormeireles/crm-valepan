@@ -1,8 +1,20 @@
-export type InboxTab = "qualify" | "archived" | "groups" | "pipeline";
+export type InboxTab = "novos" | "leads" | "groups" | "clientes" | "perdidos";
+
+export type InboxTabCounts = Record<InboxTab, number>;
 
 export function inboxTabFromParam(value: string | null | undefined): InboxTab {
-  if (value === "groups" || value === "archived" || value === "pipeline") return value;
-  return "qualify";
+  if (
+    value === "novos" ||
+    value === "leads" ||
+    value === "groups" ||
+    value === "clientes" ||
+    value === "perdidos"
+  ) {
+    return value;
+  }
+  if (value === "archived") return "clientes";
+  if (value === "pipeline") return "leads";
+  return "novos";
 }
 
 export function inboxShareHref(input: {

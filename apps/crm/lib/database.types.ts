@@ -665,10 +665,11 @@ export interface Database {
           event_status: string | null;
           last_inbound_sent_at: string | null;
           tab_total: number;
-          qualify_count: number;
-          archived_count: number;
+          novos_count: number;
+          leads_count: number;
           groups_count: number;
-          pipeline_count: number;
+          clientes_count: number;
+          perdidos_count: number;
         }[];
       };
       register_public_lead: {

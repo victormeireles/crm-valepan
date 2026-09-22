@@ -56,7 +56,7 @@ function ActionPanel({
 
 export function ExcludeLeadButton({
   leadId,
-  redirectTo = "/inbox?tab=archived",
+  redirectTo = "/inbox?tab=clientes",
   iconOnly = false,
 }: {
   leadId: string;
@@ -176,13 +176,12 @@ export function RestoreLeadButton({ leadId }: { leadId: string }) {
           return;
         }
         setOpen(false);
-        router.push("/inbox?tab=qualify");
+        router.push("/inbox?tab=novos");
       }}
     >
-      <p className="text-xs font-medium text-[var(--foreground)]">Restaurar para qualificar</p>
+      <p className="text-xs font-medium text-[var(--foreground)]">Restaurar para Novos</p>
       <p className="mt-1 text-xs text-[var(--muted)]">
-        Esta conversa voltará para “Para qualificar”, onde deverá passar novamente pela
-        qualificação.
+        Esta conversa voltará para Novos, a lista de contatos na etapa Novo.
       </p>
     </ActionPanel>
   );
