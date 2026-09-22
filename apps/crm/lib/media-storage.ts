@@ -1,14 +1,22 @@
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
+import {
+  MAX_WHATSAPP_MEDIA_BYTES,
+  WHATSAPP_MEDIA_BUCKET,
+} from "@/lib/media-constants";
 
-export const WHATSAPP_MEDIA_BUCKET = "whatsapp-media";
-// Practical channel ceiling. Z-API documents do not advertise an unlimited
-// payload and its media endpoints support files up to 100 MB.
-export const MAX_WHATSAPP_MEDIA_BYTES = 100 * 1024 * 1024;
+export { MAX_WHATSAPP_MEDIA_BYTES, WHATSAPP_MEDIA_BUCKET } from "@/lib/media-constants";
 
-export type PrivateMediaKind = "audio" | "document";
+export type PrivateMediaKind = "image" | "video" | "audio" | "document";
 
 function extensionForMime(mimeType: string | null | undefined) {
   const mime = mimeType?.split(";")[0]?.trim().toLowerCase();
+  if (mime === "image/jpeg") return "jpg";
+  if (mime === "image/png") return "png";
+  if (mime === "image/gif") return "gif";
+  if (mime === "image/webp") return "webp";
+  if (mime === "video/mp4") return "mp4";
+  if (mime === "video/3gpp") return "3gp";
+  if (mime === "video/webm") return "webm";
   if (mime === "audio/ogg" || mime === "audio/opus") return "ogg";
   if (mime === "audio/mpeg") return "mp3";
   if (mime === "audio/mp4" || mime === "audio/x-m4a") return "m4a";
@@ -44,7 +52,14 @@ export function mediaStoragePath(input: {
   mimeType?: string | null;
   fileName?: string | null;
 }) {
-  const folder = input.kind === "audio" ? "audio" : "documents";
+  const folder =
+    input.kind === "image"
+      ? "images"
+      : input.kind === "video"
+        ? "videos"
+        : input.kind === "audio"
+          ? "audio"
+          : "documents";
   return `${folder}/${input.messageId}.${safeExtension(input.fileName, input.mimeType)}`;
 }
 

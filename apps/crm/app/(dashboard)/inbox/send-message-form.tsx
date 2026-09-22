@@ -1,12 +1,18 @@
 "use client";
 
 import {
+  beginConversationAttachmentUpload,
+  finishConversationAttachmentUpload,
   listWhatsappContacts,
   sendConversationContactCard,
-  sendConversationAttachment,
   sendConversationMessage,
 } from "@/app/actions/inbox";
 import { CrmIcon } from "@/components/crm-icon";
+import {
+  MAX_WHATSAPP_MEDIA_BYTES,
+  WHATSAPP_MEDIA_BUCKET,
+} from "@/lib/media-constants";
+import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { useEffect, useRef, useState } from "react";
 import { EmojiPicker } from "./emoji-picker";
 import { QUICK_REPLIES, renderQuickReply } from "@/lib/inbox/quick-replies";
@@ -104,26 +110,56 @@ export function SendMessageForm({
     e: React.ChangeEvent<HTMLInputElement>,
     mode: "document" | "media",
   ) {
-    const file = e.target.files?.[0] ?? null;
+    const input = e.currentTarget;
+    const file = input.files?.[0] ?? null;
     if (!file) return;
+    if (file.size > MAX_WHATSAPP_MEDIA_BYTES) {
+      setErr("O WhatsApp aceita arquivos de até 100 MB neste canal.");
+      input.value = "";
+      return;
+    }
     setErr(null);
     setUploadingAttachment(true);
-    const fd = new FormData();
-    fd.set("conversation_id", conversationId);
-    fd.set("phone", phone);
-    fd.set("attachment_mode", mode);
-    fd.set("attachment", file);
     try {
-      const res = await sendConversationAttachment(fd);
-      if (!res.ok) {
-        setErr(res.error ?? "Erro ao enviar arquivo.");
+      const prepared = await beginConversationAttachmentUpload({
+        conversationId,
+        mode,
+        fileName: file.name,
+        mimeType: file.type,
+        sizeBytes: file.size,
+      });
+      if (!prepared.ok) {
+        setErr(prepared.error ?? "Não foi possível preparar o arquivo.");
+        return;
+      }
+
+      const { token, ...uploadedAttachment } = prepared.upload;
+      const supabase = createBrowserSupabaseClient();
+      const { error: uploadError } = await supabase.storage
+        .from(WHATSAPP_MEDIA_BUCKET)
+        .uploadToSignedUrl(uploadedAttachment.path, token, file, {
+          contentType: uploadedAttachment.mimeType,
+          cacheControl: "31536000",
+        });
+      if (uploadError) throw uploadError;
+
+      const result = await finishConversationAttachmentUpload(uploadedAttachment);
+      if (!result.ok) {
+        setErr(result.error ?? "Erro ao enviar arquivo.");
       }
     } catch (error) {
       console.error("[inbox] attachment upload:", error);
-      setErr("Não foi possível enviar o arquivo. Tente novamente.");
+      const message = error instanceof Error ? error.message : String(error);
+      setErr(
+        /too large|maximum.*size|exceeded.*size|payload/i.test(message)
+          ? "O arquivo ultrapassa o limite permitido pelo armazenamento."
+          : /mime|content.?type/i.test(message)
+            ? "Este formato de arquivo não é permitido."
+            : "Não foi possível carregar o arquivo. Verifique sua conexão e tente novamente.",
+      );
     } finally {
       setUploadingAttachment(false);
-      e.target.value = "";
+      input.value = "";
     }
   }
 

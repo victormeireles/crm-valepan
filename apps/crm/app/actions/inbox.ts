@@ -35,12 +35,15 @@ import {
 import {
   conversationClassificationForStageAndSubstage,
 } from "@/lib/pipeline-substages";
+import { WHATSAPP_MEDIA_BUCKET } from "@/lib/media-storage";
 import {
-  MAX_WHATSAPP_MEDIA_BYTES,
-  storePrivateMedia,
-} from "@/lib/media-storage";
+  normalizeAttachmentMetadata,
+  outboundAttachmentStoragePath,
+  type AttachmentMetadataInput,
+} from "@/lib/inbox/attachment-upload";
 
 import { createServerSupabaseClient, crmTables } from "@/lib/supabase/server";
+import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { registerZapiLidMapForPhoneDigits } from "@/lib/zapi/phone-exists";
 import {
   deleteZapiMessage,
@@ -1462,24 +1465,41 @@ export async function sendConversationContactCard(input: {
   return { ok: true as const };
 }
 
-function fileToDataUrl(file: File): Promise<string> {
-  return file.arrayBuffer().then((buf) => {
-    const base64 = Buffer.from(buf).toString("base64");
-    const mime = file.type?.trim() || "application/octet-stream";
-    return `data:${mime};base64,${base64}`;
-  });
+type AttachmentUploadInput = AttachmentMetadataInput & {
+  conversationId: string;
+};
+
+type AttachmentFinalizeInput = AttachmentUploadInput & {
+  messageId: string;
+  path: string;
+};
+
+function attachmentValidationError(error: unknown) {
+  return error instanceof Error ? error.message : "Dados do anexo inválidos.";
 }
 
-export async function sendConversationAttachment(formData: FormData) {
-  const conversationId = String(formData.get("conversation_id") ?? "").trim();
-  const phone = String(formData.get("phone") ?? "").trim();
-  const mode = String(formData.get("attachment_mode") ?? "").trim().toLowerCase();
-  const file = formData.get("attachment");
-  if (!conversationId || !phone || (mode !== "document" && mode !== "media")) {
-    return { ok: false as const, error: "Dados incompletos para envio do anexo." };
+function attachmentProviderError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/\b(400|405|413|415|422)\b/.test(message)) {
+    return "O WhatsApp recusou este arquivo. Verifique o formato e tente novamente.";
   }
-  if (!(file instanceof File) || !file.size) {
-    return { ok: false as const, error: "Selecione um arquivo para enviar." };
+  if (/fetch failed|timeout|aborted/i.test(message)) {
+    return "O serviço do WhatsApp não respondeu. Tente novamente em instantes.";
+  }
+  return "Não foi possível enviar o arquivo pelo WhatsApp. Tente novamente.";
+}
+
+export async function beginConversationAttachmentUpload(input: AttachmentUploadInput) {
+  const conversationId = input.conversationId?.trim();
+  if (!conversationId) {
+    return { ok: false as const, error: "Conversa não informada para o envio." };
+  }
+
+  let metadata;
+  try {
+    metadata = normalizeAttachmentMetadata(input);
+  } catch (error) {
+    return { ok: false as const, error: attachmentValidationError(error) };
   }
 
   const supabase = await createServerSupabaseClient();
@@ -1487,118 +1507,199 @@ export async function sendConversationAttachment(formData: FormData) {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { ok: false as const, error: "Não autenticado" };
-  const crm = crmTables(supabase);
 
-  if (file.size > MAX_WHATSAPP_MEDIA_BYTES) {
-    return {
-      ok: false as const,
-      error: "O WhatsApp aceita arquivos de até 100 MB neste canal.",
-    };
-  }
-
-  const mime = file.type.toLowerCase();
-  const dataUrl = await fileToDataUrl(file);
-  let providerMessageId: string | null = null;
-  let kindLabel = "arquivo";
-  try {
-    if (mode === "document") {
-      const sent = await sendZapiDocument(phone, dataUrl, file.name);
-      providerMessageId = sent.providerMessageId;
-      kindLabel = "documento";
-    } else if (mime.startsWith("video/")) {
-      const sent = await sendZapiVideo(phone, dataUrl, "");
-      providerMessageId = sent.providerMessageId;
-      kindLabel = "vídeo";
-    } else if (mime.startsWith("audio/")) {
-      const sent = await sendZapiAudio(phone, dataUrl);
-      providerMessageId = sent.providerMessageId;
-      kindLabel = "áudio";
-    } else {
-      const sent = await sendZapiImage(phone, dataUrl, "");
-      providerMessageId = sent.providerMessageId;
-      kindLabel = "foto";
-    }
-  } catch (e) {
-    return {
-      ok: false as const,
-      error: e instanceof Error ? e.message : "Falha ao enviar anexo no Z-API.",
-    };
-  }
-
-  const { data: conv } = await crm
+  const { data: conversation, error: conversationError } = await crmTables(supabase)
     .from("conversations")
-    .select("lead_id")
+    .select("id")
     .eq("id", conversationId)
     .maybeSingle();
-
-  const body = `[${kindLabel.toUpperCase()} enviado] ${file.name || "arquivo"}`;
-  const messageId = crypto.randomUUID();
-  const shouldStorePrivately = mime.startsWith("audio/") || mode === "document";
-  let storedMedia:
-    | { path: string; sizeBytes: number }
-    | null = null;
-  if (shouldStorePrivately) {
-    try {
-      storedMedia = await storePrivateMedia({
-        messageId,
-        kind: mode === "document" ? "document" : "audio",
-        bytes: await file.arrayBuffer(),
-        mimeType: file.type,
-        fileName: file.name,
-      });
-    } catch (storageError) {
-      console.error(
-        "[inbox] private attachment storage:",
-        storageError instanceof Error ? storageError.message : String(storageError),
-      );
-    }
+  if (conversationError || !conversation) {
+    return { ok: false as const, error: "Conversa não encontrada." };
   }
-  const { error } = await crm.from("messages").insert({
-    id: messageId,
+
+  const messageId = crypto.randomUUID();
+  const path = outboundAttachmentStoragePath({
+    userId: user.id,
+    messageId,
+    metadata,
+  });
+  const admin = createAdminSupabaseClient();
+  const { data, error } = await admin.storage
+    .from(WHATSAPP_MEDIA_BUCKET)
+    .createSignedUploadUrl(path);
+  if (error || !data?.token) {
+    console.error("[inbox] create signed attachment upload:", error?.message ?? "no token");
+    return {
+      ok: false as const,
+      error: "Não foi possível preparar o envio do arquivo. Tente novamente.",
+    };
+  }
+
+  return {
+    ok: true as const,
+    upload: {
+      conversationId,
+      messageId,
+      path,
+      token: data.token,
+      mode: metadata.mode,
+      fileName: metadata.fileName,
+      mimeType: metadata.mimeType,
+      sizeBytes: metadata.sizeBytes,
+    },
+  };
+}
+
+export async function finishConversationAttachmentUpload(input: AttachmentFinalizeInput) {
+  const conversationId = input.conversationId?.trim();
+  if (!conversationId) {
+    return { ok: false as const, error: "Conversa não informada para o envio." };
+  }
+
+  let metadata;
+  try {
+    metadata = normalizeAttachmentMetadata(input);
+  } catch (error) {
+    return { ok: false as const, error: attachmentValidationError(error) };
+  }
+
+  const supabase = await createServerSupabaseClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false as const, error: "Não autenticado" };
+
+  let expectedPath: string;
+  try {
+    expectedPath = outboundAttachmentStoragePath({
+      userId: user.id,
+      messageId: input.messageId,
+      metadata,
+    });
+  } catch (error) {
+    return { ok: false as const, error: attachmentValidationError(error) };
+  }
+  if (input.path !== expectedPath) {
+    return { ok: false as const, error: "O endereço do anexo é inválido." };
+  }
+
+  const crm = crmTables(supabase);
+  const { data: conversation, error: conversationError } = await crm
+    .from("conversations")
+    .select("phone_e164, lead_id")
+    .eq("id", conversationId)
+    .maybeSingle();
+  if (conversationError || !conversation?.phone_e164) {
+    return { ok: false as const, error: "Conversa não encontrada." };
+  }
+
+  const { data: existingMessage } = await crm
+    .from("messages")
+    .select("id")
+    .eq("id", input.messageId)
+    .maybeSingle();
+  if (existingMessage) return { ok: true as const };
+
+  const admin = createAdminSupabaseClient();
+  const bucket = admin.storage.from(WHATSAPP_MEDIA_BUCKET);
+  const { data: storedFile, error: storedFileError } = await bucket.info(expectedPath);
+  if (storedFileError || !storedFile) {
+    console.error("[inbox] inspect uploaded attachment:", storedFileError?.message ?? "missing");
+    return {
+      ok: false as const,
+      error: "O upload do arquivo não foi concluído. Selecione-o e tente novamente.",
+    };
+  }
+  if (storedFile.size !== undefined && storedFile.size !== metadata.sizeBytes) {
+    await bucket.remove([expectedPath]);
+    return { ok: false as const, error: "O arquivo recebido ficou incompleto. Tente novamente." };
+  }
+
+  const { data: signedFile, error: signedFileError } = await bucket.createSignedUrl(
+    expectedPath,
+    15 * 60,
+  );
+  if (signedFileError || !signedFile?.signedUrl) {
+    console.error("[inbox] create signed attachment download:", signedFileError?.message ?? "no url");
+    return {
+      ok: false as const,
+      error: "Não foi possível preparar o arquivo para o WhatsApp. Tente novamente.",
+    };
+  }
+
+  let providerMessageId: string | null = null;
+  try {
+    if (metadata.kind === "document") {
+      const sent = await sendZapiDocument(
+        conversation.phone_e164,
+        signedFile.signedUrl,
+        metadata.fileName,
+      );
+      providerMessageId = sent.providerMessageId;
+    } else if (metadata.kind === "video") {
+      const sent = await sendZapiVideo(conversation.phone_e164, signedFile.signedUrl, "");
+      providerMessageId = sent.providerMessageId;
+    } else if (metadata.kind === "audio") {
+      const sent = await sendZapiAudio(conversation.phone_e164, signedFile.signedUrl);
+      providerMessageId = sent.providerMessageId;
+    } else {
+      const sent = await sendZapiImage(conversation.phone_e164, signedFile.signedUrl, "");
+      providerMessageId = sent.providerMessageId;
+    }
+  } catch (error) {
+    console.error(
+      "[inbox] Z-API attachment send:",
+      error instanceof Error ? error.message : String(error),
+    );
+    await bucket.remove([expectedPath]);
+    return { ok: false as const, error: attachmentProviderError(error) };
+  }
+
+  const body = `[${metadata.kindLabel.toUpperCase()} enviado] ${metadata.fileName}`;
+  const { error: insertError } = await crm.from("messages").insert({
+    id: input.messageId,
     conversation_id: conversationId,
     direction: "out",
     body,
     message_status: "sent",
-    media_kind:
-      kindLabel === "foto"
-        ? "image"
-        : kindLabel === "vídeo"
-          ? "video"
-          : kindLabel === "áudio"
-            ? "audio"
-            : "document",
-    media_url: storedMedia ? null : dataUrl,
-    media_mime_type: file.type || null,
-    media_file_name: file.name || null,
-    ...(shouldStorePrivately
-      ? storedMedia
-        ? {
-            media_storage_path: storedMedia.path,
-            media_size_bytes: storedMedia.sizeBytes,
-            media_storage_status: "stored" as const,
-          }
-        : { media_storage_status: "failed" as const }
-      : {}),
+    media_kind: metadata.kind,
+    media_url: null,
+    media_mime_type: metadata.mimeType,
+    media_file_name: metadata.fileName,
+    media_storage_path: expectedPath,
+    media_size_bytes: storedFile.size ?? metadata.sizeBytes,
+    media_storage_status: "stored",
     ...(providerMessageId ? { provider_message_id: providerMessageId } : {}),
   });
-  if (error) return { ok: false as const, error: error.message };
+  if (insertError) {
+    console.error("[inbox] persist sent attachment:", insertError.message);
+    return {
+      ok: false as const,
+      error: "O arquivo foi enviado, mas a conversa não foi atualizada. Recarregue a página.",
+    };
+  }
 
   await crm
     .from("conversations")
     .update({ updated_at: new Date().toISOString() })
     .eq("id", conversationId);
 
-  if (conv?.lead_id) {
+  if (conversation.lead_id) {
     await crm.from("activity_logs").insert({
       entity_type: "lead",
-      entity_id: conv.lead_id,
+      entity_id: conversation.lead_id,
       action: "outbound_whatsapp_attachment",
       actor_id: user.id,
-      payload: { file_name: file.name, mime_type: file.type, file_size: file.size, mode },
+      payload: {
+        file_name: metadata.fileName,
+        mime_type: metadata.mimeType,
+        file_size: metadata.sizeBytes,
+        mode: metadata.mode,
+      },
     });
   }
 
   revalidatePath("/inbox");
-  if (conv?.lead_id) revalidatePath(`/leads/${conv.lead_id}`);
+  if (conversation.lead_id) revalidatePath(`/leads/${conversation.lead_id}`);
   return { ok: true as const };
 }

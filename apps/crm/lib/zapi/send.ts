@@ -313,7 +313,12 @@ export async function sendZapiContact(
 
 type ZapiSendFileKind = "image" | "video" | "audio" | "document";
 
-async function sendZapiFileByBase64(input: {
+function documentExtension(fileName: string | undefined) {
+  const extension = /\.([a-z0-9]{1,10})$/i.exec(fileName?.trim() ?? "")?.[1];
+  return extension?.toLowerCase() || "bin";
+}
+
+async function sendZapiFile(input: {
   toPhoneDigits: string;
   kind: ZapiSendFileKind;
   dataUrl: string;
@@ -330,7 +335,7 @@ async function sendZapiFileByBase64(input: {
 
   const endpoint =
     input.kind === "document"
-      ? "/send-document/base64"
+      ? `/send-document/${encodeURIComponent(documentExtension(input.fileName))}`
       : input.kind === "video"
         ? "/send-video"
         : input.kind === "audio"
@@ -384,7 +389,7 @@ export async function sendZapiImage(
   imageDataUrl: string,
   caption?: string,
 ) {
-  return sendZapiFileByBase64({
+  return sendZapiFile({
     toPhoneDigits,
     kind: "image",
     dataUrl: imageDataUrl,
@@ -397,7 +402,7 @@ export async function sendZapiVideo(
   videoDataUrl: string,
   caption?: string,
 ) {
-  return sendZapiFileByBase64({
+  return sendZapiFile({
     toPhoneDigits,
     kind: "video",
     dataUrl: videoDataUrl,
@@ -410,7 +415,7 @@ export async function sendZapiDocument(
   documentDataUrl: string,
   fileName?: string,
 ) {
-  return sendZapiFileByBase64({
+  return sendZapiFile({
     toPhoneDigits,
     kind: "document",
     dataUrl: documentDataUrl,
@@ -422,7 +427,7 @@ export async function sendZapiAudio(
   toPhoneDigits: string,
   audioDataUrl: string,
 ) {
-  return sendZapiFileByBase64({
+  return sendZapiFile({
     toPhoneDigits,
     kind: "audio",
     dataUrl: audioDataUrl,
