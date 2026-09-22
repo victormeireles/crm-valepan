@@ -25,6 +25,10 @@ describe("weeklyBreadCount", () => {
     ).toBe(466);
   });
 
+  it("arredonda média de faixa para inteiro", () => {
+    expect(weeklyBreadCount([{ amount: 22.5, unit: "paes", period: "semana" }])).toBe(23);
+  });
+
   it("soma várias linhas na mesma semana", () => {
     expect(
       weeklyBreadCount([

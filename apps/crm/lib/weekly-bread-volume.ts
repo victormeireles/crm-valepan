@@ -14,5 +14,5 @@ export function weeklyBreadCount(lines: VolumeLine[]): number | null {
       return breads;
     });
   if (weekly.length === 0) return null;
-  return weekly.reduce((sum, value) => sum + value, 0);
+  return Math.round(weekly.reduce((sum, value) => sum + value, 0));
 }
