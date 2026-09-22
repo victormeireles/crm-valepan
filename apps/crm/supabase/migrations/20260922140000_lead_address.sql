@@ -13,6 +13,11 @@ where zip_code is not null
   and regexp_replace(zip_code, '\D', '', 'g') ~ '^[0-9]{8}$'
   and zip_code is distinct from regexp_replace(zip_code, '\D', '', 'g');
 
+update crm.leads
+set zip_code = null
+where zip_code is not null
+  and zip_code !~ '^[0-9]{8}$';
+
 alter table crm.leads
   drop constraint if exists leads_zip_code_digits;
 

@@ -58,8 +58,9 @@ export function PipelineAdvanceSuggestionsList({
     }
     const suggestionLabel = result.suggested === 1 ? "sugestão" : "sugestões";
     const autoLabel = result.autoApplied === 1 ? "regra automática" : "regras automáticas";
+    const qualifiedLabel = result.qualified === 1 ? "ficha" : "fichas";
     setJobNote(
-      `Analisadas ${result.scanned} conversas · ${result.suggested} ${suggestionLabel} · ${result.autoApplied} ${autoLabel} · ${result.skipped} sem avanço.`,
+      `Analisadas ${result.scanned} conversas · ${result.suggested} ${suggestionLabel} · ${result.autoApplied} ${autoLabel} · ${result.skipped} sem avanço · ${result.qualified} ${qualifiedLabel}.`,
     );
     router.refresh();
   }

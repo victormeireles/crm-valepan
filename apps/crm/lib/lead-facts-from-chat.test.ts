@@ -56,6 +56,16 @@ describe("leadFactPatch", () => {
     });
   });
 
+  it("grava só o CEP quando não há endereço ViaCEP", () => {
+    expect(
+      leadFactPatch({
+        current: emptyCurrent,
+        facts: { ...emptyFacts, cep: "01310-100" },
+        phoneE164: null,
+      }),
+    ).toEqual({ zipCode: "01310100" });
+  });
+
   it("grava cidade sem CEP e UF explícita de 2 letras", () => {
     expect(
       leadFactPatch({

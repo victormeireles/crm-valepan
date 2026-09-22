@@ -204,7 +204,15 @@ export async function resolvePipelineAdvanceSuggestion(input: {
 }
 
 export async function runPipelineAdvanceJobNow(): Promise<
-  | { ok: true; scanned: number; suggested: number; autoApplied: number; skipped: number; errors: number }
+  | {
+      ok: true;
+      scanned: number;
+      suggested: number;
+      autoApplied: number;
+      skipped: number;
+      errors: number;
+      qualified: number;
+    }
   | { ok: false; error: string }
 > {
   const supabase = await createServerSupabaseClient();

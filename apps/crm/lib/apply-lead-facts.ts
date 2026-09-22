@@ -85,6 +85,7 @@ export async function applyLeadFacts(
     city: string;
     state: string;
   } | null = null;
+  let factsForPatch = input.facts;
 
   const currentZip = typeof lead.zip_code === "string" ? lead.zip_code : null;
   const cepDigits = String(input.facts.cep ?? "").replace(/\D/g, "");
@@ -97,7 +98,11 @@ export async function applyLeadFacts(
         city: lookedUp.address.city,
         state: lookedUp.address.state,
       };
+    } else if (lookedUp.reason === "not_found") {
+      // CEP inválido na base: não grava; deixa a cidade do chat seguir sem CEP.
+      factsForPatch = { ...input.facts, cep: null };
     }
+    // unavailable: grava só o CEP (leadFactPatch sem cepAddress).
   }
 
   const patch = leadFactPatch({
@@ -114,7 +119,7 @@ export async function applyLeadFacts(
       clientCategory: typeof lead.client_category === "string" ? lead.client_category : null,
       cnpj: companyDocument,
     },
-    facts: input.facts,
+    facts: factsForPatch,
     phoneE164,
     cepAddress,
   });

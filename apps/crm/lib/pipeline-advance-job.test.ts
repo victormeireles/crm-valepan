@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   afterFailedLeadFactsWrite,
   resetIdsAfterAiBatchFailure,
+  selectFactsOnlyForModel,
 } from "./pipeline-advance-job";
 
 describe("afterFailedLeadFactsWrite", () => {
@@ -28,5 +29,17 @@ describe("resetIdsAfterAiBatchFailure", () => {
         markedAnalyzedThisRun: new Set(["b", "c", "z"]),
       }),
     ).toEqual(["b", "c"]);
+  });
+});
+
+describe("selectFactsOnlyForModel", () => {
+  it("limita facts-only ao limit e ignora ids já na fila de stage", () => {
+    expect(
+      selectFactsOnlyForModel({
+        factsOnlyConversationIds: ["a", "b", "c", "d", "e"],
+        alreadyQueued: new Set(["b"]),
+        limit: 2,
+      }),
+    ).toEqual(["a", "c"]);
   });
 });

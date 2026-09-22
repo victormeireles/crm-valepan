@@ -16,6 +16,7 @@ describe("ufFromPhone", () => {
   it("não inventa UF", () => {
     expect(ufFromPhone("+5510999998888")).toBeNull();
     expect(ufFromPhone(null)).toBeNull();
+    expect(ufFromPhone(undefined)).toBeNull();
     expect(ufFromPhone("+14155552671")).toBeNull();
   });
 });

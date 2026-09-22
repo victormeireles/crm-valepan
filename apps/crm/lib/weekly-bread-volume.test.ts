@@ -25,7 +25,7 @@ describe("weeklyBreadCount", () => {
     ).toBe(466);
   });
 
-  it("soma linhas e arredonda faixa já resolvida pelo chamador", () => {
+  it("soma várias linhas na mesma semana", () => {
     expect(
       weeklyBreadCount([
         { amount: 75, unit: "paes", period: "semana" },

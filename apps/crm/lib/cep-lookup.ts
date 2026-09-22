@@ -22,6 +22,12 @@ export type CepLookupAddress = {
   state: string;
 };
 
+export type CepLookupFailureReason = "invalid" | "not_found" | "unavailable";
+
+export type CepLookupResult =
+  | { ok: true; address: CepLookupAddress }
+  | { ok: false; reason: CepLookupFailureReason; error: string };
+
 type ViaCepPayload = {
   logradouro?: string;
   bairro?: string;
@@ -77,11 +83,13 @@ export function parseLeadAddress(input: {
 export async function lookupCep(
   cep: string,
   fetchImpl: typeof fetch = fetch,
-): Promise<{ ok: true; address: CepLookupAddress } | { ok: false; error: string }> {
+): Promise<CepLookupResult> {
   const parsed = parseLeadAddress({ zipCode: cep });
-  if (!parsed.ok) return parsed;
+  if (!parsed.ok) return { ok: false, reason: "invalid", error: parsed.error };
   const zipCode = parsed.address.zipCode;
-  if (!zipCode) return { ok: false, error: "Informe um CEP válido com 8 números." };
+  if (!zipCode) {
+    return { ok: false, reason: "invalid", error: "Informe um CEP válido com 8 números." };
+  }
 
   let response: Response;
   try {
@@ -90,19 +98,37 @@ export async function lookupCep(
       signal: AbortSignal.timeout(8000),
     });
   } catch {
-    return { ok: false, error: "Não foi possível consultar o CEP. Tente novamente." };
+    return {
+      ok: false,
+      reason: "unavailable",
+      error: "Não foi possível consultar o CEP. Tente novamente.",
+    };
   }
 
-  if (response.status === 400) return { ok: false, error: "CEP não encontrado." };
-  if (!response.ok) return { ok: false, error: "Não foi possível consultar o CEP. Tente novamente." };
+  if (response.status === 400) {
+    return { ok: false, reason: "not_found", error: "CEP não encontrado." };
+  }
+  if (!response.ok) {
+    return {
+      ok: false,
+      reason: "unavailable",
+      error: "Não foi possível consultar o CEP. Tente novamente.",
+    };
+  }
 
   let payload: ViaCepPayload;
   try {
     payload = (await response.json()) as ViaCepPayload;
   } catch {
-    return { ok: false, error: "Não foi possível consultar o CEP. Tente novamente." };
+    return {
+      ok: false,
+      reason: "unavailable",
+      error: "Não foi possível consultar o CEP. Tente novamente.",
+    };
   }
-  if (payload.erro) return { ok: false, error: "CEP não encontrado." };
+  if (payload.erro) {
+    return { ok: false, reason: "not_found", error: "CEP não encontrado." };
+  }
 
   const address = parseLeadAddress({
     zipCode,
@@ -112,7 +138,11 @@ export async function lookupCep(
     state: payload.uf,
   });
   if (!address.ok || !address.address.city || !address.address.state) {
-    return { ok: false, error: "A consulta não retornou a cidade deste CEP." };
+    return {
+      ok: false,
+      reason: "unavailable",
+      error: "A consulta não retornou a cidade deste CEP.",
+    };
   }
 
   return {

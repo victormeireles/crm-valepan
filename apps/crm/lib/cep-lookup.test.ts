@@ -74,13 +74,26 @@ describe("lookupCep", () => {
     });
     await expect(lookupCep("12345678", fetchImpl)).resolves.toEqual({
       ok: false,
+      reason: "not_found",
       error: "CEP não encontrado.",
+    });
+  });
+
+  it("marca falha de rede como unavailable", async () => {
+    const fetchImpl = vi.fn().mockRejectedValue(new Error("network"));
+    await expect(lookupCep("01310100", fetchImpl)).resolves.toEqual({
+      ok: false,
+      reason: "unavailable",
+      error: "Não foi possível consultar o CEP. Tente novamente.",
     });
   });
 
   it("não chama a API quando o CEP é inválido", async () => {
     const fetchImpl = vi.fn();
-    await expect(lookupCep("123", fetchImpl)).resolves.toMatchObject({ ok: false });
+    await expect(lookupCep("123", fetchImpl)).resolves.toMatchObject({
+      ok: false,
+      reason: "invalid",
+    });
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 });

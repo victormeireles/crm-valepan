@@ -53,6 +53,21 @@ export function resetIdsAfterAiBatchFailure(input: {
   );
 }
 
+/** Facts-only fora do selectAdvanceCandidates, limitados ao `limit` do job. */
+export function selectFactsOnlyForModel(input: {
+  factsOnlyConversationIds: readonly string[];
+  alreadyQueued: ReadonlySet<string>;
+  limit: number;
+}): string[] {
+  const selected: string[] = [];
+  for (const id of input.factsOnlyConversationIds) {
+    if (selected.length >= input.limit) break;
+    if (input.alreadyQueued.has(id)) continue;
+    selected.push(id);
+  }
+  return selected;
+}
+
 type LeadJoin = {
   excluded_from_pipeline_at: string | null;
   weekly_bread_consumption: number | null;
@@ -298,7 +313,6 @@ export async function runPipelineAdvanceJob(
   const factsOnlyIds = new Set<string>();
   const markedAnalyzedThisRun = new Set<string>();
   const markAnalyzedIds: string[] = [];
-  const resetAnalyzedIds: string[] = [];
 
   for (const conversation of pool) {
     const opportunity = opportunityByLead.get(conversation.leadId);
@@ -377,9 +391,16 @@ export async function runPipelineAdvanceJob(
     }];
   });
 
+  const stageConversations = conversationsForAi.filter(
+    (conversation) => !factsOnlyIds.has(conversation.id),
+  );
+  const factsOnlyConversations = conversationsForAi.filter((conversation) =>
+    factsOnlyIds.has(conversation.id),
+  );
+
   const candidates = selectAdvanceCandidates({
     opportunities,
-    conversations: conversationsForAi,
+    conversations: stageConversations,
     fingerprints,
     existing: (existingRows ?? []).map((row) => ({
       conversationId: row.conversation_id,
@@ -417,14 +438,22 @@ export async function runPipelineAdvanceJob(
       classification: candidate.classification,
       substage: candidate.substage,
       fingerprint: candidate.fingerprint,
-      factsOnly: factsOnlyIds.has(candidate.conversationId),
+      factsOnly: false,
       transcript,
     });
     readyIds.add(candidate.conversationId);
   }
 
-  for (const conversation of conversationsForAi) {
-    if (!factsOnlyIds.has(conversation.id) || readyIds.has(conversation.id)) continue;
+  const factsOnlySelected = selectFactsOnlyForModel({
+    factsOnlyConversationIds: factsOnlyConversations.map((row) => row.id),
+    alreadyQueued: readyIds,
+    limit,
+  });
+  const factsOnlyById = new Map(factsOnlyConversations.map((row) => [row.id, row]));
+
+  for (const conversationId of factsOnlySelected) {
+    const conversation = factsOnlyById.get(conversationId);
+    if (!conversation) continue;
     const opportunity = opportunityByLead.get(conversation.leadId);
     if (!opportunity) {
       markAnalyzedIds.push(conversation.id);
@@ -452,6 +481,8 @@ export async function runPipelineAdvanceJob(
   }
 
   for (const group of chunkItems(ready, PIPELINE_ADVANCE_MODEL_CHUNK)) {
+    const groupMarkIds: string[] = [];
+    const groupResetIds: string[] = [];
     try {
       const outputs = await classifyConversationsAdvanceBatch({
         catalog,
@@ -482,12 +513,12 @@ export async function runPipelineAdvanceJob(
             markedAnalyzedThisRun: markedAnalyzedThisRun.has(item.conversationId),
           });
           if (decision.resetAnalyzed) {
-            resetAnalyzedIds.push(item.conversationId);
+            groupResetIds.push(item.conversationId);
           }
         }
 
         if (!factsWriteFailed) {
-          markAnalyzedIds.push(item.conversationId);
+          groupMarkIds.push(item.conversationId);
         }
 
         if (item.factsOnly) {
@@ -544,6 +575,8 @@ export async function runPipelineAdvanceJob(
         }
         suggested += 1;
       }
+      await markConversationsAnalyzed(crm, groupMarkIds);
+      await resetConversationsUnanalyzed(crm, groupResetIds);
     } catch (error) {
       console.error(
         "[pipeline-advance] batch failed",
@@ -551,12 +584,11 @@ export async function runPipelineAdvanceJob(
         error,
       );
       errors += group.length;
-      resetAnalyzedIds.push(
-        ...resetIdsAfterAiBatchFailure({
-          conversationIds: group.map((item) => item.conversationId),
-          markedAnalyzedThisRun,
-        }),
-      );
+      const resetIds = resetIdsAfterAiBatchFailure({
+        conversationIds: group.map((item) => item.conversationId),
+        markedAnalyzedThisRun,
+      });
+      await resetConversationsUnanalyzed(crm, resetIds);
     }
   }
 
@@ -582,7 +614,6 @@ export async function runPipelineAdvanceJob(
     }
   }
   await markConversationsAnalyzed(crm, markAnalyzedIds);
-  await resetConversationsUnanalyzed(crm, resetAnalyzedIds);
 
   console.log(
     `[pipeline-advance] done scanned=${candidates.length} suggested=${suggested} auto=${autoApplied} skipped=${skipped} qualified=${qualified} errors=${errors}`,

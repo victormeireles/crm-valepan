@@ -212,7 +212,7 @@ describe("applyLeadFacts", () => {
     expect(crm._state.leads[0]?.weekly_bread_consumption).toBe(100);
   });
 
-  it("grava o CEP quando a ViaCEP falha e segue com o restante", async () => {
+  it("grava o CEP quando a ViaCEP está indisponível e segue com o restante", async () => {
     const fetchImpl = vi.fn().mockRejectedValue(new Error("network"));
     vi.stubGlobal("fetch", fetchImpl);
 
@@ -238,5 +238,74 @@ describe("applyLeadFacts", () => {
       company_id: "company-1",
     });
     expect(crm._state.companies[0]?.document).toBe("11222333000181");
+  });
+
+  it("não grava CEP inexistente e deixa a cidade do chat", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      jsonResponse({ erro: true }),
+    );
+    vi.stubGlobal("fetch", fetchImpl);
+
+    const crm = createFakeCrm({ leads: [emptyLead()], companies: [] });
+    const result = await applyLeadFacts(crm as never, {
+      leadId: "lead-1",
+      phoneE164: "+5511988887777",
+      facts: {
+        ...emptyFacts,
+        cep: "12345678",
+        city: "Teresópolis",
+        state: "RJ",
+      },
+    });
+
+    expect(result).toEqual({ applied: true });
+    expect(crm._state.leads[0]).toMatchObject({
+      zip_code: null,
+      city: "Teresópolis",
+      state: "RJ",
+    });
+  });
+
+  it("preenche document vazio da empresa existente e não sobrescreve o preenchido", async () => {
+    const crmEmptyDoc = createFakeCrm({
+      leads: [emptyLead({ company_id: "company-1" })],
+      companies: [{
+        id: "company-1",
+        name: "Já Existe",
+        document: null,
+        city: null,
+        state: null,
+      }],
+    });
+    await applyLeadFacts(crmEmptyDoc as never, {
+      leadId: "lead-1",
+      phoneE164: "+5511988887777",
+      facts: {
+        ...emptyFacts,
+        cnpj: "11.222.333/0001-81",
+      },
+    });
+    expect(crmEmptyDoc._state.companies[0]?.document).toBe("11222333000181");
+    expect(crmEmptyDoc._state.leads[0]?.company_id).toBe("company-1");
+
+    const crmFilledDoc = createFakeCrm({
+      leads: [emptyLead({ company_id: "company-1" })],
+      companies: [{
+        id: "company-1",
+        name: "Já Existe",
+        document: "00000000000191",
+        city: null,
+        state: null,
+      }],
+    });
+    await applyLeadFacts(crmFilledDoc as never, {
+      leadId: "lead-1",
+      phoneE164: "+5511988887777",
+      facts: {
+        ...emptyFacts,
+        cnpj: "11.222.333/0001-81",
+      },
+    });
+    expect(crmFilledDoc._state.companies[0]?.document).toBe("00000000000191");
   });
 });
