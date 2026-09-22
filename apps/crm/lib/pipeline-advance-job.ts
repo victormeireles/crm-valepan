@@ -30,6 +30,16 @@ export type PipelineAdvanceJobResult = {
   qualified: number;
 };
 
+/** Após falha ao gravar a ficha: nunca marcar analisada; reabrir se esta rodada já tinha marcado. */
+export function afterFailedLeadFactsWrite(input: {
+  markedAnalyzedThisRun: boolean;
+}): { markAnalyzed: false; resetAnalyzed: boolean } {
+  return {
+    markAnalyzed: false,
+    resetAnalyzed: input.markedAnalyzedThisRun,
+  };
+}
+
 type LeadJoin = {
   excluded_from_pipeline_at: string | null;
   weekly_bread_consumption: number | null;
@@ -102,6 +112,19 @@ async function markConversationsAnalyzed(
   const { error } = await crm
     .from("conversations")
     .update({ pipeline_ai_analyzed: true, updated_at: new Date().toISOString() })
+    .in("id", unique);
+  if (error) throw new Error(error.message);
+}
+
+async function resetConversationsUnanalyzed(
+  crm: ReturnType<typeof crmTables>,
+  ids: string[],
+): Promise<void> {
+  const unique = [...new Set(ids.filter(Boolean))];
+  if (unique.length === 0) return;
+  const { error } = await crm
+    .from("conversations")
+    .update({ pipeline_ai_analyzed: false, updated_at: new Date().toISOString() })
     .in("id", unique);
   if (error) throw new Error(error.message);
 }
@@ -260,7 +283,9 @@ export async function runPipelineAdvanceJob(
   let qualified = 0;
   const skipAi = new Set<string>();
   const factsOnlyIds = new Set<string>();
+  const markedAnalyzedThisRun = new Set<string>();
   const markAnalyzedIds: string[] = [];
+  const resetAnalyzedIds: string[] = [];
 
   for (const conversation of pool) {
     const opportunity = opportunityByLead.get(conversation.leadId);
@@ -288,11 +313,12 @@ export async function runPipelineAdvanceJob(
           .from("conversations")
           .update({
             classification: rule.toClassification,
-            pipeline_ai_analyzed: !needsFacts,
+            pipeline_ai_analyzed: true,
             updated_at: nowIso,
           })
           .eq("id", conversation.id);
         if (error) throw new Error(error.message);
+        markedAnalyzedThisRun.add(conversation.id);
         autoApplied += 1;
       } else if (!needsFacts) {
         markAnalyzedIds.push(conversation.id);
@@ -427,6 +453,7 @@ export async function runPipelineAdvanceJob(
         const output = outputs.get(item.conversationId) ?? null;
         const facts = output?.facts ?? emptyChatFacts();
 
+        let factsWriteFailed = false;
         try {
           const { applied } = await applyLeadFacts(crm, {
             leadId: item.leadId,
@@ -437,9 +464,18 @@ export async function runPipelineAdvanceJob(
         } catch (error) {
           console.error("[pipeline-advance] apply facts failed", item.conversationId, error);
           errors += 1;
+          factsWriteFailed = true;
+          const decision = afterFailedLeadFactsWrite({
+            markedAnalyzedThisRun: markedAnalyzedThisRun.has(item.conversationId),
+          });
+          if (decision.resetAnalyzed) {
+            resetAnalyzedIds.push(item.conversationId);
+          }
         }
 
-        markAnalyzedIds.push(item.conversationId);
+        if (!factsWriteFailed) {
+          markAnalyzedIds.push(item.conversationId);
+        }
 
         if (item.factsOnly) {
           continue;
@@ -527,6 +563,7 @@ export async function runPipelineAdvanceJob(
     }
   }
   await markConversationsAnalyzed(crm, markAnalyzedIds);
+  await resetConversationsUnanalyzed(crm, resetAnalyzedIds);
 
   console.log(
     `[pipeline-advance] done scanned=${candidates.length} suggested=${suggested} auto=${autoApplied} skipped=${skipped} qualified=${qualified} errors=${errors}`,
