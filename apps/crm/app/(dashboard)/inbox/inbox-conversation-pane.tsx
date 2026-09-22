@@ -13,6 +13,7 @@ import { pushInboxClientUrl, readInboxLocation } from "./inbox-location";
 import { InboxLeadPanel, InboxLeadPanelDrawer } from "./inbox-lead-panel";
 import { MarkConversationRead } from "./mark-conversation-read";
 import { SendMessageForm } from "./send-message-form";
+import type { DistributorOption } from "@/lib/distributors";
 import type { PipelineSubstageDTO } from "@/lib/pipeline-substages";
 
 export const INBOX_SELECT_CONVERSATION_EVENT = "crm:inbox-select-conversation";
@@ -24,10 +25,12 @@ export function InboxConversationPane({
   initialView,
   stages,
   substages,
+  distributors,
 }: {
   initialView: InboxConversationView | null;
   stages: CatalogStage[];
   substages: PipelineSubstageDTO[];
+  distributors: DistributorOption[];
 }) {
   const [view, setView] = useState(initialView);
   const [panelLoading, setPanelLoading] = useState(false);
@@ -83,6 +86,13 @@ export function InboxConversationPane({
   }, [selectConversation]);
 
   const conversation = view?.conversation ?? null;
+  const [distributorId, setDistributorId] = useState(conversation?.distributorId ?? "");
+  const saveDistributor = useCallback((next: string | null) => {
+    setDistributorId(next ?? "");
+  }, []);
+  useEffect(() => {
+    setDistributorId(conversation?.distributorId ?? "");
+  }, [conversation?.id, conversation?.distributorId]);
   const loadLeadPanel = async (openOnMobile = false) => {
     if (!conversation?.leadId) return;
     if (view?.leadPanel) {
@@ -169,6 +179,10 @@ export function InboxConversationPane({
                       {...view.leadPanel}
                       stages={stages}
                       substages={substages}
+                      distributors={distributors}
+                      initialDistributorId={distributorId || null}
+                      distributorName={conversation.distributorName}
+                      onDistributorChange={saveDistributor}
                       hideTrigger
                       open={mobilePanelOpen}
                       onOpenChange={setMobilePanelOpen}
@@ -178,10 +192,15 @@ export function InboxConversationPane({
                   {conversation.leadId ? (
                     <ConversationPipelineSelect
                       conversationId={conversation.id}
+                      leadId={conversation.leadId}
                       stages={stages}
                       substages={substages}
+                      distributors={distributors}
                       stageId={conversation.stageId}
                       substage={conversation.substage}
+                      distributorId={distributorId || null}
+                      distributorName={conversation.distributorName}
+                      onDistributorSaved={saveDistributor}
                       onSaved={(next) => {
                         setView((current) =>
                           current
@@ -214,6 +233,10 @@ export function InboxConversationPane({
             {...view.leadPanel}
             stages={stages}
             substages={substages}
+            distributors={distributors}
+            initialDistributorId={distributorId || null}
+            distributorName={view.conversation.distributorName}
+            onDistributorChange={saveDistributor}
             initialStageId={view.conversation.stageId ?? view.leadPanel.initialStageId}
             initialSubstage={view.conversation.substage ?? view.leadPanel.initialSubstage}
           />

@@ -3,6 +3,7 @@ import { PaginationNav } from "@/components/pagination-nav";
 import { displayCompanyName, displayPersonName } from "@/lib/lead-identity";
 import { nestOne } from "@/lib/supabase/nested";
 import { isClientCategoryValue, type ClientCategoryValue } from "@/lib/client-categories";
+import { isPlaceholderDistributorName } from "@/lib/distributors";
 import { SEND_VIA_OPTIONS } from "@/lib/send-via-options";
 import { leadListRowMatchesQuery } from "@/lib/crm-text-search";
 import { fetchLeadListRows, type LeadListRow } from "@/lib/leads/list-query";
@@ -85,11 +86,20 @@ export default async function LeadsPage({
   const supabase = await createServerSupabaseClient();
   const crm = crmTables(supabase);
 
+  const [leadList, distributorCatalogResult] = await Promise.all([
+    fetchLeadListRows(crm, clientCategory, page, PAGE_SIZE, campaign),
+    crm.from("distributors").select("name").eq("active", true).not("name", "ilike", "PENDENTE CARTEIRA · %").order("name", { ascending: true }),
+  ]);
   const {
     rows: leadRows,
     error: leadsError,
     totalCount: databaseTotalCount,
-  } = await fetchLeadListRows(crm, clientCategory, page, PAGE_SIZE, campaign);
+  } = leadList;
+  const registeredDistributorNames = distributorCatalogResult.error
+    ? [...SEND_VIA_OPTIONS]
+    : (distributorCatalogResult.data ?? [])
+        .map((row) => row.name.trim().toUpperCase())
+        .filter((name) => name && !isPlaceholderDistributorName(name));
 
   const matchesQuery = (l: LeadListRow) =>
     query.trim().length === 0 || leadListRowMatchesQuery(leadRowSearchFields(l), query);
@@ -115,7 +125,7 @@ export default async function LeadsPage({
 
           for (const lead of filteredDistributorSourceRows) {
             const distName = (nestOne(lead.distributors)?.name ?? "").trim().toUpperCase();
-            if (distName && SEND_VIA_OPTIONS.includes(distName as (typeof SEND_VIA_OPTIONS)[number])) {
+            if (distName && registeredDistributorNames.includes(distName)) {
               if (!byDistributor.has(distName)) {
                 byDistributor.set(distName, lead);
               }
@@ -130,7 +140,7 @@ export default async function LeadsPage({
             distributorLocked: false,
           }));
 
-          const fixedRows = SEND_VIA_OPTIONS.map((option) => {
+          const fixedRows = registeredDistributorNames.map((option) => {
             const mapped = byDistributor.get(option) ?? null;
             return {
               distributorName: option,
@@ -251,6 +261,7 @@ export default async function LeadsPage({
                         leadId={row.lead?.id ?? null}
                         clientCategory="distribuidor"
                         distributorName={row.distributorName}
+                        distributorOptions={registeredDistributorNames}
                         distributorLocked={row.distributorLocked}
                         leadStatus={(row.lead?.status ?? "").trim().toLowerCase()}
                         networkType={(row.lead?.network_type ?? "").trim().toLowerCase()}
@@ -273,6 +284,7 @@ export default async function LeadsPage({
                           leadId={l.id}
                           clientCategory={clientCategory}
                           distributorName={(nestOne(l.distributors)?.name ?? "").trim().toUpperCase()}
+                          distributorOptions={registeredDistributorNames}
                           distributorLocked={false}
                           leadStatus={(l.status ?? "").trim().toLowerCase()}
                           networkType={(l.network_type ?? "").trim().toLowerCase()}

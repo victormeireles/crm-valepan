@@ -4,7 +4,6 @@ import { normalizeBrazilPhoneToE164 } from "@crm/shared/phone";
 import { applyPipelineStageEntryAutomations } from "@/lib/pipeline-stage-automations";
 import { revalidatePath } from "next/cache";
 import { isNetworkTypeOption } from "@/lib/network-types";
-import { isSendViaOption } from "@/lib/send-via-options";
 import { isMissingNetworkTypeColumnError } from "@/lib/leads/list-query";
 import { parseNullableNonNegativeInt } from "@/lib/parse-localized-integer";
 import { displayCompanyName, displayPersonName } from "@/lib/lead-identity";
@@ -1401,7 +1400,7 @@ export async function updateLeadCategoryContactInfo(input: {
 
 export async function updateLeadDistributor(input: {
   leadId: string;
-  distributorName: string | null;
+  distributorId: string | null;
 }) {
   const supabase = await createServerSupabaseClient();
   const {
@@ -1413,31 +1412,22 @@ export async function updateLeadDistributor(input: {
   const leadId = input.leadId.trim();
   if (!leadId) return { ok: false as const, error: "Lead inválido." };
 
-  const distributorName = input.distributorName?.trim().toUpperCase() || null;
-  if (distributorName && !isSendViaOption(distributorName)) {
-    return { ok: false as const, error: "Distribuidora inválida." };
-  }
-
+  const requestedId = input.distributorId?.trim() || null;
   let distributorId: string | null = null;
-  if (distributorName) {
-    const { data: dist } = await crm
+  if (requestedId) {
+    const { data: dist, error: distErr } = await crm
       .from("distributors")
-      .select("id")
-      .ilike("name", distributorName)
+      .select("id, active")
+      .eq("id", requestedId)
       .maybeSingle();
-    if (dist?.id) {
-      distributorId = dist.id;
-    } else {
-      const { data: inserted, error: insertErr } = await crm
-        .from("distributors")
-        .insert({ name: distributorName, active: true })
-        .select("id")
-        .single();
-      if (insertErr || !inserted) {
-        return { ok: false as const, error: insertErr?.message ?? "Erro ao salvar distribuidora." };
-      }
-      distributorId = inserted.id;
+    if (distErr) return { ok: false as const, error: distErr.message };
+    if (!dist?.id || !dist.active) {
+      return {
+        ok: false as const,
+        error: "Distribuidor inválido. Cadastre ou ative em Configurações → Distribuidores.",
+      };
     }
+    distributorId = dist.id;
   }
 
   const { data: updated, error } = await crm
@@ -1454,6 +1444,7 @@ export async function updateLeadDistributor(input: {
 
   revalidatePath("/leads");
   revalidatePath(`/leads/${leadId}`);
+  revalidatePath("/inbox");
   return { ok: true as const };
 }
 

@@ -3,6 +3,7 @@ import {
   loadRecentConversationMessages,
   type InboxMessageRow,
 } from "@/lib/inbox/load-messages";
+import { distributorOptionLabel, isPlaceholderDistributorName } from "@/lib/distributors";
 import { displayCompanyName, displayPersonName } from "@/lib/lead-identity";
 import { nestOne } from "@/lib/supabase/nested";
 import { createServerSupabaseClient, crmTables } from "@/lib/supabase/server";
@@ -99,7 +100,7 @@ export default async function InboxPage({
   const supabase = await timed("supabase_client", createServerSupabaseClient());
   const crm = crmTables(supabase);
   const conversationSelect =
-    "id, phone_e164, conversation_kind, group_display_name, classification, last_message_at, created_at, updated_at, last_read_at, leads(id, client_category, excluded_from_pipeline_at, excluded_reason, contacts(full_name, avatar_url), companies(name, city, state), distributors(name), opportunities(id, stage_id, lost_reason, updated_at))";
+    "id, phone_e164, conversation_kind, group_display_name, classification, last_message_at, created_at, updated_at, last_read_at, leads(id, client_category, excluded_from_pipeline_at, excluded_reason, contacts(full_name, avatar_url), companies(name, city, state), distributors(id, name), opportunities(id, stage_id, lost_reason, updated_at))";
   // A conversa solicitada já vem na URL; carregue suas mensagens enquanto a
   // barra lateral e a etapa inicial são consultadas.
   const requestedMessagesPromise = cid ? timed("messages_initial", loadRecentConversationMessages(crm, cid)) : null;
@@ -121,11 +122,18 @@ export default async function InboxPage({
     .from("lost_reasons")
     .select("id, name, stage_key, sort_order, active")
     .order("sort_order", { ascending: true }));
-  const [{ data: stages }, snapshotResult, requestedConversationResult, substagesResult] = await Promise.all([
+  const distributorsPromise = timed("distributors", crm
+    .from("distributors")
+    .select("id, name, distributor_regions(region_name, state)")
+    .eq("active", true)
+    .not("name", "ilike", "PENDENTE CARTEIRA · %")
+    .order("name", { ascending: true }));
+  const [{ data: stages }, snapshotResult, requestedConversationResult, substagesResult, distributorsResult] = await Promise.all([
     stagesPromise,
     snapshotPromise,
     requestedConversationPromise,
     substagesPromise,
+    distributorsPromise,
   ]);
   const snapshotRows = (snapshotResult.data ?? []) as InboxSidebarSnapshotRow[];
   const snapshotMeta = snapshotRows[0];
@@ -331,8 +339,8 @@ export default async function InboxPage({
 
   const selectedDistributor = nestOne(
     (selectedLead?.distributors ?? null) as
-      | { name: string | null }
-      | { name: string | null }[]
+      | { id: string; name: string | null }
+      | { id: string; name: string | null }[]
       | null,
   );
 
@@ -533,6 +541,8 @@ export default async function InboxPage({
           leadExcluded: selectedLeadExcluded,
           stageId: selectedOpportunity?.stage_id ?? null,
           substage: selectedOpportunity?.lost_reason ?? null,
+          distributorId: selectedDistributor?.id ?? null,
+          distributorName: selectedDistributor?.name ?? null,
         },
         messages,
         hasMoreOlder,
@@ -582,6 +592,23 @@ export default async function InboxPage({
           initialView={initialConversationView}
           stages={catalogStages}
           substages={catalogSubstages}
+          distributors={(distributorsResult.data ?? [])
+            .filter((row) => !isPlaceholderDistributorName(row.name))
+            .map((row) => {
+              const regions = row.distributor_regions as
+                | { region_name: string; state: string | null }
+                | { region_name: string; state: string | null }[]
+                | null;
+              const region = Array.isArray(regions) ? regions[0] : regions;
+              return {
+                id: row.id,
+                name: distributorOptionLabel({
+                  name: row.name,
+                  city: region?.region_name,
+                  state: region?.state,
+                }),
+              };
+            })}
         />
       </div>
     </div>

@@ -1,3 +1,5 @@
+import { distributorOptionLabel } from "@/lib/distributors";
+import { isForwardedToDistributorSubstage, substageLabelOnCard } from "@/lib/pipeline-substages";
 import { LeadIdentity } from "@/components/lead-identity";
 import { displayCompanyName, displayPersonName } from "@/lib/lead-identity";
 import { nestOne } from "@/lib/supabase/nested";
@@ -50,6 +52,7 @@ export default async function LeadDetailPage({
     { data: teamProfiles },
     { data: registrations },
     { data: lostReasonRows },
+    { data: distributorCatalog },
   ] = await Promise.all([
     crm
       .from("leads")
@@ -80,6 +83,7 @@ export default async function LeadDetailPage({
     crm.from("lead_registrations").select("id, source, cpf_cnpj")
       .eq("lead_id", id).not("cpf_cnpj", "is", null).order("created_at", { ascending: false }).limit(5),
     crm.from("lost_reasons").select("id, name, stage_key, sort_order, active").order("sort_order", { ascending: true }),
+    crm.from("distributors").select("id, name, distributor_regions(region_name, state)").eq("active", true).not("name", "ilike", "PENDENTE CARTEIRA · %").order("name", { ascending: true }),
   ]);
 
   if (!lead) notFound();
@@ -138,9 +142,14 @@ export default async function LeadDetailPage({
                 opportunity?.lost_reason ? (
                   <span
                     className="rounded-full border border-[var(--vp-ink-line)] bg-[var(--vp-paper)] px-2 py-0.5 text-[10px] font-bold tracking-[0.04em] text-[var(--vp-wine)]"
-                    title="Subclassificação"
+                    title={
+                      isForwardedToDistributorSubstage(opportunity.lost_reason) &&
+                      substageLabelOnCard(opportunity.lost_reason, distributor?.name) !== opportunity.lost_reason
+                        ? opportunity.lost_reason
+                        : "Subclassificação"
+                    }
                   >
-                    {opportunity.lost_reason}
+                    {substageLabelOnCard(opportunity.lost_reason, distributor?.name)}
                   </span>
                 ) : null
               }
@@ -163,7 +172,23 @@ export default async function LeadDetailPage({
           key={opportunity?.id ?? "no-opp"}
           leadId={id}
           clientCategory={lead.client_category ?? null}
+          distributorId={distributor?.id ?? null}
           distributorName={(distributor?.name ?? "").trim().toUpperCase()}
+          distributors={(distributorCatalog ?? []).map((row) => {
+            const regions = row.distributor_regions as
+              | { region_name: string; state: string | null }
+              | { region_name: string; state: string | null }[]
+              | null;
+            const region = Array.isArray(regions) ? regions[0] : regions;
+            return {
+              id: row.id,
+              name: distributorOptionLabel({
+                name: row.name,
+                city: region?.region_name,
+                state: region?.state,
+              }),
+            };
+          })}
           contact={
             contact
               ? {

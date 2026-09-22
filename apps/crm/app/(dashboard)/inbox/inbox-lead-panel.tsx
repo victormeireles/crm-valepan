@@ -3,6 +3,8 @@
 import { updateConversationLeadQualification, updateLeadOwner } from "@/app/actions/leads";
 import { updateConversationPipelineClassification } from "@/app/actions/inbox";
 import { CityAutocompleteInput } from "@/components/city-autocomplete-input";
+import { LeadDistributorSelect } from "@/components/lead-distributor-select";
+import { distributorOptionsForSelect, type DistributorOption } from "@/lib/distributors";
 import { CrmIcon, type CrmIconName } from "@/components/crm-icon";
 import { LeadFollowUp } from "@/components/lead-follow-up";
 import type { LeadFollowUpDTO } from "@/lib/follow-ups";
@@ -12,6 +14,7 @@ import {
   isLostPipelineStage,
 } from "@/lib/pipeline-canonical-stages";
 import {
+  isForwardedToDistributorSubstage,
   substagesForStageKey,
   type PipelineSubstageDTO,
 } from "@/lib/pipeline-substages";
@@ -39,6 +42,10 @@ export type InboxLeadPanelProps = {
   initialOwnerId: string | null;
   stages: StageOption[];
   substages: PipelineSubstageDTO[];
+  distributors?: DistributorOption[];
+  initialDistributorId?: string | null;
+  distributorName?: string | null;
+  onDistributorChange?: (distributorId: string | null) => void;
   teamOptions: TeamOption[];
   opportunityId: string | null;
   followUp: LeadFollowUpDTO | null;
@@ -236,6 +243,26 @@ export function InboxLeadPanel(props: InboxLeadPanelProps) {
                 ))}
               </select>
             </label>
+            {isForwardedToDistributorSubstage(substage) ? (
+              <label className="flex min-h-11 items-center justify-between gap-2.5 rounded-[10px] border border-[var(--vp-ink-line)] bg-[var(--vp-paper)] px-3">
+                <span className="text-[11px] font-bold uppercase tracking-[0.06em] text-[var(--vp-ink-soft)]">Distribuidor</span>
+                <LeadDistributorSelect
+                  leadId={props.leadId}
+                  options={distributorOptionsForSelect(
+                    props.distributors ?? [],
+                    props.initialDistributorId
+                      ? {
+                          id: props.initialDistributorId,
+                          name: props.distributorName?.trim() || "Distribuidor atual",
+                        }
+                      : null,
+                  )}
+                  distributorId={props.initialDistributorId ?? null}
+                  onSaved={props.onDistributorChange}
+                  className={controlClass}
+                />
+              </label>
+            ) : null}
             <label className="flex min-h-11 items-center justify-between gap-2.5 rounded-[10px] border border-[var(--vp-ink-line)] bg-[var(--vp-paper)] px-3">
               <span className="text-[11px] font-bold uppercase tracking-[0.06em] text-[var(--vp-ink-soft)]">Tipo de cliente</span>
               <select className={controlClass} value={qualification.category} onChange={(event) => void saveQualification({ category: event.target.value }, "category")}>

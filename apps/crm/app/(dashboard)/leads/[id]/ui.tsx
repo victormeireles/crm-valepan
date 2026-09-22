@@ -5,7 +5,9 @@ import {
   updateOpportunityDetails,
   updateOpportunityStage,
 } from "@/app/actions/opportunity";
-import { updateLeadClientCategory, updateLeadDistributor } from "@/app/actions/leads";
+import { updateLeadClientCategory } from "@/app/actions/leads";
+import { LeadDistributorSelect } from "@/components/lead-distributor-select";
+import { distributorOptionsForSelect, type DistributorOption } from "@/lib/distributors";
 import { LostReasonSelect } from "@/components/lost-reason-select";
 import { ExcludeLeadButton } from "../../inbox/exclude-lead-actions";
 import { isClientCategoryValue } from "@/lib/client-categories";
@@ -15,8 +17,7 @@ import {
   displayPipelineStageName,
   isLostPipelineStage,
 } from "@/lib/pipeline-canonical-stages";
-import { substagesForStageKey } from "@/lib/pipeline-substages";
-import { SEND_VIA_OPTIONS } from "@/lib/send-via-options";
+import { isForwardedToDistributorSubstage, substagesForStageKey } from "@/lib/pipeline-substages";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
@@ -32,7 +33,9 @@ type Opp = {
 export function LeadActions({
   leadId,
   clientCategory,
+  distributorId,
   distributorName,
+  distributors,
   contact,
   opportunity,
   stages,
@@ -40,7 +43,9 @@ export function LeadActions({
 }: {
   leadId: string;
   clientCategory: string | null;
+  distributorId: string | null;
   distributorName: string;
+  distributors: DistributorOption[];
   contact: { id: string; full_name: string | null } | null;
   opportunity: Opp;
   stages: Stage[];
@@ -55,11 +60,8 @@ export function LeadActions({
   const [loadingCreate, setLoadingCreate] = useState(false);
   const [loadingMeta, setLoadingMeta] = useState(false);
   const [loadingCategory, setLoadingCategory] = useState(false);
-  const [loadingDistributor, setLoadingDistributor] = useState(false);
   const [category, setCategory] = useState(clientCategory ?? "");
-  const [distributor, setDistributor] = useState(distributorName);
   const [err, setErr] = useState<string | null>(null);
-  const [distributorMsg, setDistributorMsg] = useState<string | null>(null);
 
   const selectedStage = stages.find((s) => s.id === stageId);
   const closingStage = selectedStage && isLostPipelineStage(selectedStage.name) ? selectedStage : undefined;
@@ -73,9 +75,21 @@ export function LeadActions({
     setCategory(clientCategory ?? "");
   }, [clientCategory]);
 
-  useEffect(() => {
-    setDistributor(distributorName);
-  }, [distributorName]);
+  const showDistributor = isForwardedToDistributorSubstage(lost) || Boolean(distributorId);
+  const distributorField = showDistributor ? (
+    <label className="flex flex-col gap-1">
+      Distribuidor
+      <LeadDistributorSelect
+        leadId={leadId}
+        options={distributorOptionsForSelect(
+          distributors,
+          distributorId ? { id: distributorId, name: distributorName || "Distribuidor atual" } : null,
+        )}
+        distributorId={distributorId}
+        className="rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1"
+      />
+    </label>
+  ) : null;
 
   async function createOpp() {
     setLoadingCreate(true);
@@ -199,43 +213,7 @@ export function LeadActions({
         >
           {loadingCategory ? "Salvando…" : "Salvar categoria"}
         </button>
-        <label className="flex flex-col gap-1">
-          Distribuidora
-          <select
-            className="rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1"
-            value={distributor}
-            onChange={(e) => {
-              const next = e.target.value;
-              setDistributor(next);
-              void (async () => {
-                setLoadingDistributor(true);
-                setErr(null);
-                setDistributorMsg(null);
-                const res = await updateLeadDistributor({
-                  leadId,
-                  distributorName: next.trim() || null,
-                });
-                setLoadingDistributor(false);
-                if (!res.ok) {
-                  setErr(res.error ?? "Erro");
-                  return;
-                }
-                setDistributorMsg("Distribuidora salva.");
-                router.refresh();
-              })();
-            }}
-          >
-            <option value="">—</option>
-            {SEND_VIA_OPTIONS.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </select>
-        </label>
-        <p className="text-xs text-[var(--muted)]">
-          {loadingDistributor ? "Salvando distribuidora..." : distributorMsg ?? "Salvamento automático ativo."}
-        </p>
+        {distributorField}
       </div>
     );
   }
@@ -318,6 +296,7 @@ export function LeadActions({
           )}
         </label>
       ) : null}
+      {distributorField}
       {err ? <p className="text-xs text-[var(--vp-error)]">{err}</p> : null}
       <button
         type="button"
@@ -360,43 +339,6 @@ export function LeadActions({
       >
         {loadingCategory ? "Salvando…" : "Salvar categoria"}
       </button>
-      <label className="flex flex-col gap-1">
-        Distribuidora
-        <select
-          className="rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1"
-          value={distributor}
-          onChange={(e) => {
-            const next = e.target.value;
-            setDistributor(next);
-            void (async () => {
-              setLoadingDistributor(true);
-              setErr(null);
-              setDistributorMsg(null);
-              const res = await updateLeadDistributor({
-                leadId,
-                distributorName: next.trim() || null,
-              });
-              setLoadingDistributor(false);
-              if (!res.ok) {
-                setErr(res.error ?? "Erro");
-                return;
-              }
-              setDistributorMsg("Distribuidora salva.");
-              router.refresh();
-            })();
-          }}
-        >
-          <option value="">—</option>
-          {SEND_VIA_OPTIONS.map((option) => (
-            <option key={option} value={option}>
-              {option}
-            </option>
-          ))}
-        </select>
-      </label>
-      <p className="text-xs text-[var(--muted)]">
-        {loadingDistributor ? "Salvando distribuidora..." : distributorMsg ?? "Salvamento automático ativo."}
-      </p>
     </div>
   );
 }

@@ -4,6 +4,7 @@ import {
   isLostPipelineStage,
   type CanonicalPipelineStageName,
 } from "@/lib/pipeline-canonical-stages";
+import { isPlaceholderDistributorName } from "@/lib/distributors";
 
 export type PipelineSubstageDTO = {
   id: string;
@@ -58,12 +59,33 @@ export function substageIsRequired(stageName: string | null | undefined): boolea
   return isLostPipelineStage(stageName);
 }
 
-export function isSampleSubstage(name: string | null | undefined): boolean {
-  const n = (name ?? "")
+function foldSubstageName(name: string | null | undefined): string {
+  return (name ?? "")
     .normalize("NFD")
     .replace(/\p{Diacritic}/gu, "")
-    .toLowerCase();
-  return n.includes("amostra");
+    .toLowerCase()
+    .trim();
+}
+
+export function isSampleSubstage(name: string | null | undefined): boolean {
+  return foldSubstageName(name).includes("amostra");
+}
+
+export function isForwardedToDistributorSubstage(name: string | null | undefined): boolean {
+  return foldSubstageName(name) === "encaminhado para o distribuidor";
+}
+
+/** No card, a flag de encaminhamento vira o nome do distribuidor quando já houver um alocado. */
+export function substageLabelOnCard(
+  substage: string | null | undefined,
+  distributorName: string | null | undefined,
+): string | null {
+  const flag = (substage ?? "").trim();
+  if (!flag) return null;
+  if (!isForwardedToDistributorSubstage(flag)) return flag;
+  const name = (distributorName ?? "").trim();
+  if (!name || isPlaceholderDistributorName(name)) return flag;
+  return name;
 }
 
 const CLASSIFICATION_BY_SUBSTAGE: Readonly<Record<string, string>> = {

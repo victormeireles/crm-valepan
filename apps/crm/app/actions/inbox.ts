@@ -85,6 +85,8 @@ export type InboxConversationView = {
     leadExcluded: boolean;
     stageId: string | null;
     substage: string | null;
+    distributorId: string | null;
+    distributorName: string | null;
   };
   messages: Awaited<ReturnType<typeof loadRecentConversationMessages>>["messages"];
   hasMoreOlder: boolean;
@@ -258,7 +260,7 @@ export async function loadInboxConversationView(conversationId: string) {
       leads(id, client_category, excluded_from_pipeline_at,
         contacts(full_name, avatar_url),
         companies(name, city, state),
-        distributors(name),
+        distributors(id, name),
         opportunities(id, stage_id, lost_reason, updated_at)
       )
     `).eq("id", id).maybeSingle()),
@@ -321,6 +323,8 @@ export async function loadInboxConversationView(conversationId: string) {
       leadExcluded: isLeadExcludedFromPipeline(lead),
       stageId: opportunity?.stage_id ?? null,
       substage: opportunity?.lost_reason ?? null,
+      distributorId: distributor?.id ?? null,
+      distributorName: distributor?.name ?? null,
     },
     messages: messagesResult.messages,
     hasMoreOlder: messagesResult.hasMoreOlder,

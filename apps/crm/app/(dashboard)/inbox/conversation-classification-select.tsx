@@ -1,12 +1,16 @@
 "use client";
 
 import { updateConversationPipelineClassification } from "@/app/actions/inbox";
+import { LeadDistributorSelect } from "@/components/lead-distributor-select";
+import type { DistributorOption } from "@/lib/distributors";
+import { distributorOptionsForSelect } from "@/lib/distributors";
 import {
   canonicalPipelineStageKey,
   displayPipelineStageName,
   isLostPipelineStage,
 } from "@/lib/pipeline-canonical-stages";
 import {
+  isForwardedToDistributorSubstage,
   substagesForStageKey,
   type PipelineSubstageDTO,
 } from "@/lib/pipeline-substages";
@@ -17,18 +21,28 @@ type StageOption = { id: string; name: string; sortOrder: number; isFinal?: bool
 
 export function ConversationPipelineSelect({
   conversationId,
+  leadId,
   stages,
   substages,
+  distributors,
   stageId,
   substage,
+  distributorId,
+  distributorName,
   onSaved,
+  onDistributorSaved,
 }: {
   conversationId: string;
+  leadId: string | null;
   stages: StageOption[];
   substages: PipelineSubstageDTO[];
+  distributors: DistributorOption[];
   stageId: string | null;
   substage: string | null;
+  distributorId: string | null;
+  distributorName: string | null;
   onSaved?: (next: { stageId: string | null; substage: string | null }) => void;
+  onDistributorSaved?: (distributorId: string | null) => void;
 }) {
   const router = useRouter();
   const orderedStages = useMemo(
@@ -139,6 +153,23 @@ export function ConversationPipelineSelect({
           ))}
         </select>
       </label>
+      {leadId && isForwardedToDistributorSubstage(statusValue) ? (
+        <label className="flex flex-col items-end gap-1">
+          <span className="text-[11px] font-medium uppercase tracking-[0.06em] text-[var(--muted)]">
+            Distribuidor
+          </span>
+          <LeadDistributorSelect
+            leadId={leadId}
+            options={distributorOptionsForSelect(
+              distributors,
+              distributorId ? { id: distributorId, name: distributorName?.trim() || "Distribuidor atual" } : null,
+            )}
+            distributorId={distributorId}
+            onSaved={onDistributorSaved}
+            className={controlClass}
+          />
+        </label>
+      ) : null}
       {err ? <p className="basis-full text-right text-[11px] text-[var(--vp-error)]">{err}</p> : null}
     </div>
   );

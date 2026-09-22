@@ -39,6 +39,7 @@ import {
 import { LostReasonSelect } from "@/components/lost-reason-select";
 import type { LostReasonDTO } from "@/lib/lost-reasons";
 import { displayPipelineStageName, findCanonicalPipelineStage, isCanonicalFinalStage, isLostPipelineStage, visiblePipelineBoardStages } from "@/lib/pipeline-canonical-stages";
+import { isForwardedToDistributorSubstage, substageLabelOnCard } from "@/lib/pipeline-substages";
 import { pipelineConversationPeekTarget, type PipelineConversationPeekTarget } from "@/lib/pipeline-conversation-peek";
 import { PipelineConversationPeek } from "./pipeline-conversation-peek";
 import { PipelineSignalBadges } from "./pipeline-signal-badges";
@@ -55,6 +56,7 @@ export type PipelineCardDTO = {
   stage_id: string;
   title: string | null;
   lost_reason: string | null;
+  distributorName: string | null;
   lead_id: string | null;
   personName: string;
   companyLine: string | null;
@@ -357,10 +359,15 @@ function PipelineCardContent({
           ) : null}
           {card.lost_reason ? (
             <span
-              className="rounded-full border border-[var(--vp-ink-line)] bg-[var(--vp-paper)] px-2 py-0.5 text-[10px] font-bold tracking-[0.04em] text-[var(--vp-wine)]"
-              title="Subclassificação"
+              className="max-w-full truncate rounded-full border border-[var(--vp-ink-line)] bg-[var(--vp-paper)] px-2 py-0.5 text-[10px] font-bold tracking-[0.04em] text-[var(--vp-wine)]"
+              title={
+                isForwardedToDistributorSubstage(card.lost_reason) &&
+                substageLabelOnCard(card.lost_reason, card.distributorName) !== card.lost_reason
+                  ? card.lost_reason
+                  : "Subclassificação"
+              }
             >
-              {card.lost_reason}
+              {substageLabelOnCard(card.lost_reason, card.distributorName)}
             </span>
           ) : null}
         </div>
@@ -1140,7 +1147,9 @@ export function PipelineBoard({
                   )}
                   <p className="mt-1 text-xs text-[var(--muted)]">
                     {displayPipelineStageName(stage?.name) || "Encerrado"}
-                    {card.lost_reason ? ` · ${card.lost_reason}` : ""}
+                    {card.lost_reason
+                      ? ` · ${substageLabelOnCard(card.lost_reason, card.distributorName)}`
+                      : ""}
                   </p>
                 </li>
               );

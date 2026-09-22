@@ -60,6 +60,7 @@ function mapRow(
     stage_id: row.stage_id,
     title: row.title,
     lost_reason: row.lost_reason,
+    distributorName: row.distributor_name,
     lead_id: row.lead_id,
     personName: displayPersonName(row.contact_name),
     companyLine: displayCompanyName({

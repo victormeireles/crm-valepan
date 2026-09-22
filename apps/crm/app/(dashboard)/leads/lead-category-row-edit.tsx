@@ -46,6 +46,7 @@ export function LeadCategoryRowEdit(props: {
   leadId: string | null;
   clientCategory: "hamburgueria" | "distribuidor" | "parceiros" | "outros";
   distributorName: string;
+  distributorOptions?: string[];
   distributorLocked?: boolean;
   leadStatus: string;
   networkType: string;
@@ -204,7 +205,7 @@ export function LeadCategoryRowEdit(props: {
         />
         {!props.distributorLocked ? (
           <datalist id={`lead-distributor-options-${leadId ?? "pending"}`}>
-            {SEND_VIA_OPTIONS.map((option) => (
+            {(props.distributorOptions ?? [...SEND_VIA_OPTIONS]).map((option) => (
               <option key={option} value={option} />
             ))}
           </datalist>
