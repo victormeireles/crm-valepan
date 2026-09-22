@@ -51,3 +51,5 @@ coverage
 db-push-output.txt
 env.download
 .codex-publish-media-*/
+
+tmp/

@@ -1,0 +1,1 @@
+Rode um build, corrija todos os erros, warnings e depois veja todas as alterações que foram feitas em local, separe por assuntos em commits diferentes. depois disso de um push /deploy na branch main
