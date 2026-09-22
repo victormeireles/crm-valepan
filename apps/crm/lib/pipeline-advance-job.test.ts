@@ -3,6 +3,7 @@ import {
   afterFailedLeadFactsWrite,
   resetIdsAfterAiBatchFailure,
   selectFactsOnlyForModel,
+  selectQualificationBackfillLeadIds,
 } from "./pipeline-advance-job";
 
 describe("afterFailedLeadFactsWrite", () => {
@@ -29,6 +30,31 @@ describe("resetIdsAfterAiBatchFailure", () => {
         markedAnalyzedThisRun: new Set(["b", "c", "z"]),
       }),
     ).toEqual(["b", "c"]);
+  });
+});
+
+describe("selectQualificationBackfillLeadIds", () => {
+  const leads = [
+    { leadId: "novo", stageName: "LEADS", excluded: false, needsFacts: true },
+    { leadId: "qual", stageName: "QUALIFICAÇÃO", excluded: false, needsFacts: true },
+    { leadId: "neg", stageName: "Negociação", excluded: false, needsFacts: true },
+    { leadId: "cheia", stageName: "NEGOCIAÇÃO", excluded: false, needsFacts: false },
+    { leadId: "fora", stageName: "QUALIFICAÇÃO", excluded: true, needsFacts: true },
+    { leadId: "cliente", stageName: "CONVERTIDO", excluded: false, needsFacts: true },
+  ];
+
+  it("fica em qualificação e negociação com ficha incompleta", () => {
+    expect(selectQualificationBackfillLeadIds({ leads, limit: 10 })).toEqual(["qual", "neg"]);
+  });
+
+  it("respeita o limite e não repete lead já processado", () => {
+    expect(
+      selectQualificationBackfillLeadIds({
+        leads,
+        excludeLeadIds: new Set(["qual"]),
+        limit: 1,
+      }),
+    ).toEqual(["neg"]);
   });
 });
 

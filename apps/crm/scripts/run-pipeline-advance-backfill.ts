@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { runPipelineAdvanceBackfill } from "../lib/pipeline-advance-job";
+import { runQualificationFactsBackfill } from "../lib/pipeline-advance-job";
 
 function loadEnv(file: string) {
   const contents = readFileSync(file, "utf8");
@@ -23,16 +23,15 @@ loadEnv(path.join(process.cwd(), ".env.local"));
 loadEnv(path.join(process.cwd(), "apps/crm/.env.local"));
 
 async function main() {
-  const rounds = await runPipelineAdvanceBackfill(25, 80);
+  const rounds = await runQualificationFactsBackfill(40, 40);
   const totals = rounds.reduce(
     (acc, round) => ({
       scanned: acc.scanned + round.scanned,
-      suggested: acc.suggested + round.suggested,
-      autoApplied: acc.autoApplied + round.autoApplied,
+      qualified: acc.qualified + round.qualified,
       skipped: acc.skipped + round.skipped,
       errors: acc.errors + round.errors,
     }),
-    { scanned: 0, suggested: 0, autoApplied: 0, skipped: 0, errors: 0 },
+    { scanned: 0, qualified: 0, skipped: 0, errors: 0 },
   );
   console.log("[pipeline-advance] backfill totals", totals);
 }

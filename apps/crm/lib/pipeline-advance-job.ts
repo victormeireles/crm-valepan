@@ -28,7 +28,47 @@ export type PipelineAdvanceJobResult = {
   skipped: number;
   errors: number;
   qualified: number;
+  processedLeadIds: string[];
 };
+
+export const QUALIFICATION_BACKFILL_MESSAGE_LIMIT = 40;
+export const QUALIFICATION_BACKFILL_STAGES = ["QUALIFICAÇÃO", "NEGOCIAÇÃO"] as const;
+
+export type PipelineAdvanceJobOptions = {
+  messageLimit?: number;
+  factsOnly?: boolean;
+  excludeLeadIds?: ReadonlySet<string>;
+};
+
+export function selectQualificationBackfillLeadIds(input: {
+  leads: Array<{ leadId: string; stageName: string; excluded: boolean; needsFacts: boolean }>;
+  excludeLeadIds?: ReadonlySet<string>;
+  limit: number;
+}): string[] {
+  const stages = new Set<string>(QUALIFICATION_BACKFILL_STAGES);
+  const exclude = input.excludeLeadIds ?? new Set<string>();
+  const ids: string[] = [];
+  for (const lead of input.leads) {
+    if (ids.length >= input.limit) break;
+    if (lead.excluded || !lead.needsFacts || exclude.has(lead.leadId)) continue;
+    if (!stages.has(canonicalPipelineStageKey(lead.stageName))) continue;
+    ids.push(lead.leadId);
+  }
+  return ids;
+}
+
+function emptyJobResult(skipped = 0): PipelineAdvanceJobResult {
+  return {
+    ok: true,
+    scanned: 0,
+    suggested: 0,
+    autoApplied: 0,
+    skipped,
+    errors: 0,
+    qualified: 0,
+    processedLeadIds: [],
+  };
+}
 
 /** Após falha ao gravar a ficha: nunca marcar analisada; reabrir se esta rodada já tinha marcado. */
 export function afterFailedLeadFactsWrite(input: {
@@ -159,7 +199,11 @@ async function resetConversationsUnanalyzed(
 
 export async function runPipelineAdvanceJob(
   limit = PIPELINE_ADVANCE_BATCH_SIZE,
+  options?: PipelineAdvanceJobOptions,
 ): Promise<PipelineAdvanceJobResult> {
+  const factsOnly = options?.factsOnly === true;
+  const messageLimit = options?.messageLimit ?? PIPELINE_ADVANCE_MESSAGE_LIMIT;
+  const excludeLeadIds = options?.excludeLeadIds ?? new Set<string>();
   const crm = crmTables(createAdminSupabaseClient());
   const model = pipelineAdvanceModel();
   const nowIso = new Date().toISOString();
@@ -223,26 +267,34 @@ export async function runPipelineAdvanceJob(
       .map((row) => row.leadId),
   );
 
-  if (openLeadIdSet.size === 0) {
-    return {
-      ok: true,
-      scanned: 0,
-      suggested: 0,
-      autoApplied: 0,
-      skipped: 0,
-      errors: 0,
-      qualified: 0,
-    };
+  const backfillLeadIds = factsOnly
+    ? selectQualificationBackfillLeadIds({
+        leads: opportunities.map((row) => ({
+          leadId: row.leadId,
+          stageName: row.stageName,
+          excluded: row.excluded,
+          needsFacts: leadNeedsFacts(leadFactsById.get(row.leadId)),
+        })),
+        excludeLeadIds,
+        limit,
+      })
+    : null;
+
+  if (openLeadIdSet.size === 0 || (backfillLeadIds && backfillLeadIds.length === 0)) {
+    return emptyJobResult();
   }
 
   const poolLimit = Math.max(limit * 5, 100);
-  const { data: conversationRows, error: conversationError } = await crm
+  const conversationQuery = crm
     .from("conversations")
     .select("id, lead_id, conversation_kind, classification, last_message_at, pipeline_ai_analyzed")
-    .eq("conversation_kind", "lead")
-    .eq("pipeline_ai_analyzed", false)
-    .order("last_message_at", { ascending: false })
-    .limit(poolLimit);
+    .eq("conversation_kind", "lead");
+  const { data: conversationRows, error: conversationError } = backfillLeadIds
+    ? await conversationQuery.in("lead_id", backfillLeadIds)
+    : await conversationQuery
+        .eq("pipeline_ai_analyzed", false)
+        .order("last_message_at", { ascending: false })
+        .limit(poolLimit);
   if (conversationError) throw new Error(conversationError.message);
 
   const pool = (conversationRows ?? []).flatMap((row) =>
@@ -261,20 +313,12 @@ export async function runPipelineAdvanceJob(
   const staleIds = (conversationRows ?? [])
     .filter((row) => !row.lead_id || !openLeadIdSet.has(row.lead_id))
     .map((row) => row.id);
-  if (staleIds.length > 0) {
+  if (!factsOnly && staleIds.length > 0) {
     await markConversationsAnalyzed(crm, staleIds);
   }
 
   if (pool.length === 0) {
-    return {
-      ok: true,
-      scanned: 0,
-      suggested: 0,
-      autoApplied: 0,
-      skipped: staleIds.length,
-      errors: 0,
-      qualified: 0,
-    };
+    return emptyJobResult(factsOnly ? 0 : staleIds.length);
   }
 
   const conversationIds = pool.map((row) => row.id);
@@ -287,7 +331,7 @@ export async function runPipelineAdvanceJob(
 
   const recent = await crm.rpc("pipeline_advance_recent_messages", {
     p_conversation_ids: conversationIds,
-    p_limit: PIPELINE_ADVANCE_MESSAGE_LIMIT,
+    p_limit: messageLimit,
   });
   if (recent.error) throw new Error(recent.error.message);
 
@@ -313,8 +357,20 @@ export async function runPipelineAdvanceJob(
   const factsOnlyIds = new Set<string>();
   const markedAnalyzedThisRun = new Set<string>();
   const markAnalyzedIds: string[] = [];
+  const processedLeadIds = new Set<string>();
+  const leadIdByConversation = new Map(pool.map((conversation) => [conversation.id, conversation.leadId]));
+  const rememberProcessed = (conversationIds: string[]) => {
+    for (const id of conversationIds) {
+      const leadId = leadIdByConversation.get(id);
+      if (leadId) processedLeadIds.add(leadId);
+    }
+  };
 
   for (const conversation of pool) {
+    if (factsOnly) {
+      factsOnlyIds.add(conversation.id);
+      continue;
+    }
     const opportunity = opportunityByLead.get(conversation.leadId);
     const messages = messagesByConversation.get(conversation.id) ?? [];
     const replyState = conversationReplyState(messages);
@@ -576,6 +632,7 @@ export async function runPipelineAdvanceJob(
         suggested += 1;
       }
       await markConversationsAnalyzed(crm, groupMarkIds);
+      rememberProcessed(groupMarkIds);
       await resetConversationsUnanalyzed(crm, groupResetIds);
     } catch (error) {
       console.error(
@@ -614,18 +671,20 @@ export async function runPipelineAdvanceJob(
     }
   }
   await markConversationsAnalyzed(crm, markAnalyzedIds);
+  rememberProcessed(markAnalyzedIds);
 
   console.log(
-    `[pipeline-advance] done scanned=${candidates.length} suggested=${suggested} auto=${autoApplied} skipped=${skipped} qualified=${qualified} errors=${errors}`,
+    `[pipeline-advance] done scanned=${factsOnly ? pool.length : candidates.length + autoApplied} suggested=${suggested} auto=${autoApplied} skipped=${skipped} qualified=${qualified} errors=${errors}`,
   );
   return {
     ok: true,
-    scanned: candidates.length + autoApplied,
+    scanned: factsOnly ? pool.length : candidates.length + autoApplied,
     suggested,
     autoApplied,
     skipped,
     errors,
     qualified,
+    processedLeadIds: [...processedLeadIds],
   };
 }
 
@@ -641,6 +700,29 @@ export async function runPipelineAdvanceBackfill(
       `[pipeline-advance] backfill round ${round + 1}/${maxRounds} scanned=${result.scanned} suggested=${result.suggested} auto=${result.autoApplied} skipped=${result.skipped} qualified=${result.qualified} errors=${result.errors}`,
     );
     if (result.scanned === 0) break;
+  }
+  return rounds;
+}
+
+/** Preenche ficha vazia em Qualificação e Negociação, lendo 40 mensagens. Não sugere etapa. */
+export async function runQualificationFactsBackfill(
+  maxRounds = 40,
+  limit = 40,
+): Promise<PipelineAdvanceJobResult[]> {
+  const excludeLeadIds = new Set<string>();
+  const rounds: PipelineAdvanceJobResult[] = [];
+  for (let round = 0; round < maxRounds; round += 1) {
+    const result = await runPipelineAdvanceJob(limit, {
+      factsOnly: true,
+      messageLimit: QUALIFICATION_BACKFILL_MESSAGE_LIMIT,
+      excludeLeadIds,
+    });
+    for (const leadId of result.processedLeadIds) excludeLeadIds.add(leadId);
+    rounds.push(result);
+    console.log(
+      `[pipeline-advance] qualification backfill round ${round + 1}/${maxRounds} scanned=${result.scanned} qualified=${result.qualified} skipped=${result.skipped} errors=${result.errors}`,
+    );
+    if (result.processedLeadIds.length === 0) break;
   }
   return rounds;
 }
