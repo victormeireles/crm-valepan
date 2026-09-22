@@ -7,6 +7,7 @@ import {
   chunkItems,
   conversationAdvanceFingerprint,
   conversationReplyState,
+  emptyChatFacts,
   evaluateAdvanceAccept,
   formatConversationTranscriptForModel,
   isForwardPipelineAdvance,
@@ -202,6 +203,104 @@ describe("cheap model batch helpers", () => {
       confidence: 0.81,
       rationale: "pediu amostra",
       evidence_quote: "quero amostra",
+      facts: {
+        volumes: [],
+        cep: null,
+        city: null,
+        state: null,
+        clientCategory: null,
+        cnpj: null,
+      },
+    });
+  });
+
+  it("parseia facts do mesmo JSON da classificação", () => {
+    const parsed = parseModelAdvanceBatchJson(
+      JSON.stringify({
+        results: [
+          {
+            id: "c-facts",
+            should_advance: true,
+            stage: "QUALIFICAÇÃO",
+            substage: "Sem retorno",
+            confidence: 0.88,
+            rationale: "respondeu formulário",
+            evidence_quote: "Hamburgueria 25953-000 Teresópolis 200 pães",
+            facts: {
+              volumes: [{ amount: 200, unit: "paes", period: "semana" }],
+              cep: "25953000",
+              city: "Teresópolis",
+              state: "RJ",
+              client_category: "hamburgueria",
+              cnpj: "12345678000199",
+            },
+          },
+        ],
+      }),
+    );
+    expect(parsed?.get("c-facts")).toEqual({
+      should_advance: true,
+      stage: "QUALIFICAÇÃO",
+      substage: "Sem retorno",
+      confidence: 0.88,
+      rationale: "respondeu formulário",
+      evidence_quote: "Hamburgueria 25953-000 Teresópolis 200 pães",
+      facts: {
+        volumes: [{ amount: 200, unit: "paes", period: "semana" }],
+        cep: "25953000",
+        city: "Teresópolis",
+        state: "RJ",
+        clientCategory: "hamburgueria",
+        cnpj: "12345678000199",
+      },
+    });
+  });
+
+  it("descarta categoria inválida e linhas de volume inválidas", () => {
+    const parsed = parseModelAdvanceBatchJson(
+      JSON.stringify({
+        results: [
+          {
+            id: "c-bad",
+            should_advance: false,
+            stage: "",
+            substage: "",
+            confidence: 0.5,
+            rationale: "sem avanço",
+            evidence_quote: "ok",
+            facts: {
+              volumes: [
+                { amount: 100, unit: "paes", period: "semana" },
+                { amount: 0, unit: "paes", period: "semana" },
+                { amount: -5, unit: "caixas", period: "dia" },
+                { amount: 10, unit: "sacos", period: "semana" },
+                { amount: 10, unit: "paes", period: "ano" },
+              ],
+              cep: "",
+              city: "",
+              state: "",
+              client_category: "padaria",
+              cnpj: "",
+            },
+          },
+        ],
+      }),
+    );
+    expect(parsed?.get("c-bad")).toEqual({
+      should_advance: false,
+      stage: null,
+      substage: null,
+      confidence: 0.5,
+      rationale: "sem avanço",
+      evidence_quote: "ok",
+      facts: {
+        volumes: [{ amount: 100, unit: "paes", period: "semana" }],
+        cep: null,
+        city: null,
+        state: null,
+        clientCategory: null,
+        cnpj: null,
+      },
     });
   });
 });
@@ -256,6 +355,7 @@ describe("suggestionFromModelOutput", () => {
           confidence: 0.9,
           rationale: "ainda é bot",
           evidence_quote: "olá",
+          facts: emptyChatFacts(),
         },
       }),
     ).toBeNull();
@@ -271,6 +371,7 @@ describe("suggestionFromModelOutput", () => {
           confidence: PIPELINE_ADVANCE_MIN_CONFIDENCE - 0.01,
           rationale: "pedido",
           evidence_quote: "quero 6 caixas",
+          facts: emptyChatFacts(),
         },
       }),
     ).toBeNull();
@@ -288,6 +389,7 @@ describe("suggestionFromModelOutput", () => {
         confidence: 0.86,
         rationale: "passamos para o distribuidor da região",
         evidence_quote: "já encaminhei para o distribuidor",
+        facts: emptyChatFacts(),
       },
     });
     expect(forward).toEqual({
@@ -310,6 +412,7 @@ describe("suggestionFromModelOutput", () => {
         confidence: 0.9,
         rationale: "confirmou que chegou",
         evidence_quote: "a amostra chegou ontem",
+        facts: emptyChatFacts(),
       },
     });
     expect(sameStage?.toSubstage).toBe("Recebeu amostra");
@@ -326,6 +429,7 @@ describe("suggestionFromModelOutput", () => {
           confidence: 0.99,
           rationale: "sumiu",
           evidence_quote: "",
+          facts: emptyChatFacts(),
         },
       }),
     ).toBeNull();

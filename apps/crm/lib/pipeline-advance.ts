@@ -3,6 +3,8 @@ import {
   type CanonicalPipelineStageName,
 } from "@/lib/pipeline-canonical-stages";
 import { conversationClassificationForStageAndSubstage } from "@/lib/pipeline-substages";
+import type { ChatFacts } from "@/lib/lead-facts-from-chat";
+import type { VolumeLine } from "@/lib/weekly-bread-volume";
 
 export const PIPELINE_ADVANCE_BATCH_SIZE = 50;
 export const PIPELINE_ADVANCE_MIN_CONFIDENCE = 0.6;
@@ -11,6 +13,10 @@ export const PIPELINE_ADVANCE_MODEL_CHUNK = 15;
 
 const FORWARD_STAGES = ["LEADS", "QUALIFICAÇÃO", "NEGOCIAÇÃO", "CONVERTIDO"] as const;
 type ForwardStageName = (typeof FORWARD_STAGES)[number];
+
+const CLIENT_CATEGORIES = new Set(["hamburgueria", "distribuidor", "parceiros"]);
+const VOLUME_UNITS = new Set(["paes", "caixas"]);
+const VOLUME_PERIODS = new Set(["dia", "semana", "mes"]);
 
 export type ConversationReplyState = "inbound_only" | "awaiting_reply" | "customer_replied" | "empty";
 
@@ -27,7 +33,19 @@ export type ModelAdvanceOutput = {
   confidence: number;
   rationale: string;
   evidence_quote: string;
+  facts: ChatFacts;
 };
+
+export function emptyChatFacts(): ChatFacts {
+  return {
+    volumes: [],
+    cep: null,
+    city: null,
+    state: null,
+    clientCategory: null,
+    cnpj: null,
+  };
+}
 
 export type ParsedAdvanceSuggestion = {
   toStageName: ForwardStageName;
@@ -244,6 +262,52 @@ export function resolveCatalogSubstage(
   return null;
 }
 
+function parseOptionalText(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function parseClientCategory(value: unknown): ChatFacts["clientCategory"] {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed || !CLIENT_CATEGORIES.has(trimmed)) return null;
+  return trimmed as ChatFacts["clientCategory"];
+}
+
+function parseVolumes(value: unknown): VolumeLine[] {
+  if (!Array.isArray(value)) return [];
+  const volumes: VolumeLine[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") continue;
+    const row = item as Record<string, unknown>;
+    const amount = typeof row.amount === "number" ? row.amount : Number(row.amount);
+    if (!Number.isFinite(amount) || amount <= 0) continue;
+    const unit = typeof row.unit === "string" ? row.unit.trim() : "";
+    const period = typeof row.period === "string" ? row.period.trim() : "";
+    if (!VOLUME_UNITS.has(unit) || !VOLUME_PERIODS.has(period)) continue;
+    volumes.push({
+      amount,
+      unit: unit as VolumeLine["unit"],
+      period: period as VolumeLine["period"],
+    });
+  }
+  return volumes;
+}
+
+export function parseChatFacts(value: unknown): ChatFacts {
+  if (!value || typeof value !== "object") return emptyChatFacts();
+  const row = value as Record<string, unknown>;
+  return {
+    volumes: parseVolumes(row.volumes),
+    cep: parseOptionalText(row.cep),
+    city: parseOptionalText(row.city),
+    state: parseOptionalText(row.state),
+    clientCategory: parseClientCategory(row.client_category ?? row.clientCategory),
+    cnpj: parseOptionalText(row.cnpj),
+  };
+}
+
 export function parseModelAdvanceJson(raw: string): ModelAdvanceOutput | null {
   const stripped = raw
     .trim()
@@ -272,6 +336,7 @@ export function parseModelAdvanceJson(raw: string): ModelAdvanceOutput | null {
     confidence,
     rationale: typeof row.rationale === "string" ? row.rationale : "",
     evidence_quote: typeof row.evidence_quote === "string" ? row.evidence_quote : "",
+    facts: parseChatFacts(row.facts),
   };
 }
 
@@ -303,6 +368,7 @@ export function parseModelAdvanceBatchJson(raw: string): Map<string, ModelAdvanc
       confidence: row.confidence,
       rationale: row.rationale ?? "",
       evidence_quote: row.evidence_quote ?? "",
+      facts: row.facts,
     }));
     if (output) map.set(id, output);
   }
