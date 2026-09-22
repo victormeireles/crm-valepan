@@ -16,6 +16,15 @@ describe("weeklyBreadCount", () => {
     expect(weeklyBreadCount([{ amount: 1000, unit: "paes", period: "mes" }])).toBe(233);
   });
 
+  it("arredonda cada volume mensal antes de somar", () => {
+    expect(
+      weeklyBreadCount([
+        { amount: 1000, unit: "paes", period: "mes" },
+        { amount: 1000, unit: "paes", period: "mes" },
+      ]),
+    ).toBe(466);
+  });
+
   it("soma linhas e arredonda faixa já resolvida pelo chamador", () => {
     expect(
       weeklyBreadCount([

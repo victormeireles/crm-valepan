@@ -10,9 +10,9 @@ export function weeklyBreadCount(lines: VolumeLine[]): number | null {
     .map((line) => {
       const breads = line.unit === "caixas" ? line.amount * 48 : line.amount;
       if (line.period === "dia") return breads * 7;
-      if (line.period === "mes") return breads * 7 / 30;
+      if (line.period === "mes") return Math.round(breads * 7 / 30);
       return breads;
     });
   if (weekly.length === 0) return null;
-  return Math.round(weekly.reduce((sum, value) => sum + value, 0));
+  return weekly.reduce((sum, value) => sum + value, 0);
 }
