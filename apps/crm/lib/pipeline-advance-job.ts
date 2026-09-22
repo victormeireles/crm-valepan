@@ -1,3 +1,4 @@
+import { applyLeadFacts } from "@/lib/apply-lead-facts";
 import {
   PIPELINE_ADVANCE_BATCH_SIZE,
   PIPELINE_ADVANCE_MESSAGE_LIMIT,
@@ -7,6 +8,7 @@ import {
   chunkItems,
   conversationAdvanceFingerprint,
   conversationReplyState,
+  emptyChatFacts,
   formatConversationTranscriptForModel,
   isOpenAdvanceStage,
   selectAdvanceCandidates,
@@ -25,6 +27,18 @@ export type PipelineAdvanceJobResult = {
   autoApplied: number;
   skipped: number;
   errors: number;
+  qualified: number;
+};
+
+type LeadJoin = {
+  excluded_from_pipeline_at: string | null;
+  weekly_bread_consumption: number | null;
+  zip_code: string | null;
+  city: string | null;
+  state: string | null;
+  client_category: string | null;
+  phone_e164: string | null;
+  companies: { document: string | null } | { document: string | null }[] | null;
 };
 
 type OpportunityRow = {
@@ -33,12 +47,50 @@ type OpportunityRow = {
   stage_id: string;
   lost_reason: string | null;
   pipeline_stages: { name: string } | { name: string }[] | null;
-  leads: { excluded_from_pipeline_at: string | null } | { excluded_from_pipeline_at: string | null }[] | null;
+  leads: LeadJoin | LeadJoin[] | null;
+};
+
+type LeadFactStatus = {
+  weeklyBreadConsumption: number | null;
+  zipCode: string | null;
+  city: string | null;
+  state: string | null;
+  clientCategory: string | null;
+  cnpj: string | null;
+  phoneE164: string | null;
+};
+
+type AiBatchItem = {
+  conversationId: string;
+  leadId: string;
+  opportunityId: string;
+  stageName: string;
+  classification: string | null;
+  substage: string | null;
+  fingerprint: string;
+  factsOnly: boolean;
+  transcript: string;
 };
 
 function one<T>(value: T | T[] | null | undefined): T | null {
   if (value == null) return null;
   return Array.isArray(value) ? (value[0] ?? null) : value;
+}
+
+function isBlank(value: string | null | undefined): boolean {
+  return value == null || value.trim() === "";
+}
+
+function leadNeedsFacts(lead: LeadFactStatus | null | undefined): boolean {
+  if (!lead) return true;
+  return (
+    lead.weeklyBreadConsumption == null ||
+    isBlank(lead.zipCode) ||
+    isBlank(lead.city) ||
+    isBlank(lead.state) ||
+    isBlank(lead.clientCategory) ||
+    isBlank(lead.cnpj)
+  );
 }
 
 async function markConversationsAnalyzed(
@@ -80,14 +132,29 @@ export async function runPipelineAdvanceJob(
 
   const { data: opportunityRows, error: opportunityError } = await crm
     .from("opportunities")
-    .select("id, lead_id, stage_id, lost_reason, pipeline_stages(name), leads(excluded_from_pipeline_at)");
+    .select(
+      "id, lead_id, stage_id, lost_reason, pipeline_stages(name), leads(excluded_from_pipeline_at, weekly_bread_consumption, zip_code, city, state, client_category, phone_e164, companies(document))",
+    );
   if (opportunityError) throw new Error(opportunityError.message);
 
+  const leadFactsById = new Map<string, LeadFactStatus>();
   const opportunities = ((opportunityRows ?? []) as OpportunityRow[])
     .map((row) => {
       const stage = one(row.pipeline_stages);
       const lead = one(row.leads);
       if (!row.lead_id || !stage?.name) return null;
+      const company = one(lead?.companies ?? null);
+      if (lead) {
+        leadFactsById.set(row.lead_id, {
+          weeklyBreadConsumption: lead.weekly_bread_consumption,
+          zipCode: lead.zip_code,
+          city: lead.city,
+          state: lead.state,
+          clientCategory: lead.client_category,
+          cnpj: company?.document ?? null,
+          phoneE164: lead.phone_e164,
+        });
+      }
       return {
         id: row.id,
         leadId: row.lead_id,
@@ -106,7 +173,15 @@ export async function runPipelineAdvanceJob(
   );
 
   if (openLeadIdSet.size === 0) {
-    return { ok: true, scanned: 0, suggested: 0, autoApplied: 0, skipped: 0, errors: 0 };
+    return {
+      ok: true,
+      scanned: 0,
+      suggested: 0,
+      autoApplied: 0,
+      skipped: 0,
+      errors: 0,
+      qualified: 0,
+    };
   }
 
   const poolLimit = Math.max(limit * 5, 100);
@@ -140,7 +215,15 @@ export async function runPipelineAdvanceJob(
   }
 
   if (pool.length === 0) {
-    return { ok: true, scanned: 0, suggested: 0, autoApplied: 0, skipped: staleIds.length, errors: 0 };
+    return {
+      ok: true,
+      scanned: 0,
+      suggested: 0,
+      autoApplied: 0,
+      skipped: staleIds.length,
+      errors: 0,
+      qualified: 0,
+    };
   }
 
   const conversationIds = pool.map((row) => row.id);
@@ -174,7 +257,9 @@ export async function runPipelineAdvanceJob(
   let autoApplied = 0;
   let skipped = staleIds.length;
   let errors = 0;
+  let qualified = 0;
   const skipAi = new Set<string>();
+  const factsOnlyIds = new Set<string>();
   const markAnalyzedIds: string[] = [];
 
   for (const conversation of pool) {
@@ -195,26 +280,36 @@ export async function runPipelineAdvanceJob(
           })
         : null);
     if (!rule) continue;
-    skipAi.add(conversation.id);
+
+    const needsFacts = leadNeedsFacts(leadFactsById.get(conversation.leadId));
     try {
       if (rule.kind === "apply") {
         const { error } = await crm
           .from("conversations")
           .update({
             classification: rule.toClassification,
-            pipeline_ai_analyzed: true,
+            pipeline_ai_analyzed: !needsFacts,
             updated_at: nowIso,
           })
           .eq("id", conversation.id);
         if (error) throw new Error(error.message);
         autoApplied += 1;
-      } else {
+      } else if (!needsFacts) {
         markAnalyzedIds.push(conversation.id);
+        skipped += 1;
+      } else {
         skipped += 1;
       }
     } catch (error) {
       console.error("[pipeline-advance] auto rule failed", conversation.id, error);
       errors += 1;
+      continue;
+    }
+
+    if (needsFacts) {
+      factsOnlyIds.add(conversation.id);
+    } else {
+      skipAi.add(conversation.id);
     }
   }
 
@@ -264,73 +359,134 @@ export async function runPipelineAdvanceJob(
       .map((row) => [row.conversation_id, row]),
   );
 
-  const ready = candidates.flatMap((candidate) => {
+  const ready: AiBatchItem[] = [];
+  const readyIds = new Set<string>();
+
+  for (const candidate of candidates) {
     const messages = messagesByConversation.get(candidate.conversationId) ?? [];
     const transcript = formatConversationTranscriptForModel(messages);
     if (!transcript.trim()) {
       skipped += 1;
       markAnalyzedIds.push(candidate.conversationId);
-      return [];
+      continue;
     }
-    return [{ candidate, transcript }];
-  });
+    ready.push({
+      conversationId: candidate.conversationId,
+      leadId: candidate.leadId,
+      opportunityId: candidate.opportunityId,
+      stageName: candidate.stageName,
+      classification: candidate.classification,
+      substage: candidate.substage,
+      fingerprint: candidate.fingerprint,
+      factsOnly: factsOnlyIds.has(candidate.conversationId),
+      transcript,
+    });
+    readyIds.add(candidate.conversationId);
+  }
+
+  for (const conversation of conversationsForAi) {
+    if (!factsOnlyIds.has(conversation.id) || readyIds.has(conversation.id)) continue;
+    const opportunity = opportunityByLead.get(conversation.leadId);
+    if (!opportunity) {
+      markAnalyzedIds.push(conversation.id);
+      continue;
+    }
+    const messages = messagesByConversation.get(conversation.id) ?? [];
+    const transcript = formatConversationTranscriptForModel(messages);
+    if (!transcript.trim()) {
+      markAnalyzedIds.push(conversation.id);
+      continue;
+    }
+    const stageName = canonicalPipelineStageKey(opportunity.stageName);
+    ready.push({
+      conversationId: conversation.id,
+      leadId: conversation.leadId,
+      opportunityId: opportunity.id,
+      stageName,
+      classification: conversation.classification,
+      substage: conversation.substage,
+      fingerprint: fingerprints[conversation.id] ?? "",
+      factsOnly: true,
+      transcript,
+    });
+    readyIds.add(conversation.id);
+  }
 
   for (const group of chunkItems(ready, PIPELINE_ADVANCE_MODEL_CHUNK)) {
     try {
       const outputs = await classifyConversationsAdvanceBatch({
         catalog,
-        items: group.map(({ candidate, transcript }) => ({
-          id: candidate.conversationId,
-          currentStageName: candidate.stageName,
-          currentSubstage: candidate.substage,
-          transcript,
+        items: group.map((item) => ({
+          id: item.conversationId,
+          currentStageName: item.stageName,
+          currentSubstage: item.substage,
+          transcript: item.transcript,
         })),
       });
-      for (const { candidate } of group) {
-        const output = outputs.get(candidate.conversationId) ?? null;
+      for (const item of group) {
+        const output = outputs.get(item.conversationId) ?? null;
+        const facts = output?.facts ?? emptyChatFacts();
+
+        try {
+          const { applied } = await applyLeadFacts(crm, {
+            leadId: item.leadId,
+            phoneE164: leadFactsById.get(item.leadId)?.phoneE164 ?? null,
+            facts,
+          });
+          if (applied) qualified += 1;
+        } catch (error) {
+          console.error("[pipeline-advance] apply facts failed", item.conversationId, error);
+          errors += 1;
+        }
+
+        markAnalyzedIds.push(item.conversationId);
+
+        if (item.factsOnly) {
+          continue;
+        }
+
         const parsed = output
           ? suggestionFromModelOutput({
-              currentStageName: candidate.stageName,
-              currentSubstage: candidate.substage,
+              currentStageName: item.stageName,
+              currentSubstage: item.substage,
               catalog,
               output,
             })
           : null;
-        markAnalyzedIds.push(candidate.conversationId);
         if (!parsed) {
           skipped += 1;
           continue;
         }
-        const fromStageId = stageIdByName.get(candidate.stageName);
+        const fromStageId = stageIdByName.get(item.stageName);
         const toStageId = stageIdByName.get(parsed.toStageName);
         if (!fromStageId || !toStageId) {
           skipped += 1;
           continue;
         }
         const payload = {
-          lead_id: candidate.leadId,
-          conversation_id: candidate.conversationId,
-          opportunity_id: candidate.opportunityId,
+          lead_id: item.leadId,
+          conversation_id: item.conversationId,
+          opportunity_id: item.opportunityId,
           from_stage_id: fromStageId,
           to_stage_id: toStageId,
-          from_classification: candidate.classification,
+          from_classification: item.classification,
           to_classification: parsed.toClassification,
-          from_substage: candidate.substage,
+          from_substage: item.substage,
           to_substage: parsed.toSubstage,
           confidence: parsed.confidence,
           rationale: parsed.rationale,
           evidence_quote: parsed.evidenceQuote,
           status: "pending" as const,
-          fingerprint: candidate.fingerprint,
+          fingerprint: item.fingerprint,
           model,
           updated_at: nowIso,
         };
-        const pending = pendingByConversation.get(candidate.conversationId);
+        const pending = pendingByConversation.get(item.conversationId);
         if (pending) {
           const { error } = await crm
             .from("pipeline_advance_suggestions")
             .update(payload)
-            .eq("conversation_id", candidate.conversationId)
+            .eq("conversation_id", item.conversationId)
             .eq("status", "pending");
           if (error) throw new Error(error.message);
         } else {
@@ -342,7 +498,7 @@ export async function runPipelineAdvanceJob(
     } catch (error) {
       console.error(
         "[pipeline-advance] batch failed",
-        group.map(({ candidate }) => candidate.conversationId),
+        group.map((item) => item.conversationId),
         error,
       );
       errors += group.length;
@@ -354,7 +510,7 @@ export async function runPipelineAdvanceJob(
     (existingRows ?? []).map((row) => [row.conversation_id, row] as const),
   );
   for (const row of conversationsForAi) {
-    if (candidateIds.has(row.id)) continue;
+    if (candidateIds.has(row.id) || readyIds.has(row.id) || factsOnlyIds.has(row.id)) continue;
     if (row.replyState !== "customer_replied") {
       markAnalyzedIds.push(row.id);
       continue;
@@ -373,7 +529,7 @@ export async function runPipelineAdvanceJob(
   await markConversationsAnalyzed(crm, markAnalyzedIds);
 
   console.log(
-    `[pipeline-advance] done scanned=${candidates.length} suggested=${suggested} auto=${autoApplied} skipped=${skipped} errors=${errors}`,
+    `[pipeline-advance] done scanned=${candidates.length} suggested=${suggested} auto=${autoApplied} skipped=${skipped} qualified=${qualified} errors=${errors}`,
   );
   return {
     ok: true,
@@ -382,6 +538,7 @@ export async function runPipelineAdvanceJob(
     autoApplied,
     skipped,
     errors,
+    qualified,
   };
 }
 
@@ -394,7 +551,7 @@ export async function runPipelineAdvanceBackfill(
     const result = await runPipelineAdvanceJob(limit);
     rounds.push(result);
     console.log(
-      `[pipeline-advance] backfill round ${round + 1}/${maxRounds} scanned=${result.scanned} suggested=${result.suggested} auto=${result.autoApplied} skipped=${result.skipped} errors=${result.errors}`,
+      `[pipeline-advance] backfill round ${round + 1}/${maxRounds} scanned=${result.scanned} suggested=${result.suggested} auto=${result.autoApplied} skipped=${result.skipped} qualified=${result.qualified} errors=${result.errors}`,
     );
     if (result.scanned === 0) break;
   }

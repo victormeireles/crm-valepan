@@ -74,6 +74,10 @@ export interface Database {
           client_category: string | null;
           network_type: string | null;
           zip_code: string | null;
+          street: string | null;
+          neighborhood: string | null;
+          city: string | null;
+          state: string | null;
           weekly_bread_consumption: number | null;
           bread_type: string | null;
           bread_weight_grams: number | null;
@@ -95,6 +99,10 @@ export interface Database {
           client_category?: string | null;
           network_type?: string | null;
           zip_code?: string | null;
+          street?: string | null;
+          neighborhood?: string | null;
+          city?: string | null;
+          state?: string | null;
           weekly_bread_consumption?: number | null;
           bread_type?: string | null;
           bread_weight_grams?: number | null;
