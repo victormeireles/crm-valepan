@@ -1,6 +1,12 @@
 "use client";
 
 import { loadInboxConversationView, type InboxConversationView } from "@/app/actions/inbox";
+import {
+  loadPipelineClassificationCatalog,
+  settlePendingAdvanceSuggestion,
+  type PipelineClassificationCatalog,
+} from "@/app/actions/pipeline-advance";
+import { ConversationPipelineSelect } from "@/app/(dashboard)/inbox/conversation-classification-select";
 import { ContactAvatar } from "@/components/contact-avatar";
 import { CrmIcon } from "@/components/crm-icon";
 import {
@@ -9,6 +15,7 @@ import {
 } from "@/lib/pipeline-conversation-peek";
 import dynamic from "next/dynamic";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
 const PipelineConversationBody = dynamic(
@@ -31,26 +38,49 @@ function PeekThreadSkeleton() {
 export function PipelineConversationPeek({
   target,
   onClose,
+  catalog: catalogProp = null,
 }: {
   target: PipelineConversationPeekTarget | null;
   onClose: () => void;
+  catalog?: PipelineClassificationCatalog | null;
 }) {
+  const router = useRouter();
   const dialogRef = useRef<HTMLDialogElement>(null);
   const requestVersion = useRef(0);
   const [reloadNonce, setReloadNonce] = useState(0);
+  const [portalRoot, setPortalRoot] = useState<HTMLElement | null>(null);
   const [view, setView] = useState<InboxConversationView | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [catalog, setCatalog] = useState<PipelineClassificationCatalog | null>(catalogProp);
+  const [classifyError, setClassifyError] = useState<string | null>(null);
 
   useEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return;
     if (target) {
       if (!dialog.open) dialog.showModal();
+      setPortalRoot(dialog);
     } else if (dialog.open) {
       dialog.close();
     }
   }, [target]);
+
+  useEffect(() => {
+    setCatalog(catalogProp);
+  }, [catalogProp]);
+
+  useEffect(() => {
+    if (!target || catalog) return;
+    let cancelled = false;
+    void loadPipelineClassificationCatalog().then((result) => {
+      if (cancelled || !result.ok) return;
+      setCatalog(result.catalog);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [target, catalog]);
 
   useEffect(() => {
     if (!target) {
@@ -138,6 +168,71 @@ export function PipelineConversationPeek({
               <CrmIcon name="close" className="text-lg" />
             </button>
           </div>
+          {visibleView?.conversation.leadId ? (
+            <div className="mt-3 border-t border-[var(--vp-ink-line)] pt-3">
+              {catalog ? (
+                <ConversationPipelineSelect
+                  key={visibleView.conversation.id}
+                  conversationId={visibleView.conversation.id}
+                  leadId={visibleView.conversation.leadId}
+                  stages={catalog.stages}
+                  substages={catalog.substages}
+                  distributors={catalog.distributors}
+                  stageId={visibleView.conversation.stageId}
+                  substage={visibleView.conversation.substage}
+                  distributorId={visibleView.conversation.distributorId}
+                  distributorName={visibleView.conversation.distributorName}
+                  layout="stack"
+                  portalRoot={portalRoot}
+                  skipRefresh
+                  onSaved={(next) => {
+                    setView((current) =>
+                      current
+                        ? {
+                            ...current,
+                            conversation: {
+                              ...current.conversation,
+                              stageId: next.stageId,
+                              substage: next.substage,
+                            },
+                          }
+                        : current,
+                    );
+                    setClassifyError(null);
+                    void settlePendingAdvanceSuggestion({
+                      conversationId: visibleView.conversation.id,
+                      stageId: next.stageId,
+                      substage: next.substage,
+                    }).then((result) => {
+                      if (!result.ok) {
+                        setClassifyError(result.error);
+                        return;
+                      }
+                      router.refresh();
+                    });
+                  }}
+                  onDistributorSaved={(distributorId) => {
+                    setView((current) =>
+                      current
+                        ? {
+                            ...current,
+                            conversation: { ...current.conversation, distributorId },
+                          }
+                        : current,
+                    );
+                  }}
+                />
+              ) : (
+                <div className="grid gap-2" aria-hidden>
+                  <div className="h-11 animate-pulse rounded-[10px] bg-[var(--vp-surface)]" />
+                  <div className="h-11 animate-pulse rounded-[10px] bg-[var(--vp-surface)]" />
+                </div>
+              )}
+              {classifyError ? (
+                <p role="alert" className="mt-2 text-xs text-[var(--vp-error)]">{classifyError}</p>
+              ) : null}
+            </div>
+          ) : null}
         </header>
         {error ? (
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 text-center">

@@ -9,6 +9,7 @@ import {
   conversationReplyState,
   emptyChatFacts,
   evaluateAdvanceAccept,
+  suggestionResolutionStatus,
   formatConversationTranscriptForModel,
   isForwardPipelineAdvance,
   parseModelAdvanceBatchJson,
@@ -588,6 +589,35 @@ describe("selectAdvanceCandidates", () => {
     });
     expect(selected.map((row) => row.conversationId)).toEqual(["c1"]);
     expect(selected[0]?.opportunityId).toBe("o1");
+  });
+});
+
+describe("suggestionResolutionStatus", () => {
+  it("aceita o destino da IA e dispensa quando a pessoa escolhe outro", () => {
+    expect(
+      suggestionResolutionStatus({
+        suggestedStageId: "negociacao",
+        suggestedSubstage: "Pediu amostra",
+        chosenStageId: "negociacao",
+        chosenSubstage: "Pediu amostra",
+      }),
+    ).toBe("accepted");
+    expect(
+      suggestionResolutionStatus({
+        suggestedStageId: "negociacao",
+        suggestedSubstage: "Pediu amostra",
+        chosenStageId: "qualificacao",
+        chosenSubstage: "Pediu amostra",
+      }),
+    ).toBe("dismissed");
+    expect(
+      suggestionResolutionStatus({
+        suggestedStageId: "negociacao",
+        suggestedSubstage: null,
+        chosenStageId: "negociacao",
+        chosenSubstage: "  ",
+      }),
+    ).toBe("accepted");
   });
 });
 

@@ -552,6 +552,19 @@ export function evaluateAdvanceAccept(input: {
   return { action: "expire" };
 }
 
+/** Aceitar só quando o destino confirmado é o da IA. Outro destino encerra a sugestão sem contá-la como acerto. */
+export function suggestionResolutionStatus(input: {
+  suggestedStageId: string;
+  suggestedSubstage: string | null;
+  chosenStageId: string;
+  chosenSubstage: string | null;
+}): "accepted" | "dismissed" {
+  const sameStage = input.chosenStageId === input.suggestedStageId;
+  const sameSubstage =
+    (input.chosenSubstage ?? "").trim() === (input.suggestedSubstage ?? "").trim();
+  return sameStage && sameSubstage ? "accepted" : "dismissed";
+}
+
 export function isOpenAdvanceStage(name: string | null | undefined): boolean {
   const key = canonicalPipelineStageKey(name ?? "") as CanonicalPipelineStageName | string;
   return key === "LEADS" || key === "QUALIFICAÇÃO" || key === "NEGOCIAÇÃO";

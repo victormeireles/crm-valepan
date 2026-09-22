@@ -1,12 +1,21 @@
 "use server";
 
 import { updateConversationPipelineClassification } from "@/app/actions/inbox";
-import { evaluateAdvanceAccept } from "@/lib/pipeline-advance";
+import { distributorOptionLabel, isPlaceholderDistributorName, type DistributorOption } from "@/lib/distributors";
+import { evaluateAdvanceAccept, suggestionResolutionStatus } from "@/lib/pipeline-advance";
 import { runPipelineAdvanceJob } from "@/lib/pipeline-advance-job";
+import { canonicalPipelineStageKey, selectCanonicalPipelineStages } from "@/lib/pipeline-canonical-stages";
+import { isPipelineSubstageStageKey, type PipelineSubstageDTO } from "@/lib/pipeline-substages";
 import { createServerSupabaseClient, crmTables } from "@/lib/supabase/server";
 import { nestOne } from "@/lib/supabase/nested";
 import { displayCompanyName, displayPersonName } from "@/lib/lead-identity";
 import { revalidatePath } from "next/cache";
+
+export type PipelineClassificationCatalog = {
+  stages: { id: string; name: string; sortOrder: number; isFinal: boolean }[];
+  substages: PipelineSubstageDTO[];
+  distributors: DistributorOption[];
+};
 
 export type PipelineAdvanceSuggestionDTO = {
   id: string;
@@ -16,8 +25,11 @@ export type PipelineAdvanceSuggestionDTO = {
   companyLine: string | null;
   fromStageName: string;
   fromSubstage: string | null;
+  toStageId: string;
   toStageName: string;
   toSubstage: string | null;
+  distributorId: string | null;
+  distributorName: string | null;
   toClassification: string;
   rationale: string;
   evidenceQuote: string;
@@ -41,7 +53,7 @@ export async function listPendingPipelineAdvanceSuggestions(): Promise<{
   const { data, error } = await crm
     .from("pipeline_advance_suggestions")
     .select(
-      "id, lead_id, conversation_id, from_stage_id, to_stage_id, from_substage, to_substage, to_classification, rationale, evidence_quote, confidence, leads(phone_e164, client_category, contacts(full_name), companies(name), distributors(name))",
+      "id, lead_id, conversation_id, from_stage_id, to_stage_id, from_substage, to_substage, to_classification, rationale, evidence_quote, confidence, leads(phone_e164, client_category, contacts(full_name), companies(name), distributors(id, name))",
     )
     .eq("status", "pending")
     .order("created_at", { ascending: false })
@@ -68,8 +80,11 @@ export async function listPendingPipelineAdvanceSuggestions(): Promise<{
       }),
       fromStageName: stageNameById.get(row.from_stage_id) ?? "",
       fromSubstage: row.from_substage,
+      toStageId: row.to_stage_id,
       toStageName: stageNameById.get(row.to_stage_id) ?? "",
       toSubstage: row.to_substage,
+      distributorId: distributor?.id ?? null,
+      distributorName: distributor?.name ?? null,
       toClassification: row.to_classification,
       rationale: row.rationale,
       evidenceQuote: row.evidence_quote,
@@ -98,6 +113,8 @@ export async function countPendingPipelineAdvanceSuggestions(): Promise<number> 
 export async function resolvePipelineAdvanceSuggestion(input: {
   id: string;
   action: "accept" | "dismiss";
+  stageId?: string | null;
+  substage?: string | null;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   const id = input.id.trim();
   if (!id) return { ok: false, error: "Sugestão inválida." };
@@ -140,44 +157,57 @@ export async function resolvePipelineAdvanceSuggestion(input: {
     return { ok: true };
   }
 
-  const { data: opportunity } = await crm
-    .from("opportunities")
-    .select("id, stage_id, lost_reason, pipeline_stages(name)")
-    .eq("id", suggestion.opportunity_id)
-    .maybeSingle();
-  const { data: suggestedStage } = await crm
-    .from("pipeline_stages")
-    .select("name")
-    .eq("id", suggestion.to_stage_id)
-    .maybeSingle();
-  const currentStage = nestOne(opportunity?.pipeline_stages);
-  const decision = evaluateAdvanceAccept({
-    currentStageName: currentStage?.name ?? "",
-    suggestedStageName: suggestedStage?.name ?? "",
-    currentSubstage: opportunity?.lost_reason ?? null,
+  const chosenStageId = (input.stageId ?? "").trim() || suggestion.to_stage_id;
+  const chosenSubstage = (input.stageId ?? "").trim()
+    ? (input.substage ?? "").trim() || null
+    : suggestion.to_substage;
+  const resolution = suggestionResolutionStatus({
+    suggestedStageId: suggestion.to_stage_id,
     suggestedSubstage: suggestion.to_substage,
+    chosenStageId,
+    chosenSubstage,
   });
 
-  if (decision.action === "expire") {
-    await crm
-      .from("pipeline_advance_suggestions")
-      .update({
-        status: "expired",
-        resolved_at: nowIso,
-        resolved_by: user.id,
-        updated_at: nowIso,
-      })
-      .eq("id", id)
-      .eq("status", "pending");
-    revalidatePath("/pipeline");
-    revalidatePath("/pipeline/sugestoes");
-    return { ok: false, error: "O funil já não precisa desta sugestão." };
+  if (resolution === "accepted") {
+    const { data: opportunity } = await crm
+      .from("opportunities")
+      .select("id, stage_id, lost_reason, pipeline_stages(name)")
+      .eq("id", suggestion.opportunity_id)
+      .maybeSingle();
+    const { data: suggestedStage } = await crm
+      .from("pipeline_stages")
+      .select("name")
+      .eq("id", suggestion.to_stage_id)
+      .maybeSingle();
+    const currentStage = nestOne(opportunity?.pipeline_stages);
+    const decision = evaluateAdvanceAccept({
+      currentStageName: currentStage?.name ?? "",
+      suggestedStageName: suggestedStage?.name ?? "",
+      currentSubstage: opportunity?.lost_reason ?? null,
+      suggestedSubstage: suggestion.to_substage,
+    });
+
+    if (decision.action === "expire") {
+      await crm
+        .from("pipeline_advance_suggestions")
+        .update({
+          status: "expired",
+          resolved_at: nowIso,
+          resolved_by: user.id,
+          updated_at: nowIso,
+        })
+        .eq("id", id)
+        .eq("status", "pending");
+      revalidatePath("/pipeline");
+      revalidatePath("/pipeline/sugestoes");
+      return { ok: false, error: "O funil já não precisa desta sugestão." };
+    }
   }
 
   const classified = await updateConversationPipelineClassification({
     conversationId: suggestion.conversation_id,
-    stageId: suggestion.to_stage_id,
-    substage: suggestion.to_substage,
+    stageId: chosenStageId,
+    substage: chosenSubstage,
   });
   if (!classified.ok) return classified;
   await crm
@@ -188,7 +218,7 @@ export async function resolvePipelineAdvanceSuggestion(input: {
   const { error: acceptError } = await crm
     .from("pipeline_advance_suggestions")
     .update({
-      status: "accepted",
+      status: resolution,
       resolved_at: nowIso,
       resolved_by: user.id,
       updated_at: nowIso,
@@ -197,6 +227,120 @@ export async function resolvePipelineAdvanceSuggestion(input: {
     .eq("status", "pending");
   if (acceptError) return { ok: false, error: acceptError.message };
 
+  revalidatePath("/pipeline");
+  revalidatePath("/pipeline/sugestoes");
+  revalidatePath("/inbox");
+  return { ok: true };
+}
+
+export async function loadPipelineClassificationCatalog(): Promise<
+  { ok: true; catalog: PipelineClassificationCatalog } | { ok: false; error: string }
+> {
+  const supabase = await createServerSupabaseClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Não autenticado" };
+  const crm = crmTables(supabase);
+  const [stagesResult, substagesResult, distributorsResult] = await Promise.all([
+    crm.from("pipeline_stages").select("id, name, sort_order, is_final").order("sort_order", { ascending: true }),
+    crm.from("lost_reasons").select("id, name, stage_key, sort_order, active").order("sort_order", { ascending: true }),
+    crm
+      .from("distributors")
+      .select("id, name, distributor_regions(region_name, state)")
+      .eq("active", true)
+      .not("name", "ilike", "PENDENTE CARTEIRA · %")
+      .order("name", { ascending: true }),
+  ]);
+  if (stagesResult.error) return { ok: false, error: stagesResult.error.message };
+  if (substagesResult.error) return { ok: false, error: substagesResult.error.message };
+  if (distributorsResult.error) return { ok: false, error: distributorsResult.error.message };
+
+  const stages = selectCanonicalPipelineStages(stagesResult.data ?? []).map((stage) => ({
+    id: stage.id,
+    name: stage.name,
+    sortOrder: stage.sort_order,
+    isFinal: stage.is_final,
+  }));
+  const substages = (substagesResult.data ?? []).flatMap((row) => {
+    if (!isPipelineSubstageStageKey(row.stage_key)) return [];
+    return [{
+      id: row.id,
+      name: row.name,
+      stage_key: canonicalPipelineStageKey(row.stage_key) as PipelineSubstageDTO["stage_key"],
+      sort_order: row.sort_order,
+      active: row.active,
+    }];
+  });
+  const distributors = (distributorsResult.data ?? [])
+    .filter((row) => !isPlaceholderDistributorName(row.name))
+    .map((row) => {
+      const regions = row.distributor_regions as
+        | { region_name: string; state: string | null }
+        | { region_name: string; state: string | null }[]
+        | null;
+      const region = Array.isArray(regions) ? regions[0] : regions;
+      return {
+        id: row.id,
+        name: distributorOptionLabel({
+          name: row.name,
+          city: region?.region_name,
+          state: region?.state,
+        }),
+      };
+    });
+
+  return { ok: true, catalog: { stages, substages, distributors } };
+}
+
+/** Encerra a sugestão pendente depois que a pessoa classifica no chat, para o Aceitar não sobrescrever. */
+export async function settlePendingAdvanceSuggestion(input: {
+  conversationId: string;
+  stageId: string | null;
+  substage: string | null;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const conversationId = input.conversationId.trim();
+  if (!conversationId) return { ok: false, error: "Conversa inválida." };
+  const supabase = await createServerSupabaseClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Não autenticado" };
+  const crm = crmTables(supabase);
+  const { data: suggestion, error } = await crm
+    .from("pipeline_advance_suggestions")
+    .select("id, to_stage_id, to_substage, status")
+    .eq("conversation_id", conversationId)
+    .eq("status", "pending")
+    .maybeSingle();
+  if (error) return { ok: false, error: error.message };
+  if (!suggestion) return { ok: true };
+
+  const chosenStageId = (input.stageId ?? "").trim();
+  const nowIso = new Date().toISOString();
+  const status = chosenStageId
+    ? suggestionResolutionStatus({
+        suggestedStageId: suggestion.to_stage_id,
+        suggestedSubstage: suggestion.to_substage,
+        chosenStageId,
+        chosenSubstage: input.substage,
+      })
+    : "dismissed";
+  const { error: updateError } = await crm
+    .from("pipeline_advance_suggestions")
+    .update({
+      status,
+      resolved_at: nowIso,
+      resolved_by: user.id,
+      updated_at: nowIso,
+    })
+    .eq("id", suggestion.id)
+    .eq("status", "pending");
+  if (updateError) return { ok: false, error: updateError.message };
+  await crm
+    .from("conversations")
+    .update({ pipeline_ai_analyzed: true, updated_at: nowIso })
+    .eq("id", conversationId);
   revalidatePath("/pipeline");
   revalidatePath("/pipeline/sugestoes");
   revalidatePath("/inbox");
