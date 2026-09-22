@@ -86,7 +86,6 @@ export function LeadActions({
           distributorId ? { id: distributorId, name: distributorName || "Distribuidor atual" } : null,
         )}
         distributorId={distributorId}
-        className="rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1"
       />
     </label>
   ) : null;

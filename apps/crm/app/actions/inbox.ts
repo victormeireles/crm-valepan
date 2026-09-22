@@ -262,7 +262,7 @@ export async function loadInboxConversationView(conversationId: string) {
   const [conversationTimed, tailTimed] = await Promise.all([
     timeInboxOperation("selected_conversation", crm.from("conversations").select(`
       id, phone_e164, conversation_kind, group_display_name, last_read_at,
-      leads(id, client_category, excluded_from_pipeline_at,
+      leads(id, client_category, excluded_from_pipeline_at, city, state,
         contacts(full_name, avatar_url),
         companies(name, city, state),
         distributors(id, name),
@@ -317,7 +317,7 @@ export async function loadInboxConversationView(conversationId: string) {
       phone: conversation.phone_e164,
       headerName,
       headerCompany,
-      location: [company?.city, company?.state].filter(Boolean).join(", ") || null,
+      location: [lead?.city ?? company?.city, lead?.state ?? company?.state].filter(Boolean).join(", ") || null,
       avatarUrl: validInboxAvatarUrl(contact?.avatar_url),
       firstName: headerName.trim().split(/\s+/)[0] || "cliente",
       lastReadAt: conversation.last_read_at ?? null,
@@ -354,8 +354,8 @@ export async function loadInboxLeadPanel(conversationId: string) {
   const [conversationTimed, stagesTimed, profilesTimed] = await Promise.all([
     timeInboxOperation("lead_details", crm.from("conversations").select(`
       id, phone_e164,
-      leads(id, owner_id, client_category, zip_code, weekly_bread_consumption,
-        bread_type, bread_weight_grams,
+      leads(id, owner_id, client_category, zip_code, street, neighborhood, city, state,
+        weekly_bread_consumption, bread_type, bread_weight_grams,
         contacts(full_name), companies(name, document, city, state), distributors(name),
         opportunities(id, stage_id, lost_reason, updated_at)
       )
@@ -401,9 +401,11 @@ export async function loadInboxLeadPanel(conversationId: string) {
     initialCategory: lead.client_category ?? null,
     initialStageId: opportunity?.stage_id ?? null,
     initialSubstage: opportunity?.lost_reason ?? null,
-    initialState: company?.state ?? null,
-    initialCity: company?.city ?? null,
+    initialState: lead.state ?? company?.state ?? null,
+    initialCity: lead.city ?? company?.city ?? null,
     initialZipCode: lead.zip_code ?? null,
+    initialStreet: lead.street ?? null,
+    initialNeighborhood: lead.neighborhood ?? null,
     initialWeeklyBreadConsumption: lead.weekly_bread_consumption ?? null,
     initialBreadWeightGrams: lead.bread_weight_grams ?? null,
     initialBreadType: lead.bread_type ?? null,

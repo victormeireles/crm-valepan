@@ -1,6 +1,7 @@
 "use client";
 
-import { updateConversationLeadQualification } from "@/app/actions/leads";
+import { lookupLeadCep, updateConversationLeadQualification } from "@/app/actions/leads";
+import { formatCaptureZip } from "@/lib/lead-capture";
 import { CityAutocompleteInput } from "@/components/city-autocomplete-input";
 import { formatLocalizedInteger } from "@/lib/parse-localized-integer";
 import { useRouter } from "next/navigation";
@@ -23,6 +24,8 @@ type Props = {
   initialState: string | null;
   initialCity: string | null;
   initialZipCode: string | null;
+  initialStreet: string | null;
+  initialNeighborhood: string | null;
   initialWeeklyBreadConsumption: number | null;
   initialCompanyName: string | null;
   initialCnpj: string | null;
@@ -41,7 +44,10 @@ export function LeadQualificationModal(props: Props) {
   const [stageId, setStageId] = useState(props.initialStageId ?? "");
   const [state, setState] = useState(props.initialState ?? "");
   const [city, setCity] = useState(props.initialCity ?? "");
-  const [zipCode, setZipCode] = useState(props.initialZipCode ?? "");
+  const [zipCode, setZipCode] = useState(formatCaptureZip(props.initialZipCode ?? ""));
+  const [street, setStreet] = useState(props.initialStreet ?? "");
+  const [neighborhood, setNeighborhood] = useState(props.initialNeighborhood ?? "");
+  const [cepStatus, setCepStatus] = useState<string | null>(null);
   const [weeklyBreadConsumption, setWeeklyBreadConsumption] = useState(
     formatInitialInt(props.initialWeeklyBreadConsumption),
   );
@@ -57,7 +63,10 @@ export function LeadQualificationModal(props: Props) {
     setStageId(props.initialStageId ?? "");
     setState(props.initialState ?? "");
     setCity(props.initialCity ?? "");
-    setZipCode(props.initialZipCode ?? "");
+    setZipCode(formatCaptureZip(props.initialZipCode ?? ""));
+    setStreet(props.initialStreet ?? "");
+    setNeighborhood(props.initialNeighborhood ?? "");
+    setCepStatus(null);
     setWeeklyBreadConsumption(formatInitialInt(props.initialWeeklyBreadConsumption));
     setCompanyName(props.initialCompanyName ?? "");
     setCnpj(props.initialCnpj ?? "");
@@ -72,6 +81,8 @@ export function LeadQualificationModal(props: Props) {
     props.initialState,
     props.initialCity,
     props.initialZipCode,
+    props.initialStreet,
+    props.initialNeighborhood,
     props.initialWeeklyBreadConsumption,
     props.initialCompanyName,
     props.initialCnpj,
@@ -89,6 +100,8 @@ export function LeadQualificationModal(props: Props) {
       state: state.trim() || null,
       city: city.trim() || null,
       zipCode: zipCode.trim() || null,
+      street: street.trim() || null,
+      neighborhood: neighborhood.trim() || null,
       weeklyBreadConsumption: weeklyBreadConsumption.trim() || null,
       companyName: companyName.trim() || null,
       cnpj: cnpj.trim() || null,
@@ -187,7 +200,49 @@ export function LeadQualificationModal(props: Props) {
                 <input
                   className="rounded border border-[var(--border)] bg-[var(--vp-paper)] px-2 py-1.5 text-sm"
                   value={zipCode}
-                  onChange={(e) => setZipCode(e.target.value)}
+                  inputMode="numeric"
+                  autoComplete="postal-code"
+                  placeholder="00000-000"
+                  onChange={(e) => {
+                    const formatted = formatCaptureZip(e.target.value);
+                    setZipCode(formatted);
+                    const digits = formatted.replace(/\D/g, "");
+                    if (digits.length !== 8) {
+                      setCepStatus(null);
+                      return;
+                    }
+                    setCepStatus("Buscando CEP…");
+                    void lookupLeadCep(digits).then((result) => {
+                      if (!result.ok) {
+                        setCepStatus(result.error);
+                        return;
+                      }
+                      setStreet(result.address.street ?? "");
+                      setNeighborhood(result.address.neighborhood ?? "");
+                      setCity(result.address.city);
+                      setState(result.address.state);
+                      setCepStatus(null);
+                    });
+                  }}
+                />
+                {cepStatus ? <span className="text-[11px] text-[var(--muted)]">{cepStatus}</span> : null}
+              </label>
+
+              <label className="flex flex-col gap-1 text-xs">
+                Logradouro
+                <input
+                  className="rounded border border-[var(--border)] bg-[var(--vp-paper)] px-2 py-1.5 text-sm"
+                  value={street}
+                  onChange={(e) => setStreet(e.target.value)}
+                />
+              </label>
+
+              <label className="flex flex-col gap-1 text-xs">
+                Bairro
+                <input
+                  className="rounded border border-[var(--border)] bg-[var(--vp-paper)] px-2 py-1.5 text-sm"
+                  value={neighborhood}
+                  onChange={(e) => setNeighborhood(e.target.value)}
                 />
               </label>
 

@@ -1,14 +1,16 @@
 "use client";
 
-import { updateConversationLeadQualification, updateLeadOwner } from "@/app/actions/leads";
+import { lookupLeadCep, updateConversationLeadQualification, updateLeadOwner } from "@/app/actions/leads";
+import { formatCaptureZip } from "@/lib/lead-capture";
 import { updateConversationPipelineClassification } from "@/app/actions/inbox";
 import { CityAutocompleteInput } from "@/components/city-autocomplete-input";
+import { CrmMenuSelect } from "@/components/crm-menu-select";
 import { LeadDistributorSelect } from "@/components/lead-distributor-select";
 import { distributorOptionsForSelect, type DistributorOption } from "@/lib/distributors";
 import { CrmIcon, type CrmIconName } from "@/components/crm-icon";
 import { LeadFollowUp } from "@/components/lead-follow-up";
 import type { LeadFollowUpDTO } from "@/lib/follow-ups";
-import { useMemo, useRef, useState } from "react";
+import { useId, useMemo, useRef, useState } from "react";
 import {
   displayPipelineStageName,
   isLostPipelineStage,
@@ -35,6 +37,8 @@ export type InboxLeadPanelProps = {
   initialState: string | null;
   initialCity: string | null;
   initialZipCode: string | null;
+  initialStreet: string | null;
+  initialNeighborhood: string | null;
   initialWeeklyBreadConsumption: number | null;
   initialBreadWeightGrams: number | null;
   initialBreadType: string | null;
@@ -60,6 +64,8 @@ type QualificationState = {
   state: string;
   city: string;
   zipCode: string;
+  street: string;
+  neighborhood: string;
   weeklyBreadConsumption: string;
   breadWeightGrams: string;
   breadType: string;
@@ -73,7 +79,9 @@ export function InboxLeadPanel(props: InboxLeadPanelProps) {
     stageId: props.initialStageId ?? "",
     state: props.initialState ?? "",
     city: props.initialCity ?? "",
-    zipCode: props.initialZipCode ?? "",
+    zipCode: formatCaptureZip(props.initialZipCode ?? ""),
+    street: props.initialStreet ?? "",
+    neighborhood: props.initialNeighborhood ?? "",
     weeklyBreadConsumption: props.initialWeeklyBreadConsumption == null ? "" : String(props.initialWeeklyBreadConsumption),
     breadWeightGrams: props.initialBreadWeightGrams == null ? "" : String(props.initialBreadWeightGrams),
     breadType: props.initialBreadType ?? "",
@@ -89,6 +97,7 @@ export function InboxLeadPanel(props: InboxLeadPanelProps) {
   const saveVersionRef = useRef(0);
 
   const [volumeDraft, setVolumeDraft] = useState(qualification.weeklyBreadConsumption);
+  const cepFieldId = useId();
 
   function updateQualificationDraft(patch: Partial<QualificationState>) {
     const next = { ...qualificationRef.current, ...patch };
@@ -111,6 +120,8 @@ export function InboxLeadPanel(props: InboxLeadPanelProps) {
           state: next.state || null,
           city: next.city || null,
           zipCode: next.zipCode || null,
+          street: next.street || null,
+          neighborhood: next.neighborhood || null,
           weeklyBreadConsumption: next.weeklyBreadConsumption || null,
           companyName: next.companyName || null,
           cnpj: next.cnpj || null,
@@ -134,6 +145,39 @@ export function InboxLeadPanel(props: InboxLeadPanelProps) {
     const queued = saveQueueRef.current.then(persist, persist);
     saveQueueRef.current = queued;
     return queued;
+  }
+
+  function onZipChange(raw: string) {
+    updateQualificationDraft({ zipCode: formatCaptureZip(raw) });
+  }
+
+  async function lookupAddressFromCep() {
+    const formatted = formatCaptureZip(qualificationRef.current.zipCode);
+    const digits = formatted.replace(/\D/g, "");
+    if (digits.length !== 8) {
+      setError("Informe um CEP com 8 dígitos.");
+      return;
+    }
+    setSavingField("zip");
+    setError(null);
+    try {
+      const lookedUp = await lookupLeadCep(digits);
+      if (!lookedUp.ok) {
+        setError(lookedUp.error);
+        setSavingField(null);
+        return;
+      }
+      await saveQualification({
+        zipCode: formatCaptureZip(lookedUp.address.zipCode),
+        street: lookedUp.address.street ?? "",
+        neighborhood: lookedUp.address.neighborhood ?? "",
+        city: lookedUp.address.city,
+        state: lookedUp.address.state,
+      }, "zip");
+    } catch {
+      setError("Não foi possível buscar o CEP. Tente novamente.");
+      setSavingField(null);
+    }
   }
 
   async function saveOwner(nextOwnerId: string) {
@@ -210,79 +254,132 @@ export function InboxLeadPanel(props: InboxLeadPanelProps) {
         <section>
           <p className="mb-2 text-[10px] font-extrabold uppercase tracking-[0.14em] text-[var(--vp-ink-soft)]">Qualificação</p>
           <div className="space-y-2">
-            <label className="flex min-h-11 items-center justify-between gap-2.5 rounded-[10px] border border-[var(--vp-ink-line)] bg-[var(--vp-paper)] px-3">
-              <span className="text-[11px] font-bold uppercase tracking-[0.06em] text-[var(--vp-ink-soft)]">Etapa</span>
-              <select
-                className={controlClass}
-                value={qualification.stageId}
-                onChange={(event) => {
-                  const next = event.target.value;
-                  const stage = orderedStages.find((item) => item.id === next) ?? null;
-                  const nextOptions = substagesForStageKey(props.substages, stage?.name ?? null, "");
-                  const nextStatus = nextOptions.includes(substage) ? substage : "";
-                  void saveStageAndStatus(next, nextStatus);
-                }}
-              >
-                <option value="">Não definida</option>
-                {orderedStages.map((stage) => (
-                  <option key={stage.id} value={stage.id}>{displayPipelineStageName(stage.name)}</option>
-                ))}
-              </select>
-            </label>
-            <label className="flex min-h-11 items-center justify-between gap-2.5 rounded-[10px] border border-[var(--vp-ink-line)] bg-[var(--vp-paper)] px-3">
-              <span className="text-[11px] font-bold uppercase tracking-[0.06em] text-[var(--vp-ink-soft)]">Status</span>
-              <select
-                className={controlClass}
-                value={substage}
-                disabled={!qualification.stageId || statusOptions.length === 0}
-                onChange={(event) => void saveStageAndStatus(qualification.stageId, event.target.value)}
-              >
-                <option value="">{statusRequired ? "Selecione o status" : "Sem status"}</option>
-                {statusOptions.map((name) => (
-                  <option key={name} value={name}>{name}</option>
-                ))}
-              </select>
-            </label>
+            <CrmMenuSelect
+              label="Etapa"
+              variant="row"
+              value={qualification.stageId}
+              disabled={savingField === "stage"}
+              options={[
+                { value: "", label: "Não definida" },
+                ...orderedStages.map((stage) => ({
+                  value: stage.id,
+                  label: displayPipelineStageName(stage.name),
+                })),
+              ]}
+              onChange={(next) => {
+                const stage = orderedStages.find((item) => item.id === next) ?? null;
+                const nextOptions = substagesForStageKey(props.substages, stage?.name ?? null, "");
+                const nextStatus = nextOptions.includes(substage) ? substage : "";
+                void saveStageAndStatus(next, nextStatus);
+              }}
+            />
+            <CrmMenuSelect
+              label="Status"
+              variant="row"
+              value={substage}
+              disabled={!qualification.stageId || statusOptions.length === 0 || savingField === "stage"}
+              options={[
+                { value: "", label: statusRequired ? "Selecione o status" : "Sem status" },
+                ...statusOptions.map((name) => ({ value: name, label: name })),
+              ]}
+              onChange={(next) => void saveStageAndStatus(qualification.stageId, next)}
+            />
             {isForwardedToDistributorSubstage(substage) ? (
-              <label className="flex min-h-11 items-center justify-between gap-2.5 rounded-[10px] border border-[var(--vp-ink-line)] bg-[var(--vp-paper)] px-3">
-                <span className="text-[11px] font-bold uppercase tracking-[0.06em] text-[var(--vp-ink-soft)]">Distribuidor</span>
-                <LeadDistributorSelect
-                  leadId={props.leadId}
-                  options={distributorOptionsForSelect(
-                    props.distributors ?? [],
-                    props.initialDistributorId
-                      ? {
-                          id: props.initialDistributorId,
-                          name: props.distributorName?.trim() || "Distribuidor atual",
-                        }
-                      : null,
-                  )}
-                  distributorId={props.initialDistributorId ?? null}
-                  onSaved={props.onDistributorChange}
-                  className={controlClass}
-                />
-              </label>
+              <LeadDistributorSelect
+                leadId={props.leadId}
+                options={distributorOptionsForSelect(
+                  props.distributors ?? [],
+                  props.initialDistributorId
+                    ? {
+                        id: props.initialDistributorId,
+                        name: props.distributorName?.trim() || "Distribuidor atual",
+                      }
+                    : null,
+                )}
+                distributorId={props.initialDistributorId ?? null}
+                onSaved={props.onDistributorChange}
+                appearance="row"
+              />
             ) : null}
+            <CrmMenuSelect
+              label="Tipo de cliente"
+              variant="row"
+              value={qualification.category}
+              options={[
+                { value: "", label: "Não informado" },
+                { value: "hamburgueria", label: "Hamburgueria" },
+                { value: "distribuidor", label: "Distribuidor" },
+                { value: "parceiros", label: "Parceiros" },
+                { value: "outros", label: "Outros" },
+              ]}
+              onChange={(next) => void saveQualification({ category: next }, "category")}
+            />
+            <div className="flex min-h-11 items-center justify-between gap-2 rounded-[10px] border border-[var(--vp-ink-line)] bg-[var(--vp-paper)] px-3">
+              <label htmlFor={cepFieldId} className="shrink-0 text-[11px] font-bold uppercase tracking-[0.06em] text-[var(--vp-ink-soft)]">CEP</label>
+              <input
+                id={cepFieldId}
+                className={controlClass}
+                value={qualification.zipCode}
+                inputMode="numeric"
+                autoComplete="postal-code"
+                placeholder="00000-000"
+                onChange={(event) => onZipChange(event.target.value)}
+                onBlur={() => void saveQualification({ zipCode: qualificationRef.current.zipCode }, "zip")}
+              />
+              <button
+                type="button"
+                title="Buscar endereço pelo CEP"
+                className="relative grid size-8 shrink-0 cursor-pointer place-items-center rounded-lg border border-[var(--vp-gold-classic)] bg-[var(--vp-gold-cream)] text-[var(--vp-wine)] transition-colors duration-200 after:absolute after:-inset-1.5 after:content-[''] hover:bg-[var(--vp-gold)] active:bg-[var(--vp-gold-dim)] disabled:cursor-not-allowed disabled:opacity-40"
+                aria-label="Buscar endereço pelo CEP"
+                aria-busy={savingField === "zip"}
+                disabled={savingField === "zip" || qualification.zipCode.replace(/\D/g, "").length !== 8}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => void lookupAddressFromCep()}
+              >
+                <CrmIcon name={savingField === "zip" ? "progress_activity" : "search"} className={`text-base ${savingField === "zip" ? "animate-spin" : ""}`} />
+              </button>
+            </div>
             <label className="flex min-h-11 items-center justify-between gap-2.5 rounded-[10px] border border-[var(--vp-ink-line)] bg-[var(--vp-paper)] px-3">
-              <span className="text-[11px] font-bold uppercase tracking-[0.06em] text-[var(--vp-ink-soft)]">Tipo de cliente</span>
-              <select className={controlClass} value={qualification.category} onChange={(event) => void saveQualification({ category: event.target.value }, "category")}>
-                <option value="">Não informado</option>
-                <option value="hamburgueria">Hamburgueria</option>
-                <option value="distribuidor">Distribuidor</option>
-                <option value="parceiros">Parceiros</option>
-                <option value="outros">Outros</option>
-              </select>
+              <span className="text-[11px] font-bold uppercase tracking-[0.06em] text-[var(--vp-ink-soft)]">Logradouro</span>
+              <input
+                className={controlClass}
+                value={qualification.street}
+                placeholder="Rua, avenida"
+                onChange={(event) => updateQualificationDraft({ street: event.target.value })}
+                onBlur={() => void saveQualification({ street: qualificationRef.current.street }, "street")}
+              />
+            </label>
+            <label className="flex min-h-11 items-center justify-between gap-2.5 rounded-[10px] border border-[var(--vp-ink-line)] bg-[var(--vp-paper)] px-3">
+              <span className="text-[11px] font-bold uppercase tracking-[0.06em] text-[var(--vp-ink-soft)]">Bairro</span>
+              <input
+                className={controlClass}
+                value={qualification.neighborhood}
+                placeholder="Não informado"
+                onChange={(event) => updateQualificationDraft({ neighborhood: event.target.value })}
+                onBlur={() => void saveQualification({ neighborhood: qualificationRef.current.neighborhood }, "neighborhood")}
+              />
             </label>
             <label className="flex min-h-11 items-center justify-between gap-2.5 rounded-[10px] border border-[var(--vp-ink-line)] bg-[var(--vp-paper)] px-3">
               <span className="text-[11px] font-bold uppercase tracking-[0.06em] text-[var(--vp-ink-soft)]">Cidade</span>
               <CityAutocompleteInput
                 className={controlClass}
                 value={qualification.city}
-                  onChange={(city) => updateQualificationDraft({ city })}
-                  onBlur={() => void saveQualification({ city: qualificationRef.current.city }, "city")}
+                onChange={(city) => updateQualificationDraft({ city })}
+                onBlur={() => void saveQualification({ city: qualificationRef.current.city }, "city")}
                 stateFilter={qualification.state}
                 placeholder="Não informada"
                 disabled={savingField === "city"}
+              />
+            </label>
+            <label className="flex min-h-11 items-center justify-between gap-2.5 rounded-[10px] border border-[var(--vp-ink-line)] bg-[var(--vp-paper)] px-3">
+              <span className="text-[11px] font-bold uppercase tracking-[0.06em] text-[var(--vp-ink-soft)]">UF</span>
+              <input
+                className={controlClass}
+                value={qualification.state}
+                maxLength={2}
+                placeholder="UF"
+                onChange={(event) => updateQualificationDraft({ state: event.target.value.toUpperCase() })}
+                onBlur={() => void saveQualification({ state: qualificationRef.current.state }, "state")}
               />
             </label>
             <label className="flex min-h-11 items-center justify-between gap-2.5 rounded-[10px] border border-[var(--vp-ink-line)] bg-[var(--vp-paper)] px-3">
@@ -299,13 +396,17 @@ export function InboxLeadPanel(props: InboxLeadPanelProps) {
                 {volumeDraft ? <span className="text-[11px] font-bold text-[var(--vp-ink-soft)]">pães/sem</span> : null}
               </span>
             </label>
-            <label className="flex min-h-11 items-center justify-between gap-2.5 rounded-[10px] border border-[var(--vp-ink-line)] bg-[var(--vp-paper)] px-3">
-              <span className="text-[11px] font-bold uppercase tracking-[0.06em] text-[var(--vp-ink-soft)]">Responsável</span>
-              <select className={controlClass} value={ownerId} onChange={(event) => void saveOwner(event.target.value)}>
-                <option value="">Sem responsável</option>
-                {props.teamOptions.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
-              </select>
-            </label>
+            <CrmMenuSelect
+              label="Responsável"
+              variant="row"
+              value={ownerId}
+              disabled={savingField === "owner"}
+              options={[
+                { value: "", label: "Sem responsável" },
+                ...props.teamOptions.map((option) => ({ value: option.id, label: option.label })),
+              ]}
+              onChange={(next) => void saveOwner(next)}
+            />
           </div>
           <p className="mt-1.5 min-h-4 text-[11px] text-[var(--vp-ink-soft)]" aria-live="polite">
             {savingField && savingField !== "nextStage" ? "salvando…" : ""}

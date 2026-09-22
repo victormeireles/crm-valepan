@@ -46,7 +46,8 @@ export function CityAutocompleteInput({
         setLoading(false);
         if (res.ok) {
           setSuggestions(res.cities);
-          setOpen(res.cities.length > 0);
+          const inputFocused = rootRef.current?.querySelector("input") === document.activeElement;
+          setOpen(inputFocused && res.cities.length > 0);
         } else {
           setSuggestions([]);
           setOpen(false);

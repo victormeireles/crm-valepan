@@ -17,7 +17,8 @@ import { ToggleTaskButton } from "../../tasks/toggle-task-button";
 import { LeadActions } from "./ui";
 import { LeadFollowUp } from "@/components/lead-follow-up";
 import { toFollowUpDTO } from "@/lib/follow-ups";
-import { formatCaptureZip, formatLeadSource } from "@/lib/lead-capture";
+import { formatLeadSource } from "@/lib/lead-capture";
+import { LeadAddressForm } from "./lead-address-form";
 import { formatCpfCnpj } from "@/lib/cpf-cnpj";
 import { selectCanonicalPipelineStages } from "@/lib/pipeline-canonical-stages";
 
@@ -158,7 +159,6 @@ export default async function LeadDetailPage({
           <p className="text-sm text-[var(--muted)]">
             Status: {lead.status} · Origem: {formatLeadSource(lead.source)}
           </p>
-          {lead.zip_code ? <p className="text-sm text-[var(--muted)]">CEP: {formatCaptureZip(lead.zip_code)}</p> : null}
           {registrations?.map((registration) => registration.cpf_cnpj ? (
             <p key={registration.id} className="text-sm text-[var(--muted)]">
               CPF/CNPJ: {formatCpfCnpj(registration.cpf_cnpj)} · Informado no {formatLeadSource(registration.source)}
@@ -220,6 +220,14 @@ export default async function LeadDetailPage({
       </div>
 
       <section className="grid gap-4 md:grid-cols-2">
+        <LeadAddressForm
+          leadId={id}
+          zipCode={lead.zip_code}
+          street={lead.street}
+          neighborhood={lead.neighborhood}
+          city={lead.city ?? company?.city ?? null}
+          state={lead.state ?? company?.state ?? null}
+        />
         <div className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-4">
           <h2 className="text-sm font-medium">Empresa</h2>
           {company ? (

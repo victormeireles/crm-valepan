@@ -1,6 +1,7 @@
 "use client";
 
 import { updateConversationPipelineClassification } from "@/app/actions/inbox";
+import { CrmMenuSelect } from "@/components/crm-menu-select";
 import { LeadDistributorSelect } from "@/components/lead-distributor-select";
 import type { DistributorOption } from "@/lib/distributors";
 import { distributorOptionsForSelect } from "@/lib/distributors";
@@ -31,6 +32,9 @@ export function ConversationPipelineSelect({
   distributorName,
   onSaved,
   onDistributorSaved,
+  layout = "inline",
+  portalRoot = null,
+  skipRefresh = false,
 }: {
   conversationId: string;
   leadId: string | null;
@@ -43,6 +47,9 @@ export function ConversationPipelineSelect({
   distributorName: string | null;
   onSaved?: (next: { stageId: string | null; substage: string | null }) => void;
   onDistributorSaved?: (distributorId: string | null) => void;
+  layout?: "inline" | "stack";
+  portalRoot?: HTMLElement | null;
+  skipRefresh?: boolean;
 }) {
   const router = useRouter();
   const orderedStages = useMemo(
@@ -90,7 +97,7 @@ export function ConversationPipelineSelect({
       setStageValue(res.stageId ?? "");
       setStatusValue(res.substage ?? "");
       onSaved?.({ stageId: res.stageId, substage: res.substage });
-      router.refresh();
+      if (!skipRefresh) router.refresh();
     } catch {
       setErr("Não foi possível salvar. Tente novamente.");
       setStageValue(stageId ?? "");
@@ -100,77 +107,65 @@ export function ConversationPipelineSelect({
     }
   }
 
-  const controlClass =
-    "min-w-[9.5rem] rounded border border-[var(--border)] bg-[var(--vp-paper-pure)] px-2 py-1.5 text-xs text-[var(--foreground)]";
+  const menuVariant = layout === "stack" ? "row" : "toolbar";
 
   return (
-    <div className="flex flex-wrap items-end justify-end gap-2">
-      <label className="flex flex-col items-end gap-1">
-        <span className="text-[11px] font-medium uppercase tracking-[0.06em] text-[var(--muted)]">
-          Etapa
-        </span>
-        <select
-          value={stageValue}
-          disabled={loading}
-          onChange={(event) => {
-            const next = event.target.value;
-            const stage = orderedStages.find((item) => item.id === next) ?? null;
-            const nextOptions = substagesForStageKey(substages, stage?.name ?? null, "");
-            const nextStatus = nextOptions.includes(statusValue) ? statusValue : "";
-            setStageValue(next);
-            setStatusValue(nextStatus);
-            void persist(next, nextStatus);
-          }}
-          className={controlClass}
-        >
-          <option value="">Não definida</option>
-          {orderedStages.map((stage) => (
-            <option key={stage.id} value={stage.id}>
-              {displayPipelineStageName(stage.name)}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label className="flex flex-col items-end gap-1">
-        <span className="text-[11px] font-medium uppercase tracking-[0.06em] text-[var(--muted)]">
-          Status
-        </span>
-        <select
-          value={statusValue}
-          disabled={loading || !stageValue || statusOptions.length === 0}
-          onChange={(event) => {
-            const next = event.target.value;
-            setStatusValue(next);
-            void persist(stageValue, next);
-          }}
-          className={controlClass}
-        >
-          <option value="">{statusRequired ? "Selecione o status" : "Sem status"}</option>
-          {statusOptions.map((name) => (
-            <option key={name} value={name}>
-              {name}
-            </option>
-          ))}
-        </select>
-      </label>
+    <div className={layout === "stack" ? "grid gap-2" : "flex flex-wrap items-center justify-end gap-2"}>
+      <CrmMenuSelect
+        label="Etapa"
+        portalRoot={portalRoot}
+        variant={menuVariant}
+        value={stageValue}
+        disabled={loading}
+        options={[
+          { value: "", label: "Não definida" },
+          ...orderedStages.map((stage) => ({
+            value: stage.id,
+            label: displayPipelineStageName(stage.name),
+          })),
+        ]}
+        onChange={(next) => {
+          const stage = orderedStages.find((item) => item.id === next) ?? null;
+          const nextOptions = substagesForStageKey(substages, stage?.name ?? null, "");
+          const nextStatus = nextOptions.includes(statusValue) ? statusValue : "";
+          setStageValue(next);
+          setStatusValue(nextStatus);
+          void persist(next, nextStatus);
+        }}
+      />
+      <CrmMenuSelect
+        label="Status"
+        portalRoot={portalRoot}
+        variant={menuVariant}
+        value={statusValue}
+        disabled={loading || !stageValue || statusOptions.length === 0}
+        options={[
+          { value: "", label: statusRequired ? "Selecione o status" : "Sem status" },
+          ...statusOptions.map((name) => ({ value: name, label: name })),
+        ]}
+        onChange={(next) => {
+          setStatusValue(next);
+          void persist(stageValue, next);
+        }}
+      />
       {leadId && isForwardedToDistributorSubstage(statusValue) ? (
-        <label className="flex flex-col items-end gap-1">
-          <span className="text-[11px] font-medium uppercase tracking-[0.06em] text-[var(--muted)]">
-            Distribuidor
-          </span>
-          <LeadDistributorSelect
-            leadId={leadId}
-            options={distributorOptionsForSelect(
-              distributors,
-              distributorId ? { id: distributorId, name: distributorName?.trim() || "Distribuidor atual" } : null,
-            )}
-            distributorId={distributorId}
-            onSaved={onDistributorSaved}
-            className={controlClass}
-          />
-        </label>
+        <LeadDistributorSelect
+          leadId={leadId}
+          options={distributorOptionsForSelect(
+            distributors,
+            distributorId ? { id: distributorId, name: distributorName?.trim() || "Distribuidor atual" } : null,
+          )}
+          distributorId={distributorId}
+          onSaved={onDistributorSaved}
+          appearance={menuVariant}
+          portalRoot={portalRoot}
+        />
       ) : null}
-      {err ? <p className="basis-full text-right text-[11px] text-[var(--vp-error)]">{err}</p> : null}
+      {err ? (
+        <p role="alert" className={layout === "stack" ? "text-xs text-[var(--vp-error)]" : "basis-full text-right text-[11px] text-[var(--vp-error)]"}>
+          {err}
+        </p>
+      ) : null}
     </div>
   );
 }

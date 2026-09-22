@@ -5,6 +5,7 @@ import { applyPipelineStageEntryAutomations } from "@/lib/pipeline-stage-automat
 import { revalidatePath } from "next/cache";
 import { isNetworkTypeOption } from "@/lib/network-types";
 import { isMissingNetworkTypeColumnError } from "@/lib/leads/list-query";
+import { lookupCep, parseLeadAddress } from "@/lib/cep-lookup";
 import { parseNullableNonNegativeInt } from "@/lib/parse-localized-integer";
 import { displayCompanyName, displayPersonName } from "@/lib/lead-identity";
 import { nestOne } from "@/lib/supabase/nested";
@@ -721,6 +722,75 @@ export async function updateConversationLeadClientCategory(input: {
   return { ok: true as const };
 }
 
+export async function lookupLeadCep(cep: string) {
+  const supabase = await createServerSupabaseClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false as const, error: "Não autenticado" };
+  return lookupCep(cep);
+}
+
+export async function updateLeadAddress(input: {
+  leadId: string;
+  zipCode: string | null;
+  street: string | null;
+  neighborhood: string | null;
+  city: string | null;
+  state: string | null;
+}) {
+  const leadId = input.leadId.trim();
+  if (!leadId) return { ok: false as const, error: "Lead inválido." };
+  const address = parseLeadAddress(input);
+  if (!address.ok) return address;
+
+  const supabase = await createServerSupabaseClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false as const, error: "Não autenticado" };
+
+  const crm = crmTables(supabase);
+  const { data: lead, error: leadErr } = await crm
+    .from("leads")
+    .select("id, company_id")
+    .eq("id", leadId)
+    .maybeSingle();
+  if (leadErr) return { ok: false as const, error: leadErr.message };
+  if (!lead?.id) return { ok: false as const, error: "Lead não encontrado." };
+
+  const now = new Date().toISOString();
+  const { error: updateErr } = await crm
+    .from("leads")
+    .update({
+      zip_code: address.address.zipCode,
+      street: address.address.street,
+      neighborhood: address.address.neighborhood,
+      city: address.address.city,
+      state: address.address.state,
+      updated_at: now,
+    })
+    .eq("id", leadId);
+  if (updateErr) return { ok: false as const, error: updateErr.message };
+
+  if (lead.company_id) {
+    const { error: companyErr } = await crm
+      .from("companies")
+      .update({
+        city: address.address.city,
+        state: address.address.state,
+        updated_at: now,
+      })
+      .eq("id", lead.company_id);
+    if (companyErr) return { ok: false as const, error: companyErr.message };
+  }
+
+  revalidatePath(`/leads/${leadId}`);
+  revalidatePath("/leads", "page");
+  revalidatePath("/inbox");
+  return { ok: true as const };
+}
+
 export async function updateConversationLeadQualification(input: {
   conversationId: string;
   category: string | null;
@@ -728,6 +798,8 @@ export async function updateConversationLeadQualification(input: {
   state: string | null;
   city: string | null;
   zipCode: string | null;
+  street: string | null;
+  neighborhood: string | null;
   weeklyBreadConsumption: string | null;
   companyName: string | null;
   cnpj: string | null;
@@ -753,9 +825,15 @@ export async function updateConversationLeadQualification(input: {
   });
   if (!gramsParsed.ok) return { ok: false as const, error: "Gramatura inválida." };
 
-  const state = String(input.state ?? "").trim().toUpperCase() || null;
-  const city = String(input.city ?? "").trim() || null;
-  const zipCode = String(input.zipCode ?? "").trim() || null;
+  const address = parseLeadAddress({
+    zipCode: input.zipCode,
+    street: input.street,
+    neighborhood: input.neighborhood,
+    city: input.city,
+    state: input.state,
+  });
+  if (!address.ok) return address;
+  const { zipCode, street, neighborhood, city, state } = address.address;
   const companyName = String(input.companyName ?? "").trim() || null;
   const cnpj = String(input.cnpj ?? "").trim() || null;
   const breadType = String(input.breadType ?? "").trim() || null;
@@ -851,6 +929,10 @@ export async function updateConversationLeadQualification(input: {
       client_category: normalizedCategory,
       company_id: nextCompanyId,
       zip_code: zipCode,
+      street,
+      neighborhood,
+      city,
+      state,
       weekly_bread_consumption: weeklyParsed.value,
       bread_type: breadType,
       bread_weight_grams: gramsParsed.value,

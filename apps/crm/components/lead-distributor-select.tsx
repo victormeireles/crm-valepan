@@ -1,6 +1,7 @@
 "use client";
 
 import { updateLeadDistributor } from "@/app/actions/leads";
+import { CrmMenuSelect } from "@/components/crm-menu-select";
 import type { DistributorOption } from "@/lib/distributors";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -11,15 +12,19 @@ export function LeadDistributorSelect({
   options,
   distributorId,
   onSaved,
-  className,
+  appearance = "field",
   emptyLabel = "Selecione o distribuidor",
+  portalRoot = null,
+  wide = false,
 }: {
   leadId: string;
   options: DistributorOption[];
   distributorId: string | null;
   onSaved?: (distributorId: string | null) => void;
-  className?: string;
+  appearance?: "toolbar" | "row" | "field";
   emptyLabel?: string;
+  portalRoot?: HTMLElement | null;
+  wide?: boolean;
 }) {
   const router = useRouter();
   const [value, setValue] = useState(distributorId ?? "");
@@ -33,13 +38,20 @@ export function LeadDistributorSelect({
   const known = !value || options.some((option) => option.id === value);
 
   return (
-    <div className="contents">
-      <select
-        aria-label="Distribuidor"
+    <div className={appearance === "toolbar" ? "contents" : "min-w-0"}>
+      <CrmMenuSelect
+        label="Distribuidor"
+        searchable
+        portalRoot={portalRoot}
+        wide={wide}
+        variant={appearance}
         value={known ? value : ""}
         disabled={loading || options.length === 0}
-        onChange={(event) => {
-          const next = event.target.value;
+        options={[
+          { value: "", label: options.length === 0 ? "Nenhum cadastrado" : emptyLabel },
+          ...options.map((option) => ({ value: option.id, label: option.name })),
+        ]}
+        onChange={(next) => {
           setValue(next);
           setLoading(true);
           setError(null);
@@ -64,24 +76,16 @@ export function LeadDistributorSelect({
             }
           })();
         }}
-        className={className}
-      >
-        <option value="">{options.length === 0 ? "Nenhum cadastrado" : emptyLabel}</option>
-        {options.map((option) => (
-          <option key={option.id} value={option.id}>
-            {option.name}
-          </option>
-        ))}
-      </select>
+      />
       {options.length === 0 ? (
         <Link
           href="/settings/distribuidores"
-          className="text-[11px] font-semibold text-[var(--vp-wine)] underline-offset-2 hover:underline"
+          className="mt-1 inline-block text-[11px] font-semibold text-[var(--vp-wine)] underline-offset-2 hover:underline"
         >
           Cadastrar em Configurações
         </Link>
       ) : null}
-      {error ? <p className="text-[11px] text-[var(--vp-error)]">{error}</p> : null}
+      {error ? <p className="mt-1 text-[11px] text-[var(--vp-error)]">{error}</p> : null}
     </div>
   );
 }
