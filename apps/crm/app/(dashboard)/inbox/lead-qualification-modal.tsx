@@ -4,6 +4,7 @@ import { lookupLeadCep, updateConversationLeadQualification } from "@/app/action
 import { formatCaptureZip } from "@/lib/lead-capture";
 import { CityAutocompleteInput } from "@/components/city-autocomplete-input";
 import { formatLocalizedInteger } from "@/lib/parse-localized-integer";
+import { displayPipelineStageName } from "@/lib/pipeline-canonical-stages";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
@@ -167,7 +168,7 @@ export function LeadQualificationModal(props: Props) {
                   <option value="">— NÃO DEFINIDA —</option>
                   {props.stages.map((stage) => (
                     <option key={stage.id} value={stage.id}>
-                      {stage.name}
+                      {displayPipelineStageName(stage.name)}
                     </option>
                   ))}
                 </select>

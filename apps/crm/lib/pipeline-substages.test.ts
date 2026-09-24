@@ -20,7 +20,13 @@ describe("pipeline substages", () => {
 
   it("traduz etapa+status para a classificação antiga da conversa", () => {
     expect(conversationClassificationForStageAndSubstage("NEGOCIAÇÃO", "Pediu amostra")).toBe("AMOSTRA");
-    expect(conversationClassificationForStageAndSubstage("NEGOCIAÇÃO", "Encaminhado para o distribuidor")).toBe(
+    expect(
+      conversationClassificationForStageAndSubstage(
+        "ENCAMINHADO PARA DISTRIBUIDOR",
+        "Encaminhado para o distribuidor",
+      ),
+    ).toBe("ENCAMINHADO PARA O DISTRIBUIDOR");
+    expect(conversationClassificationForStageAndSubstage("ENCAMINHADO PARA DISTRIBUIDOR", null)).toBe(
       "ENCAMINHADO PARA O DISTRIBUIDOR",
     );
     expect(conversationClassificationForStageAndSubstage("PERDIDO", "Não inaugurou")).toBe("NÃO INAUGUROU");
