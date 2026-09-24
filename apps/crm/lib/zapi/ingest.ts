@@ -1257,75 +1257,14 @@ export async function ingestZapiMessage(parsed: ZapiInbound) {
     }
   }
 
-  /**
-   * Auto-merge de conversa quando o histórico antigo ficou em `lid:...` e agora já
-   * existe o mapeamento para o E.164 real. Isso evita duas threads para o mesmo contato.
-   */
-  if (
-    originalParsedKey.startsWith("lid:") &&
-    !phoneE164ForCrm.startsWith("lid:") &&
-    originalParsedKey !== phoneE164ForCrm
-  ) {
-    const { data: pairRows, error: pairErr } = await crm
-      .from("conversations")
-      .select("id, lead_id, phone_e164")
-      .eq("channel", "whatsapp")
-      .in("phone_e164", [originalParsedKey, phoneE164ForCrm]);
+  const linkedLidKeys = [
+    ...(originalParsedKey.startsWith("lid:") ? [originalParsedKey] : []),
+    ...(parsed.linkedLidKeys ?? []),
+  ].filter((value, index, values) => value.startsWith("lid:") && values.indexOf(value) === index);
 
-    if (pairErr) {
-      console.warn("[zapi ingest] merge_lid_conversation lookup:", pairErr.message);
-    } else if (pairRows?.length) {
-      const lidConv = pairRows.find((r) => r.phone_e164 === originalParsedKey);
-      const e164Conv = pairRows.find((r) => r.phone_e164 === phoneE164ForCrm);
-
-      if (lidConv && !e164Conv) {
-        const { error: renameErr } = await crm
-          .from("conversations")
-          .update({ phone_e164: phoneE164ForCrm, updated_at: new Date().toISOString() })
-          .eq("id", lidConv.id);
-        if (renameErr) {
-          console.warn("[zapi ingest] merge_lid_conversation rename:", renameErr.message);
-        } else {
-          console.info("[zapi ingest] merge_lid_conversation renomeada", {
-            from: originalParsedKey,
-            to: phoneE164ForCrm,
-            conversation_id: lidConv.id,
-          });
-        }
-      } else if (lidConv && e164Conv && lidConv.id !== e164Conv.id) {
-        const { error: moveErr } = await crm
-          .from("messages")
-          .update({ conversation_id: e164Conv.id })
-          .eq("conversation_id", lidConv.id);
-        if (moveErr) {
-          console.warn("[zapi ingest] merge_lid_conversation move_messages:", moveErr.message);
-        } else {
-          const nowIso = new Date().toISOString();
-          await crm
-            .from("conversations")
-            .update({ updated_at: nowIso })
-            .eq("id", e164Conv.id);
-          const { error: delErr } = await crm
-            .from("conversations")
-            .delete()
-            .eq("id", lidConv.id);
-          if (delErr) {
-            console.warn("[zapi ingest] merge_lid_conversation delete_old:", delErr.message);
-          } else {
-            console.info("[zapi ingest] merge_lid_conversation concluído", {
-              lid_conversation_id: lidConv.id,
-              e164_conversation_id: e164Conv.id,
-              e164: phoneE164ForCrm,
-            });
-          }
-        }
-      }
-    }
-  }
-
-  if (!phoneE164ForCrm.startsWith("lid:") && parsed.linkedLidKeys?.length) {
+  if (!phoneE164ForCrm.startsWith("lid:") && linkedLidKeys.length) {
     const ts = new Date().toISOString();
-    for (const lidKey of parsed.linkedLidKeys) {
+    for (const lidKey of linkedLidKeys) {
       if (!lidKey.startsWith("lid:") || lidKey === phoneE164ForCrm) continue;
       const { error: upErr } = await crm.from("zapi_lid_map").upsert(
         { lid_key: lidKey, phone_e164: phoneE164ForCrm, updated_at: ts },
@@ -1333,11 +1272,26 @@ export async function ingestZapiMessage(parsed: ZapiInbound) {
       );
       if (upErr) {
         console.warn("[zapi ingest] zapi_lid_map upsert (payload):", upErr.message);
+        continue;
+      }
+
+      const { data: mergedConversationId, error: mergeErr } = await crm.rpc(
+        "merge_zapi_lid_identity",
+        { p_lid_key: lidKey, p_phone_e164: phoneE164ForCrm },
+      );
+      if (mergeErr) {
+        console.warn("[zapi ingest] merge_zapi_lid_identity:", mergeErr.message);
+      } else if (mergedConversationId) {
+        console.info("[zapi ingest] identidade LID reunida ao telefone", {
+          lid: lidKey,
+          phone_e164: phoneE164ForCrm,
+          conversation_id: mergedConversationId,
+        });
       }
     }
     console.info("[zapi ingest] zapi_lid_map ligado ao E.164 deste webhook", {
       phone_e164: phoneE164ForCrm,
-      lids: parsed.linkedLidKeys,
+      lids: linkedLidKeys,
     });
   }
 
@@ -1645,7 +1599,7 @@ export async function ingestZapiMessage(parsed: ZapiInbound) {
 
   const { data: conv } = await crm
     .from("conversations")
-    .select("id, conversation_kind, group_display_name")
+    .select("id, lead_id, conversation_kind, group_display_name")
     .eq("channel", "whatsapp")
     .eq("phone_e164", phoneE164ForCrm)
     .maybeSingle();
@@ -1662,6 +1616,7 @@ export async function ingestZapiMessage(parsed: ZapiInbound) {
   if (conv?.id) {
     conversationId = conv.id;
     if (
+      conv.lead_id !== leadId ||
       conv.conversation_kind !== parsed.conversationKind ||
       (parsed.conversationKind === "group" && resolvedGroupDisplayName)
     ) {

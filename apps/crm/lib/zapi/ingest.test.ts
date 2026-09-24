@@ -226,6 +226,19 @@ describe("parseZapiWebhookPayload LID identity", () => {
     expect(parsed?.phoneE164).toBe("lid:118232430158059");
     expect(parsed?.contactName).toBe("Cliente Exemplo");
   });
+
+  it("links a short numeric LID to the real phone from the same webhook", () => {
+    const parsed = parseZapiWebhookPayload({
+      type: "ReceivedCallback",
+      key: { remoteJid: "2100457140361@lid" },
+      phone: "5521992595914",
+      messageId: "short-lid-with-phone",
+      text: { message: "Olá" },
+    });
+
+    expect(parsed?.phoneE164).toBe("+5521992595914");
+    expect(parsed?.linkedLidKeys).toContain("lid:2100457140361");
+  });
 });
 
 describe("parseZapiWebhookPayload profile photo", () => {

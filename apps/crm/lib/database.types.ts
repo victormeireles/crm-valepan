@@ -630,6 +630,13 @@ export interface Database {
       };
     };
     Functions: {
+      merge_zapi_lid_identity: {
+        Args: {
+          p_lid_key: string;
+          p_phone_e164: string;
+        };
+        Returns: string | null;
+      };
       inbox_sidebar_snapshot: {
         Args: {
           p_messages_visible_since: string;

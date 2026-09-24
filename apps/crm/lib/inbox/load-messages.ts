@@ -42,6 +42,8 @@ export type InboxMessageRow = {
 
 const MESSAGES_SELECT_WITH_MEDIA =
   "id, provider_message_id, reply_to_message_id, reaction, edited_at, deleted_at, pinned_at, pinned_until, direction, body, event_kind, event_status, provider_call_id, media_kind, media_url, media_mime_type, media_file_name, media_storage_path, media_size_bytes, media_storage_status, message_status, read_at, sent_at, message_favorites(user_id)";
+const MESSAGES_SELECT_WITH_MEDIA_WITHOUT_FAVORITES =
+  "id, provider_message_id, reply_to_message_id, reaction, edited_at, deleted_at, pinned_at, pinned_until, direction, body, event_kind, event_status, provider_call_id, media_kind, media_url, media_mime_type, media_file_name, media_storage_path, media_size_bytes, media_storage_status, message_status, read_at, sent_at";
 const MESSAGES_SELECT_WITH_LEGACY_MEDIA =
   "id, direction, body, media_kind, media_url, media_mime_type, media_file_name, message_status, read_at, sent_at";
 const MESSAGES_SELECT_LEGACY = "id, direction, body, sent_at";
@@ -87,6 +89,12 @@ function isMissingMediaColumnError(error?: { message?: string; code?: string } |
     || msg.includes("pinned_until")
     || msg.includes("message_favorites")
   );
+}
+
+export function isMessageFavoritesAccessError(
+  error?: { message?: string; code?: string } | null,
+) {
+  return !!error?.message?.toLowerCase().includes("message_favorites");
 }
 
 function normalizeLegacyRows(
@@ -204,6 +212,19 @@ export async function loadRecentConversationMessages(
     .order("sent_at", { ascending: false })
     .limit(take);
 
+  // Instalações anteriores não concediam acesso à tabela criada para favoritos.
+  // Repetir a consulta sem essa relação mantém media_storage_path disponível;
+  // o fallback legado escondia áudios que já estavam no bucket privado.
+  if (res.error && isMessageFavoritesAccessError(res.error)) {
+    res = await crm
+      .from("messages")
+      .select(MESSAGES_SELECT_WITH_MEDIA_WITHOUT_FAVORITES)
+      .eq("conversation_id", conversationId)
+      .gte("sent_at", INBOX_MESSAGES_VISIBLE_SINCE)
+      .order("sent_at", { ascending: false })
+      .limit(take) as typeof res;
+  }
+
   if (res.error && isMissingMediaColumnError(res.error)) {
     let fallback = await crm
       .from("messages")
@@ -311,6 +332,17 @@ export async function loadOlderMessagesPage(
     .lt("sent_at", beforeSentAt)
     .order("sent_at", { ascending: false })
     .limit(INBOX_MESSAGE_PAGE_SIZE);
+
+  if (res.error && isMessageFavoritesAccessError(res.error)) {
+    res = await crm
+      .from("messages")
+      .select(MESSAGES_SELECT_WITH_MEDIA_WITHOUT_FAVORITES)
+      .eq("conversation_id", conversationId)
+      .gte("sent_at", INBOX_MESSAGES_VISIBLE_SINCE)
+      .lt("sent_at", beforeSentAt)
+      .order("sent_at", { ascending: false })
+      .limit(INBOX_MESSAGE_PAGE_SIZE) as typeof res;
+  }
 
   if (res.error && isMissingMediaColumnError(res.error)) {
     let fallback = await crm
