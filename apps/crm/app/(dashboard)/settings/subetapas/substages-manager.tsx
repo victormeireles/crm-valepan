@@ -61,8 +61,7 @@ export function SubstagesManager({
         </h1>
         <p className="mt-2 max-w-2xl text-sm text-[var(--vp-ink-muted)]">
           Cada etapa do funil tem os próprios status. No chat, primeiro escolhe a etapa
-          (Novo, Qualificação, Negociação, Encaminhado para distribuidor, Cliente, Perdido)
-          e depois o status desta lista.
+          (Novo, Qualificação, Negociação, Cliente, Perdido) e depois o status desta lista.
         </p>
       </div>
 

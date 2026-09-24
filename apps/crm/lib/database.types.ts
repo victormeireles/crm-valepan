@@ -126,13 +126,7 @@ export interface Database {
         Row: {
           id: string;
           name: string;
-          stage_key:
-            | "LEADS"
-            | "QUALIFICAÇÃO"
-            | "NEGOCIAÇÃO"
-            | "ENCAMINHADO PARA DISTRIBUIDOR"
-            | "CONVERTIDO"
-            | "PERDIDO";
+          stage_key: "LEADS" | "QUALIFICAÇÃO" | "NEGOCIAÇÃO" | "CONVERTIDO" | "PERDIDO";
           sort_order: number;
           active: boolean;
           created_at: string;
@@ -141,13 +135,7 @@ export interface Database {
         Insert: {
           id?: string;
           name: string;
-          stage_key?:
-            | "LEADS"
-            | "QUALIFICAÇÃO"
-            | "NEGOCIAÇÃO"
-            | "ENCAMINHADO PARA DISTRIBUIDOR"
-            | "CONVERTIDO"
-            | "PERDIDO";
+          stage_key?: "LEADS" | "QUALIFICAÇÃO" | "NEGOCIAÇÃO" | "CONVERTIDO" | "PERDIDO";
           sort_order?: number;
           active?: boolean;
         };

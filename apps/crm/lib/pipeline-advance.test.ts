@@ -25,11 +25,7 @@ const CATALOG = [
   { name: "Sem retorno", stage_key: "QUALIFICAÇÃO", active: true },
   { name: "Pediu amostra", stage_key: "NEGOCIAÇÃO", active: true },
   { name: "Recebeu amostra", stage_key: "NEGOCIAÇÃO", active: true },
-  {
-    name: "Encaminhado para o distribuidor",
-    stage_key: "ENCAMINHADO PARA DISTRIBUIDOR",
-    active: true,
-  },
+  { name: "Encaminhado para o distribuidor", stage_key: "NEGOCIAÇÃO", active: true },
 ];
 
 describe("pipeline advance ranks", () => {
@@ -38,8 +34,7 @@ describe("pipeline advance ranks", () => {
     expect(pipelineStageRank("entrada")).toBe(0);
     expect(pipelineStageRank("QUALIFICAÇÃO")).toBe(1);
     expect(pipelineStageRank("NEGOCIAÇÃO")).toBe(2);
-    expect(pipelineStageRank("ENCAMINHADO PARA DISTRIBUIDOR")).toBe(3);
-    expect(pipelineStageRank("CONVERTIDO")).toBe(4);
+    expect(pipelineStageRank("CONVERTIDO")).toBe(3);
     expect(pipelineStageRank("PERDIDO")).toBeNull();
     expect(pipelineStageRank("AMOSTRA")).toBeNull();
   });
@@ -47,7 +42,6 @@ describe("pipeline advance ranks", () => {
   it("só aceita avanço real de etapa", () => {
     expect(isForwardPipelineAdvance("LEADS", "QUALIFICAÇÃO")).toBe(true);
     expect(isForwardPipelineAdvance("LEADS", "CONVERTIDO")).toBe(true);
-    expect(isForwardPipelineAdvance("NEGOCIAÇÃO", "ENCAMINHADO PARA DISTRIBUIDOR")).toBe(true);
     expect(isForwardPipelineAdvance("NEGOCIAÇÃO", "CONVERTIDO")).toBe(true);
     expect(isForwardPipelineAdvance("NEGOCIAÇÃO", "LEADS")).toBe(false);
     expect(isForwardPipelineAdvance("NEGOCIAÇÃO", "NEGOCIAÇÃO")).toBe(false);
@@ -391,7 +385,7 @@ describe("suggestionFromModelOutput", () => {
       catalog: CATALOG,
       output: {
         should_advance: true,
-        stage: "ENCAMINHADO PARA DISTRIBUIDOR",
+        stage: "NEGOCIAÇÃO",
         substage: "encaminhado para o distribuidor",
         confidence: 0.86,
         rationale: "passamos para o distribuidor da região",
@@ -400,7 +394,7 @@ describe("suggestionFromModelOutput", () => {
       },
     });
     expect(forward).toEqual({
-      toStageName: "ENCAMINHADO PARA DISTRIBUIDOR",
+      toStageName: "NEGOCIAÇÃO",
       toSubstage: "Encaminhado para o distribuidor",
       toClassification: "ENCAMINHADO PARA O DISTRIBUIDOR",
       confidence: 0.86,

@@ -25,8 +25,6 @@ beforeAll(async () => {
     .replace('create extension if not exists "pgcrypto";', ""));
   await db.exec(sql("20260921120000_lost_reasons_catalog.sql"));
   await db.exec(sql("20260921160000_pipeline_substages_by_stage.sql"));
-  await db.exec(`alter table crm.conversations add column classification text`);
-  await db.exec(sql("20260924120000_forwarded_to_distributor_canonical_stage.sql"));
 }, 30000);
 
 afterAll(async () => {
@@ -57,7 +55,7 @@ describe.sequential("catalogo de motivos de perda", () => {
     ]);
   });
 
-  it("mantém os status de negociação e move o encaminhamento para sua etapa", async () => {
+  it("nasce com status de negociacao e qualificacao", async () => {
     const result = await db.query<{ name: string }>(`
       select name from crm.lost_reasons
       where stage_key = 'NEGOCIAÇÃO' and active
@@ -66,14 +64,6 @@ describe.sequential("catalogo de motivos de perda", () => {
     expect(result.rows.map((row) => row.name)).toEqual([
       "Pediu amostra",
       "Recebeu amostra",
-    ]);
-
-    const forwarded = await db.query<{ name: string }>(`
-      select name from crm.lost_reasons
-      where stage_key = 'ENCAMINHADO PARA DISTRIBUIDOR' and active
-      order by sort_order, name
-    `);
-    expect(forwarded.rows.map((row) => row.name)).toEqual([
       "Encaminhado para o distribuidor",
     ]);
   });

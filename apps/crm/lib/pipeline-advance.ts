@@ -11,13 +11,7 @@ export const PIPELINE_ADVANCE_MIN_CONFIDENCE = 0.6;
 export const PIPELINE_ADVANCE_MESSAGE_LIMIT = 12;
 export const PIPELINE_ADVANCE_MODEL_CHUNK = 15;
 
-const FORWARD_STAGES = [
-  "LEADS",
-  "QUALIFICAÇÃO",
-  "NEGOCIAÇÃO",
-  "ENCAMINHADO PARA DISTRIBUIDOR",
-  "CONVERTIDO",
-] as const;
+const FORWARD_STAGES = ["LEADS", "QUALIFICAÇÃO", "NEGOCIAÇÃO", "CONVERTIDO"] as const;
 type ForwardStageName = (typeof FORWARD_STAGES)[number];
 
 const CLIENT_CATEGORIES = new Set(["hamburgueria", "distribuidor", "parceiros"]);
@@ -573,8 +567,5 @@ export function suggestionResolutionStatus(input: {
 
 export function isOpenAdvanceStage(name: string | null | undefined): boolean {
   const key = canonicalPipelineStageKey(name ?? "") as CanonicalPipelineStageName | string;
-  return key === "LEADS"
-    || key === "QUALIFICAÇÃO"
-    || key === "NEGOCIAÇÃO"
-    || key === "ENCAMINHADO PARA DISTRIBUIDOR";
+  return key === "LEADS" || key === "QUALIFICAÇÃO" || key === "NEGOCIAÇÃO";
 }

@@ -2,7 +2,6 @@ export const CANONICAL_PIPELINE_STAGE_NAMES = [
   "LEADS",
   "QUALIFICAÇÃO",
   "NEGOCIAÇÃO",
-  "ENCAMINHADO PARA DISTRIBUIDOR",
   "CONVERTIDO",
   "PERDIDO",
 ] as const;
@@ -16,18 +15,13 @@ const DISPLAY_NAME: Record<CanonicalPipelineStageName, string> = {
   LEADS: "Novo",
   QUALIFICAÇÃO: "Qualificação",
   NEGOCIAÇÃO: "Negociação",
-  "ENCAMINHADO PARA DISTRIBUIDOR": "Encaminhado para distribuidor",
   CONVERTIDO: "Cliente",
   PERDIDO: "Perdido",
 };
 
 export function canonicalPipelineStageKey(name: string): string {
   const key = name.trim().toUpperCase();
-  if (key === "ENTRADA") return "LEADS";
-  if (key === "ENCAMINHADO PARA O DISTRIBUIDOR") {
-    return "ENCAMINHADO PARA DISTRIBUIDOR";
-  }
-  return key;
+  return key === "ENTRADA" ? "LEADS" : key;
 }
 
 export function isCanonicalPipelineStageName(name: string): boolean {
@@ -74,8 +68,8 @@ export function selectCanonicalPipelineStages<
     const key = canonicalPipelineStageKey(stage.name);
     if (!CANONICAL_SET.has(key)) continue;
     const current = byKey.get(key);
-    const prefersCanonicalName = stage.name.trim().toUpperCase() === key;
-    if (!current || prefersCanonicalName) {
+    const prefersLeads = key === "LEADS" && stage.name.trim().toUpperCase() === "LEADS";
+    if (!current || prefersLeads) {
       byKey.set(key, {
         ...stage,
         name: key,

@@ -13,15 +13,11 @@ describe("pipelineStageForInboxClassification", () => {
     expect(pipelineStageForInboxClassification("SEM RETORNO")).toBe("QUALIFICAÇÃO");
   });
 
-  it("envia amostra para Negociação e encaminhado para sua própria etapa", () => {
+  it("envia amostra e encaminhado para Negociação", () => {
     expect(pipelineStageForInboxClassification("AMOSTRA")).toBe("NEGOCIAÇÃO");
     expect(pipelineStageForInboxClassification("NEGOCIAÇÃO")).toBe("NEGOCIAÇÃO");
-    expect(pipelineStageForInboxClassification("ENCAMINHADO PARA O DISTRIBUIDOR")).toBe(
-      "ENCAMINHADO PARA DISTRIBUIDOR",
-    );
-    expect(pipelineStageForInboxClassification("ENCAMINHADO PARA DISTRIBUIDOR")).toBe(
-      "ENCAMINHADO PARA DISTRIBUIDOR",
-    );
+    expect(pipelineStageForInboxClassification("ENCAMINHADO PARA O DISTRIBUIDOR")).toBe("NEGOCIAÇÃO");
+    expect(pipelineStageForInboxClassification("ENCAMINHADO PARA DISTRIBUIDOR")).toBe("NEGOCIAÇÃO");
   });
 
   it("envia cliente para Convertido", () => {

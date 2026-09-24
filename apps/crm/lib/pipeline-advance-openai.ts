@@ -41,17 +41,16 @@ export function pipelineAdvanceModelOptions(model: string): {
 function systemPrompt(catalog: string): string {
   return `Você classifica conversas comerciais da Valepan (pães de hambúrguer) para um CRM.
 Só sugira AVANÇAR etapa ou TROCAR a subetapa para uma mais avançada na mesma etapa. Nunca sugira voltar etapa e nunca sugira Perdido.
-Ordem: Novo (LEADS) < Qualificação < Negociação < Encaminhado para distribuidor < Cliente (CONVERTIDO).
+Ordem: Novo (LEADS) < Qualificação < Negociação < Cliente (CONVERTIDO).
 
 Catálogo de subetapas por etapa:
 ${catalog}
 
 Regras:
-- Responda com a etapa canônica (LEADS, QUALIFICAÇÃO, NEGOCIAÇÃO, ENCAMINHADO PARA DISTRIBUIDOR, CONVERTIDO) e o nome EXATO de uma subetapa do catálogo dessa etapa. Se a etapa não tiver subetapa, deixe substage vazio.
+- Responda com a etapa canônica (LEADS, QUALIFICAÇÃO, NEGOCIAÇÃO, CONVERTIDO) e o nome EXATO de uma subetapa do catálogo dessa etapa. Se a etapa não tiver subetapa, deixe substage vazio.
 - Mensagens repetidas pedindo orçamento, CEP ou catálogo são template do bot. Sozinhas NÃO são negociação.
 - CONVERTIDO: já compra, pós-venda, troca de produto, pedido recorrente, "já sou cliente".
-- ENCAMINHADO PARA DISTRIBUIDOR: a Valepan confirma que repassou o lead para um distribuidor ou informa qual distribuidor fará o atendimento.
-- NEGOCIAÇÃO: cotação específica, volume/preço reais, pedido em andamento. Use Pediu amostra / Recebeu amostra quando couber.
+- NEGOCIAÇÃO: cotação específica, volume/preço reais, pedido em andamento. Use Pediu amostra / Recebeu amostra / Encaminhado para o distribuidor quando couber.
 - QUALIFICAÇÃO / Sem retorno: já houve contato nosso e o cliente ainda não negociou de fato.
 - Se a evidência for fraca ou o chat for só bot, should_advance=false e stage/substage vazios.
 - rationale em no máximo 12 palavras. evidence_quote deve ser um trecho real do chat.
@@ -174,14 +173,7 @@ export async function classifyConversationsAdvanceBatch(input: {
                     should_advance: { type: "boolean" },
                     stage: {
                       type: "string",
-                      enum: [
-                        "",
-                        "LEADS",
-                        "QUALIFICAÇÃO",
-                        "NEGOCIAÇÃO",
-                        "ENCAMINHADO PARA DISTRIBUIDOR",
-                        "CONVERTIDO",
-                      ],
+                      enum: ["", "LEADS", "QUALIFICAÇÃO", "NEGOCIAÇÃO", "CONVERTIDO"],
                     },
                     substage: { type: "string" },
                     confidence: { type: "number" },
