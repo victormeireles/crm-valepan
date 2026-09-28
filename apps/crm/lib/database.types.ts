@@ -708,6 +708,20 @@ export interface Database {
         };
         Returns: Json;
       };
+      pipeline_counts_snapshot: {
+        Args: {
+          p_messages_visible_since: string;
+          p_owner_user_id?: string | null;
+          p_signal?: string | null;
+          p_region?: string | null;
+          p_client_category?: string | null;
+          p_query?: string | null;
+          p_stage_id?: string | null;
+          p_volume?: string | null;
+          p_lost_reason?: string | null;
+        };
+        Returns: Json;
+      };
       pipeline_cards_page: {
         Args: {
           p_messages_visible_since: string;
@@ -734,6 +748,7 @@ export interface Database {
           p_query?: string | null;
           p_stage_id?: string | null;
           p_volume?: string | null;
+          p_lost_reason?: string | null;
         };
         Returns: { stage_id: string; card_count: number; volume_kg: number }[];
       };
@@ -746,6 +761,7 @@ export interface Database {
           p_query?: string | null;
           p_stage_id?: string | null;
           p_volume?: string | null;
+          p_lost_reason?: string | null;
         };
         Returns: { owner_id: string; card_count: number }[];
       };
@@ -753,11 +769,13 @@ export interface Database {
         Args: {
           p_messages_visible_since: string;
           p_owner_user_id?: string | null;
+          p_signal?: string | null;
           p_region?: string | null;
           p_client_category?: string | null;
           p_query?: string | null;
           p_stage_id?: string | null;
           p_volume?: string | null;
+          p_lost_reason?: string | null;
         };
         Returns: {
           open_count: number;

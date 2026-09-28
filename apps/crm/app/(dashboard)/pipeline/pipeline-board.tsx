@@ -135,6 +135,7 @@ function useDesktopDrag() {
 }
 
 function DroppableColumn({
+  dragEnabled,
   stageId,
   stageName,
   totalCount,
@@ -142,6 +143,7 @@ function DroppableColumn({
   maxWeeklyBreadCount,
   children,
 }: {
+  dragEnabled: boolean;
   stageId: string;
   stageName: string;
   totalCount: number;
@@ -151,6 +153,7 @@ function DroppableColumn({
 }) {
   const { setNodeRef, isOver } = useDroppable({
     id: `stage:${stageId}`,
+    disabled: !dragEnabled,
     data: { type: "column" as const, stageId },
   });
 
@@ -191,7 +194,7 @@ function VirtualizedPipelineCard({
 }) {
   const containerRef = useRef<HTMLLIElement | null>(null);
   const measuredHeightRef = useRef(160);
-  const [isNearViewport, setIsNearViewport] = useState(true);
+  const [isNearViewport, setIsNearViewport] = useState(false);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -203,7 +206,7 @@ function VirtualizedPipelineCard({
     const scrollRoot = container.closest("ul");
     const observer = new IntersectionObserver(
       ([entry]) => setIsNearViewport(entry?.isIntersecting ?? false),
-      { root: scrollRoot, rootMargin: "320px 0px" },
+      { root: scrollRoot, rootMargin: "240px 0px" },
     );
     observer.observe(container);
     return () => observer.disconnect();
@@ -226,9 +229,56 @@ function VirtualizedPipelineCard({
       ref={containerRef}
       style={shouldRender ? undefined : { height: measuredHeightRef.current }}
       aria-hidden={shouldRender ? undefined : true}
+      data-virtualized={shouldRender ? undefined : "true"}
     >
       {shouldRender ? children : null}
     </li>
+  );
+}
+
+function DesktopPipelineDndContext({
+  children,
+  onDragStart,
+  onDragEnd,
+}: {
+  children: React.ReactNode;
+  onDragStart: (event: DragStartEvent) => void;
+  onDragEnd: (event: DragEndEvent) => void;
+}) {
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 8 },
+    }),
+  );
+  return (
+    <DndContext
+      id="pipeline-board"
+      sensors={sensors}
+      collisionDetection={closestCorners}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+    >
+      {children}
+    </DndContext>
+  );
+}
+
+function PipelineDndContext({
+  enabled,
+  children,
+  onDragStart,
+  onDragEnd,
+}: {
+  enabled: boolean;
+  children: React.ReactNode;
+  onDragStart: (event: DragStartEvent) => void;
+  onDragEnd: (event: DragEndEvent) => void;
+}) {
+  if (!enabled) return children;
+  return (
+    <DesktopPipelineDndContext onDragStart={onDragStart} onDragEnd={onDragEnd}>
+      {children}
+    </DesktopPipelineDndContext>
   );
 }
 
@@ -654,12 +704,6 @@ export function PipelineBoard({
     }
   }, [followUpCard]);
 
-  const sensors = useSensors(
-    useSensor(PointerSensor, {
-      activationConstraint: { distance: 8 },
-    }),
-  );
-
   const commitMove = useCallback(
     async (
       opportunityId: string,
@@ -907,10 +951,8 @@ export function PipelineBoard({
   return (
     <PipelineClockContext.Provider value={nowMs}>
       <PipelineDragEnabledContext.Provider value={dragEnabled}>
-        <DndContext
-          id="pipeline-board"
-          sensors={sensors}
-          collisionDetection={closestCorners}
+        <PipelineDndContext
+          enabled={dragEnabled}
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
         >
@@ -937,6 +979,7 @@ export function PipelineBoard({
             return (
               <DroppableColumn
                 key={stage.id}
+                dragEnabled={dragEnabled}
                 stageId={stage.id}
                 stageName={displayPipelineStageName(stage.name)}
                 totalCount={totalCount}
@@ -946,7 +989,7 @@ export function PipelineBoard({
                 {items.map((card) => (
                   <VirtualizedPipelineCard
                     key={card.id}
-                    forceMount={items.length <= 15 || activeCard !== null}
+                    forceMount={activeCard?.id === card.id}
                   >
                     <DraggableCard
                       card={card}
@@ -1157,7 +1200,7 @@ export function PipelineBoard({
           </ul>
         </details>
       ) : null}
-        </DndContext>
+        </PipelineDndContext>
       </PipelineDragEnabledContext.Provider>
     </PipelineClockContext.Provider>
   );

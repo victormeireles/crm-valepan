@@ -97,10 +97,6 @@ export async function listPendingPipelineAdvanceSuggestions(): Promise<{
 
 export async function countPendingPipelineAdvanceSuggestions(): Promise<number> {
   const supabase = await createServerSupabaseClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return 0;
   const crm = crmTables(supabase);
   const { count, error } = await crm
     .from("pipeline_advance_suggestions")

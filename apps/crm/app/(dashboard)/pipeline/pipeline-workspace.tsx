@@ -1,10 +1,13 @@
 "use client";
 
 import {
-  loadPipelineFilterSnapshot,
+  loadPipelineCardsSnapshot,
+  loadPipelineCountsSnapshot,
+  loadPipelineKpisSnapshot,
   type PipelinePageFilters,
   type PipelineVolumeFilter,
 } from "@/app/actions/pipeline";
+import { countPendingPipelineAdvanceSuggestions } from "@/app/actions/pipeline-advance";
 import { isClientCategoryValue } from "@/lib/client-categories";
 import { isPipelineRegion, isPipelineSignal } from "@/lib/pipeline-signals";
 import type { LostReasonDTO } from "@/lib/lost-reasons";
@@ -17,6 +20,25 @@ import { PipelineKpiStrip } from "./pipeline-kpi-strip";
 
 type TeamOption = { id: string; label: string; count: number };
 type Summary = { open: number; awaiting: number; stale: number; overdue: number };
+type FilterPartResult = {
+  cards: Awaited<ReturnType<typeof loadPipelineCardsSnapshot>>;
+  counts: Awaited<ReturnType<typeof loadPipelineCountsSnapshot>>;
+  kpis: Awaited<ReturnType<typeof loadPipelineKpisSnapshot>>;
+};
+
+async function loadAbortableFilterPart<TPart extends keyof FilterPartResult>(
+  part: TPart,
+  filters: PipelinePageFilters,
+  signal: AbortSignal,
+): Promise<FilterPartResult[TPart]> {
+  const response = await fetch(`/api/pipeline/filter?part=${part}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ filters }),
+    signal,
+  });
+  return await response.json() as FilterPartResult[TPart];
+}
 
 function isVolumeFilter(value: string): value is Exclude<PipelineVolumeFilter, null> {
   return ["informado", "ate_100", "acima_100"].includes(value);
@@ -57,11 +79,60 @@ export function PipelineWorkspace(props: {
   const [teamOptions, setTeamOptions] = useState(props.initialTeamOptions);
   const [mineCount, setMineCount] = useState(props.initialMineCount);
   const [summary, setSummary] = useState<Summary>(props.initialSummary ?? { open: 0, awaiting: 0, stale: 0, overdue: 0 });
+  const [suggestionCount, setSuggestionCount] = useState(props.suggestionCount);
   const [pending, setPending] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [activeFilters, setActiveFilters] = useState(props.initialFilters);
   const [nowMs, setNowMs] = useState(props.renderNowMs);
   const filterRequestId = useRef(0);
+  const filterAbortRef = useRef<AbortController | null>(null);
+
+  const applyCounts = useCallback((
+    result: Awaited<ReturnType<typeof loadPipelineCountsSnapshot>>,
+    filters: PipelinePageFilters,
+  ) => {
+    if (!result.ok) return;
+    const canonicalIds = new Set(props.stages.map((stage) => stage.id));
+    const totals: Record<string, number> = Object.fromEntries(props.stages.map((stage) => [stage.id, 0]));
+    const breadCounts: Record<string, number> = Object.fromEntries(props.stages.map((stage) => [stage.id, 0]));
+    for (const row of result.visibleStageCounts) {
+      if (!canonicalIds.has(row.stage_id)) continue;
+      totals[row.stage_id] = Number(row.card_count);
+      breadCounts[row.stage_id] = Number(row.volume_kg);
+    }
+    setStageTotals(totals);
+    setStageBreadCounts(breadCounts);
+
+    if (!filters.stageId) {
+      const clientStage = findCanonicalPipelineStage(props.stages, "CONVERTIDO");
+      const lostStage = findCanonicalPipelineStage(props.stages, "PERDIDO");
+      setArchiveCounts({
+        client: clientStage ? totals[clientStage.id] ?? 0 : 0,
+        lost: lostStage ? totals[lostStage.id] ?? 0 : 0,
+      });
+    }
+    setTotalCount(result.allStageCounts.reduce(
+      (sum, row) => canonicalIds.has(row.stage_id) ? sum + Number(row.card_count) : sum,
+      0,
+    ));
+    const ownerCounts = new Map(result.ownerCounts.map((row) => [row.owner_id, Number(row.card_count)]));
+    setTeamOptions(props.initialTeamOptions.map((option) => ({
+      ...option,
+      count: ownerCounts.get(option.id) ?? 0,
+    })));
+    setMineCount(props.currentUserId ? ownerCounts.get(props.currentUserId) ?? 0 : 0);
+  }, [props.currentUserId, props.initialTeamOptions, props.stages]);
+
+  const applyKpis = useCallback((result: Awaited<ReturnType<typeof loadPipelineKpisSnapshot>>) => {
+    if (!result.ok) return;
+    const rawSummary = result.ownerSummary;
+    setSummary(rawSummary ? {
+      open: Number(rawSummary.open_count),
+      awaiting: Number(rawSummary.awaiting_reply_count),
+      stale: Number(rawSummary.stale_count),
+      overdue: Number(rawSummary.overdue_count),
+    } : { open: 0, awaiting: 0, stale: 0, overdue: 0 });
+  }, []);
 
   useEffect(() => {
     setNowMs(Date.now());
@@ -69,10 +140,32 @@ export function PipelineWorkspace(props: {
     return () => window.clearInterval(interval);
   }, []);
 
+  useEffect(() => {
+    const requestId = filterRequestId.current;
+    const controller = new AbortController();
+    filterAbortRef.current = controller;
+    void loadAbortableFilterPart("counts", props.initialFilters, controller.signal).then((result) => {
+      if (requestId === filterRequestId.current) applyCounts(result, props.initialFilters);
+    }).catch(() => undefined);
+    void loadAbortableFilterPart("kpis", props.initialFilters, controller.signal).then((result) => {
+      if (requestId === filterRequestId.current) applyKpis(result);
+    }).catch(() => undefined);
+    return () => controller.abort();
+  }, [applyCounts, applyKpis, props.initialFilters]);
+
+  useEffect(() => {
+    void countPendingPipelineAdvanceSuggestions()
+      .then(setSuggestionCount)
+      .catch(() => undefined);
+  }, []);
+
   const changeFilters = useCallback(async (
     patch: Record<string, string | null>,
     historyMode: "push" | "replace" = "push",
   ) => {
+    filterAbortRef.current?.abort();
+    const controller = new AbortController();
+    filterAbortRef.current = controller;
     const requestId = ++filterRequestId.current;
     const metricStartedAt = performance.now();
     const params = new URLSearchParams(window.location.search);
@@ -113,10 +206,21 @@ export function PipelineWorkspace(props: {
     }
     setPending(true);
     setLoadError(null);
-    let result: Awaited<ReturnType<typeof loadPipelineFilterSnapshot>>;
+    setActiveFilters(filters);
+    const countsPromise = loadAbortableFilterPart("counts", filters, controller.signal);
+    const kpisPromise = loadAbortableFilterPart("kpis", filters, controller.signal);
+    void countsPromise.then((result) => {
+      if (requestId === filterRequestId.current) applyCounts(result, filters);
+    }).catch(() => undefined);
+    void kpisPromise.then((result) => {
+      if (requestId === filterRequestId.current) applyKpis(result);
+    }).catch(() => undefined);
+
+    let result: Awaited<ReturnType<typeof loadPipelineCardsSnapshot>>;
     try {
-      result = await loadPipelineFilterSnapshot({ filters });
-    } catch {
+      result = await loadAbortableFilterPart("cards", filters, controller.signal);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
       if (requestId === filterRequestId.current) {
         setPending(false);
         setLoadError("Não foi possível concluir a busca. Tente novamente.");
@@ -135,49 +239,9 @@ export function PipelineWorkspace(props: {
       setLoadError("Não foi possível concluir a busca. Tente novamente.");
       return;
     }
-    setActiveFilters(filters);
-
     const canonicalIds = new Set(props.stages.map((stage) => stage.id));
     setCards(result.cards.filter((card) => canonicalIds.has(card.stage_id)));
-
-    const totals: Record<string, number> = Object.fromEntries(props.stages.map((stage) => [stage.id, 0]));
-    const breadCounts: Record<string, number> = Object.fromEntries(props.stages.map((stage) => [stage.id, 0]));
-    for (const row of result.visibleStageCounts as { stage_id: string; card_count: number; volume_kg: number }[]) {
-      if (!canonicalIds.has(row.stage_id)) continue;
-      totals[row.stage_id] = (totals[row.stage_id] ?? 0) + Number(row.card_count);
-      // `volume_kg` é mantido pela RPC por compatibilidade, mas contém pães/semana.
-      breadCounts[row.stage_id] = (breadCounts[row.stage_id] ?? 0) + Number(row.volume_kg);
-    }
-    setStageTotals(totals);
-    setStageBreadCounts(breadCounts);
-    if (!filters.stageId) {
-      const clientStage = findCanonicalPipelineStage(props.stages, "CONVERTIDO");
-      const lostStage = findCanonicalPipelineStage(props.stages, "PERDIDO");
-      setArchiveCounts({
-        client: clientStage ? totals[clientStage.id] ?? 0 : 0,
-        lost: lostStage ? totals[lostStage.id] ?? 0 : 0,
-      });
-    }
-
-    const allStageCounts = result.allStageCounts as { stage_id: string; card_count: number }[];
-    const rawOwnerCounts = result.ownerCounts as { owner_id: string; card_count: number }[];
-    setTotalCount(
-      allStageCounts.reduce(
-        (sum, row) => (canonicalIds.has(row.stage_id) ? sum + Number(row.card_count) : sum),
-        0,
-      ),
-    );
-    const ownerCounts = new Map(rawOwnerCounts.map((row) => [row.owner_id, Number(row.card_count)]));
-    setTeamOptions(props.initialTeamOptions.map((option) => ({ ...option, count: ownerCounts.get(option.id) ?? 0 })));
-    setMineCount(props.currentUserId ? ownerCounts.get(props.currentUserId) ?? 0 : 0);
-    const rawSummary = result.ownerSummary;
-    setSummary(rawSummary ? {
-      open: Number(rawSummary.open_count),
-      awaiting: Number(rawSummary.awaiting_reply_count),
-      stale: Number(rawSummary.stale_count),
-      overdue: Number(rawSummary.overdue_count),
-    } : { open: 0, awaiting: 0, stale: 0, overdue: 0 });
-  }, [props.canViewTeam, props.currentUserId, props.initialTeamOptions, props.stages]);
+  }, [applyCounts, applyKpis, props.canViewTeam, props.currentUserId, props.stages]);
 
   const hasAnyFilter = useMemo(
     () => Boolean(
@@ -228,7 +292,7 @@ export function PipelineWorkspace(props: {
         hasAnyFilter={hasAnyFilter}
         lostReasons={props.lostReasons}
         stageTotals={headerStageTotals}
-        suggestionCount={props.suggestionCount}
+        suggestionCount={suggestionCount}
         onFilterChange={changeFilters}
       />
       <PipelineKpiStrip

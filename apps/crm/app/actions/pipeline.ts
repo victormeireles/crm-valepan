@@ -26,12 +26,10 @@ type PipelineSummaryRow = {
   stale_count: number;
   overdue_count: number;
 };
-type PipelineBoardSnapshot = {
-  cards: PipelineCardRow[];
+type PipelineCountsSnapshot = {
   visibleStageCounts: PipelineStageCountRow[];
   allStageCounts: PipelineStageCountRow[];
   ownerCounts: PipelineOwnerCountRow[];
-  ownerSummary: PipelineSummaryRow | null;
 };
 type Crm = ReturnType<typeof crmTables>;
 
@@ -107,33 +105,21 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" ? value as Record<string, unknown> : null;
 }
 
-function readBoardSnapshot(value: unknown): PipelineBoardSnapshot | null {
+function readCountsSnapshot(value: unknown): PipelineCountsSnapshot | null {
   const row = asRecord(value);
-  if (!row || !Array.isArray(row.cards) || !Array.isArray(row.visible_stage_counts)
+  if (!row || !Array.isArray(row.visible_stage_counts)
     || !Array.isArray(row.all_stage_counts) || !Array.isArray(row.owner_counts)) {
     return null;
   }
-  const summary = asRecord(row.summary);
   return {
-    cards: row.cards as PipelineCardRow[],
     visibleStageCounts: row.visible_stage_counts as PipelineStageCountRow[],
     allStageCounts: row.all_stage_counts as PipelineStageCountRow[],
     ownerCounts: row.owner_counts as PipelineOwnerCountRow[],
-    ownerSummary: summary ? {
-      open_count: Number(summary.open_count ?? 0),
-      awaiting_reply_count: Number(summary.awaiting_reply_count ?? 0),
-      stale_count: Number(summary.stale_count ?? 0),
-      overdue_count: Number(summary.overdue_count ?? 0),
-    } : null,
   };
 }
 
-async function loadBoardSnapshot(
-  crm: Crm,
-  filters: PipelinePageFilters,
-  limit = INITIAL_PAGE_SIZE,
-): Promise<{ ok: true; snapshot: PipelineBoardSnapshot } | { ok: false; error: string }> {
-  const { data, error } = await crm.rpc("pipeline_board_snapshot", {
+function pipelineRpcArgs(filters: PipelinePageFilters) {
+  return {
     p_messages_visible_since: INBOX_MESSAGES_VISIBLE_SINCE,
     p_owner_user_id: filters.ownerUserId,
     p_signal: filters.signal,
@@ -141,39 +127,63 @@ async function loadBoardSnapshot(
     p_client_category: filters.clientCategory,
     p_query: filters.query.trim() || null,
     p_stage_id: filters.stageId,
-    p_offset: 0,
-    p_limit: limit,
     p_volume: filters.volume,
     p_lost_reason: filters.lostReason,
-  });
-  if (error) return { ok: false, error: error.message };
-  const snapshot = readBoardSnapshot(data);
-  if (!snapshot) return { ok: false, error: "Snapshot do funil inválido." };
-  return { ok: true, snapshot };
+  };
 }
 
 export async function loadPipelineFilterSnapshot(input: { filters: PipelinePageFilters }) {
+  const [cards, counts, kpis] = await Promise.all([
+    loadPipelineCardsSnapshot(input),
+    loadPipelineCountsSnapshot(input),
+    loadPipelineKpisSnapshot(input),
+  ]);
+  if (!cards.ok) return cards;
+  if (!counts.ok) return counts;
+  if (!kpis.ok) return kpis;
+  return {
+    ok: true as const,
+    cards: cards.cards,
+    visibleStageCounts: counts.visibleStageCounts,
+    allStageCounts: counts.allStageCounts,
+    ownerCounts: counts.ownerCounts,
+    ownerSummary: kpis.ownerSummary,
+  };
+}
+
+export async function loadPipelineCardsSnapshot(input: {
+  filters: PipelinePageFilters;
+  includeOwnerNames?: boolean;
+}) {
   const startedAt = performance.now();
   const supabase = await createServerSupabaseClient();
   const crm = crmTables(supabase);
-  const [snapshotTimed, profilesTimed] = await Promise.all([
-    timePipelineOperation("board_snapshot", loadBoardSnapshot(crm, input.filters)),
-    timePipelineOperation("profiles", crm.from("profiles").select("id, full_name")),
-  ]);
-  const snapshotResult = snapshotTimed.value;
-  const profilesResult = profilesTimed.value;
+  const args = pipelineRpcArgs(input.filters);
+  const cardsTimedPromise = timePipelineOperation("cards", crm.rpc("pipeline_cards_page", {
+      ...args,
+      p_offset: 0,
+      p_limit: INITIAL_PAGE_SIZE,
+    }));
+  const profilesTimedPromise = input.includeOwnerNames === false
+    ? null
+    : timePipelineOperation("profiles", crm.from("profiles").select("id, full_name"));
+  const cardsTimed = await cardsTimedPromise;
+  const profilesTimed = profilesTimedPromise ? await profilesTimedPromise : null;
+  const cardsResult = cardsTimed.value;
+  const profilesResult = profilesTimed?.value ?? { data: [], error: null };
   logPipelinePerformance(
-    "filter_snapshot",
+    "cards_snapshot",
     performance.now() - startedAt,
-    [snapshotTimed, profilesTimed],
+    profilesTimed ? [cardsTimed, profilesTimed] : [cardsTimed],
     {
-      cards: snapshotResult.ok ? snapshotResult.snapshot.cards.length : 0,
+      cards: cardsResult.data?.length ?? 0,
       hasOwner: Boolean(input.filters.ownerUserId),
       hasQuery: Boolean(input.filters.query.trim()),
       stageFiltered: Boolean(input.filters.stageId),
+      profilesLoaded: input.includeOwnerNames !== false,
     },
   );
-  if (!snapshotResult.ok) return snapshotResult;
+  if (cardsResult.error) return { ok: false as const, error: cardsResult.error.message };
   if (profilesResult.error) return { ok: false as const, error: profilesResult.error.message };
 
   const ownerNames = new Map(
@@ -183,8 +193,9 @@ export async function loadPipelineFilterSnapshot(input: { filters: PipelinePageF
     ]),
   );
   let followUps: Map<string, LeadFollowUpDTO>;
+  const cardRows = (cardsResult.data ?? []) as PipelineCardRow[];
   try {
-    followUps = await loadFollowUps(crm, snapshotResult.snapshot.cards);
+    followUps = await loadFollowUps(crm, cardRows);
   } catch (followUpError) {
     return {
       ok: false as const,
@@ -193,11 +204,60 @@ export async function loadPipelineFilterSnapshot(input: { filters: PipelinePageF
   }
   return {
     ok: true as const,
-    cards: snapshotResult.snapshot.cards.map((row) => mapRow(row, ownerNames, followUps)),
-    allStageCounts: snapshotResult.snapshot.allStageCounts,
-    visibleStageCounts: snapshotResult.snapshot.visibleStageCounts,
-    ownerCounts: snapshotResult.snapshot.ownerCounts,
-    ownerSummary: snapshotResult.snapshot.ownerSummary,
+    cards: cardRows.map((row) => mapRow(row, ownerNames, followUps)),
+  };
+}
+
+export async function loadPipelineCountsSnapshot(input: { filters: PipelinePageFilters }) {
+  const startedAt = performance.now();
+  const supabase = await createServerSupabaseClient();
+  const crm = crmTables(supabase);
+  const timed = await timePipelineOperation(
+    "counts",
+    crm.rpc("pipeline_counts_snapshot", pipelineRpcArgs(input.filters)),
+  );
+  const { data, error } = timed.value;
+  const snapshot = error ? null : readCountsSnapshot(data);
+  logPipelinePerformance("counts_snapshot", performance.now() - startedAt, [timed], {
+    hasOwner: Boolean(input.filters.ownerUserId),
+    hasQuery: Boolean(input.filters.query.trim()),
+  });
+  if (error) return { ok: false as const, error: error.message };
+  if (!snapshot) return { ok: false as const, error: "Contagens do funil inválidas." };
+  return { ok: true as const, ...snapshot };
+}
+
+export async function loadPipelineKpisSnapshot(input: { filters: PipelinePageFilters }) {
+  const startedAt = performance.now();
+  const supabase = await createServerSupabaseClient();
+  const crm = crmTables(supabase);
+  const args = pipelineRpcArgs(input.filters);
+  const timed = await timePipelineOperation("kpis", crm.rpc("pipeline_owner_summary", {
+    p_messages_visible_since: args.p_messages_visible_since,
+    p_owner_user_id: args.p_owner_user_id,
+    p_signal: args.p_signal,
+    p_region: args.p_region,
+    p_client_category: args.p_client_category,
+    p_query: args.p_query,
+    p_stage_id: args.p_stage_id,
+    p_volume: args.p_volume,
+    p_lost_reason: args.p_lost_reason,
+  }));
+  const { data, error } = timed.value;
+  const summaryRow = ((data ?? []) as PipelineSummaryRow[])[0] ?? null;
+  logPipelinePerformance("kpis_snapshot", performance.now() - startedAt, [timed], {
+    hasOwner: Boolean(input.filters.ownerUserId),
+    hasQuery: Boolean(input.filters.query.trim()),
+  });
+  if (error) return { ok: false as const, error: error.message };
+  return {
+    ok: true as const,
+    ownerSummary: summaryRow ? {
+      open_count: Number(summaryRow.open_count),
+      awaiting_reply_count: Number(summaryRow.awaiting_reply_count),
+      stale_count: Number(summaryRow.stale_count),
+      overdue_count: Number(summaryRow.overdue_count),
+    } : null,
   };
 }
 

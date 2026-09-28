@@ -7,13 +7,9 @@ import { isClientCategoryValue, type ClientCategoryValue } from "@/lib/client-ca
 import { createServerSupabaseClient, crmTables } from "@/lib/supabase/server";
 import type { PipelineCardDTO, PipelineStageDTO } from "./pipeline-board";
 import { PipelineWorkspace } from "./pipeline-workspace";
-import {
-  loadPipelineFilterSnapshot,
-  type PipelineVolumeFilter,
-} from "@/app/actions/pipeline";
+import { loadPipelineCardsSnapshot, type PipelineVolumeFilter } from "@/app/actions/pipeline";
 import { logPipelinePerformance } from "@/lib/pipeline-performance";
 import { selectCanonicalPipelineStages } from "@/lib/pipeline-canonical-stages";
-import { countPendingPipelineAdvanceSuggestions } from "@/app/actions/pipeline-advance";
 
 export const dynamic = "force-dynamic";
 const INITIAL_CARDS_PER_STAGE = 10;
@@ -71,8 +67,7 @@ export default async function PipelinePage({
     { data: stageRows },
     { data: teamProfiles },
     { data: lostReasonRows },
-    snapshot,
-    suggestionCount,
+    cardsSnapshot,
   ] = await Promise.all([
     crm
       .from("pipeline_stages")
@@ -80,7 +75,7 @@ export default async function PipelinePage({
       .order("sort_order", { ascending: true }),
     crm.from("profiles").select("id, full_name, role").order("full_name", { ascending: true }),
     crm.from("lost_reasons").select("id, name, stage_key, sort_order, active").order("sort_order", { ascending: true }),
-    loadPipelineFilterSnapshot({
+    loadPipelineCardsSnapshot({
       filters: {
         ownerUserId,
         signal: signalFilter,
@@ -91,11 +86,11 @@ export default async function PipelinePage({
         volume: volumeFilter,
         lostReason: lostReasonFilter,
       },
+      includeOwnerNames: false,
     }),
-    countPendingPipelineAdvanceSuggestions(),
   ]);
   const databaseDurationMs = performance.now() - databaseStartedAt;
-  if (!snapshot.ok) throw new Error(snapshot.error);
+  if (!cardsSnapshot.ok) throw new Error(cardsSnapshot.error);
 
   const rawStages: PipelineStageDTO[] = (stageRows ?? []).map((s) => ({
     id: s.id,
@@ -110,7 +105,7 @@ export default async function PipelinePage({
     (teamProfiles ?? []).map((profile) => [profile.id, formatTeamOption(profile).label]),
   );
 
-  const pagedCards: PipelineCardDTO[] = snapshot.cards.map((card) => ({
+  const pagedCards: PipelineCardDTO[] = cardsSnapshot.cards.map((card) => ({
     ...card,
     ownerName: card.ownerId
       ? (ownerNameById.get(card.ownerId) ?? card.ownerName)
@@ -119,38 +114,28 @@ export default async function PipelinePage({
 
   const stageTotals = Object.fromEntries(stages.map((stage) => [stage.id, 0]));
   const stageBreadCounts = Object.fromEntries(stages.map((stage) => [stage.id, 0]));
-  for (const row of snapshot.visibleStageCounts) {
-    if (!canonicalIds.has(row.stage_id)) continue;
-    stageTotals[row.stage_id] = (stageTotals[row.stage_id] ?? 0) + Number(row.card_count);
-    // `volume_kg` é o nome legado do campo retornado pela RPC; o valor agora é pães/semana.
-    stageBreadCounts[row.stage_id] = (stageBreadCounts[row.stage_id] ?? 0) + Number(row.volume_kg);
-  }
   const initialCards = stages.flatMap((stage) =>
     pagedCards.filter((card) => card.stage_id === stage.id).slice(0, INITIAL_CARDS_PER_STAGE),
   );
-  const totalCount = snapshot.allStageCounts.reduce((total, row) => {
-    return canonicalIds.has(row.stage_id) ? total + Number(row.card_count) : total;
-  }, 0);
+  for (const card of initialCards) {
+    if (!canonicalIds.has(card.stage_id)) continue;
+    stageTotals[card.stage_id] = (stageTotals[card.stage_id] ?? 0) + 1;
+    stageBreadCounts[card.stage_id] = (stageBreadCounts[card.stage_id] ?? 0)
+      + (card.weeklyBreadCount ?? 0);
+  }
+  const totalCount = initialCards.length;
   const visibleCount = Object.values(stageTotals).reduce((total, count) => total + count, 0);
   const visibleBreadCount = Object.values(stageBreadCounts).reduce((total, count) => total + count, 0);
   const selectedOwnerName = ownerUserId
     ? (ownerNameById.get(ownerUserId) ?? (mineOnly ? "Minha carteira" : "Responsável desconhecido"))
     : null;
 
-  const countByOwner = new Map<string, number>(
-    snapshot.ownerCounts.map((row) => [row.owner_id, Number(row.card_count)]),
-  );
   const teamOptions = (teamProfiles ?? []).map((profile) => ({
     ...formatTeamOption(profile),
-    count: countByOwner.get(profile.id) ?? 0,
+    count: 0,
   }));
-  const mineCount = user?.id ? (countByOwner.get(user.id) ?? 0) : 0;
-  const initialSummary = snapshot.ownerSummary ? {
-    open: Number(snapshot.ownerSummary.open_count),
-    awaiting: Number(snapshot.ownerSummary.awaiting_reply_count),
-    stale: Number(snapshot.ownerSummary.stale_count),
-    overdue: Number(snapshot.ownerSummary.overdue_count),
-  } : null;
+  const mineCount = 0;
+  const initialSummary = null;
   logPipelinePerformance("initial_load", performance.now() - pageStartedAt, [
     { operation: "database_parallel", durationMs: Math.round(databaseDurationMs * 10) / 10 },
   ], {
@@ -209,7 +194,7 @@ export default async function PipelinePage({
             sort_order: reason.sort_order,
             active: reason.active,
           }))}
-          suggestionCount={suggestionCount}
+          suggestionCount={0}
         />
       )}
     </div>
