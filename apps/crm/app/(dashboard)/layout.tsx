@@ -23,7 +23,7 @@ export default async function DashboardLayout({
   if (!user) redirect("/login");
 
   const crm = crmTables(supabase);
-  const { data: profile } = await crm
+  const { data: profile, error: profileError } = await crm
     .from("profiles")
     .select("full_name, role")
     .eq("id", user.id)
@@ -54,7 +54,7 @@ export default async function DashboardLayout({
                 CRM
               </span>
             </Link>
-            <DashboardNav />
+            <DashboardNav isAdmin={profile?.role === "admin"} />
           </div>
           <div className="flex shrink-0 items-center gap-3 border-l border-[rgba(255,248,247,0.2)] pl-3 md:pl-5">
             <div className="flex items-center gap-3 rounded-xl bg-[rgba(255,248,247,0.08)] px-3 py-2 text-sm backdrop-blur-sm">
@@ -77,7 +77,23 @@ export default async function DashboardLayout({
         </div>
       </header>
       <div className="relative mx-auto flex min-h-0 w-full flex-1 flex-col overflow-y-auto px-4 py-6 lg:px-6 md:py-8">
-        {children}
+        {profileError ? (
+          <div className="mx-auto max-w-lg rounded-xl border border-[var(--border)] bg-[var(--card)] p-6">
+            <h1 className="text-lg font-semibold">Não foi possível abrir o CRM</h1>
+            <p className="mt-2 text-sm text-[var(--muted)]">
+              O perfil não carregou. Atualize a página. Se continuar, saia e entre de novo.
+            </p>
+          </div>
+        ) : profile ? (
+          children
+        ) : (
+          <div className="mx-auto max-w-lg rounded-xl border border-[var(--border)] bg-[var(--card)] p-6">
+            <h1 className="text-lg font-semibold">Sem acesso ao CRM</h1>
+            <p className="mt-2 text-sm text-[var(--muted)]">
+              Sua conta entrou, mas ainda não tem um perfil liberado. Um administrador precisa autorizar o acesso.
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );

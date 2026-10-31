@@ -91,6 +91,8 @@ export const config = {
     "/tasks/:path*",
     "/distributors/:path*",
     "/samples/:path*",
+    "/settings",
+    "/settings/:path*",
     "/login",
   ],
 };

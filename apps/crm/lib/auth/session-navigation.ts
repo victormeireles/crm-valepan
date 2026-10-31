@@ -6,6 +6,7 @@ export const PROTECTED_ROUTE_PREFIXES = [
   "/tasks",
   "/distributors",
   "/samples",
+  "/settings",
 ] as const;
 
 const DEFAULT_AUTHENTICATED_PATH = "/dashboard";

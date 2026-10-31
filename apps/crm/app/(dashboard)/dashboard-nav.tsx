@@ -14,14 +14,21 @@ function linkActive(pathname: string, href: string, searchParams: URLSearchParam
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-export function DashboardNav() {
+export function DashboardNav({ isAdmin = false }: { isAdmin?: boolean }) {
   const pathname = usePathname() ?? "";
   const searchParams = useSearchParams() ?? new URLSearchParams();
   const categoryFilter = searchParams.get("client_category") ?? "";
+  const items = isAdmin
+    ? dashboardNavItems.map((item) =>
+        item.kind === "dropdown" && item.id === "settings"
+          ? { ...item, items: [...item.items, { href: "/settings/usuarios", label: "Usuários" }] }
+          : item,
+      )
+    : dashboardNavItems;
 
   return (
     <nav className="flex min-w-0 flex-nowrap gap-0.5 text-xs font-semibold uppercase tracking-[0.08em] md:gap-1 md:text-[13px] md:tracking-[0.05em] lg:text-sm">
-      {dashboardNavItems.map((n) => {
+      {items.map((n) => {
         if (n.kind === "link") {
           const active = linkActive(pathname, n.href, searchParams);
           return (
