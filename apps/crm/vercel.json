@@ -7,6 +7,10 @@
     {
       "path": "/api/cron/pipeline-advance",
       "schedule": "0 9 * * *"
+    },
+    {
+      "path": "/api/cron/zapi-connection-health",
+      "schedule": "*/10 * * * *"
     }
   ]
 }

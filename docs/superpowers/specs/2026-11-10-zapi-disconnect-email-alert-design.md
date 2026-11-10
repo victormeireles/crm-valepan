@@ -11,6 +11,7 @@ Avisar por e-mail quando o número comercial da Z-API desconectar, sem spam enqu
 
 1. Webhook `DisconnectedCallback`
 2. Falha de chamada HTTP à Z-API cuja resposta indique instância desconectada
+3. Cron `/api/cron/zapi-connection-health` a cada 10 min (`GET /status`); offline → notify, online → clear
 
 ## Deduplicação
 
