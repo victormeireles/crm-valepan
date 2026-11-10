@@ -1,3 +1,11 @@
+import { maybeNotifyZapiDisconnectedFromHttpError } from "@/lib/zapi/disconnect-alert";
+
+async function throwZapiHttpError(label: string, res: Response): Promise<never> {
+  const t = await res.text();
+  maybeNotifyZapiDisconnectedFromHttpError(label, res.status, t);
+  throw new Error(`Z-API ${label} failed: ${res.status} ${t}`);
+}
+
 /**
  * Corpo `phone` da Z-API: dígitos E.164 ou `123@lid` / prefixo interno `lid:123` do CRM.
  */
@@ -52,8 +60,7 @@ export async function sendZapiText(
   });
 
   if (!res.ok) {
-    const t = await res.text();
-    throw new Error(`Z-API send failed: ${res.status} ${t}`);
+    await throwZapiHttpError("send", res);
   }
 
   const raw: unknown = await res.json().catch(() => ({}));
@@ -95,8 +102,7 @@ async function postZapiMessageAction(
     },
   );
   if (!res.ok) {
-    const responseText = await res.text();
-    throw new Error(`Z-API reaction failed: ${res.status} ${responseText}`);
+    await throwZapiHttpError("reaction", res);
   }
 }
 
@@ -149,7 +155,7 @@ export async function editZapiTextMessage(input: {
     }),
   });
   if (!response.ok) {
-    throw new Error(`Z-API edit failed: ${response.status} ${await response.text()}`);
+    await throwZapiHttpError("edit", response);
   }
 }
 
@@ -170,7 +176,7 @@ export async function forwardZapiMessage(input: {
     }),
   });
   if (!response.ok) {
-    throw new Error(`Z-API forward failed: ${response.status} ${await response.text()}`);
+    await throwZapiHttpError("forward", response);
   }
 }
 
@@ -191,7 +197,7 @@ export async function deleteZapiMessage(input: {
     headers: config.headers,
   });
   if (!response.ok) {
-    throw new Error(`Z-API delete failed: ${response.status} ${await response.text()}`);
+    await throwZapiHttpError("delete", response);
   }
 }
 
@@ -214,7 +220,7 @@ export async function pinZapiMessage(input: {
     }),
   });
   if (!response.ok) {
-    throw new Error(`Z-API pin failed: ${response.status} ${await response.text()}`);
+    await throwZapiHttpError("pin", response);
   }
 }
 
@@ -241,8 +247,7 @@ export async function fetchZapiContacts(page = 1, pageSize = 200): Promise<ZapiC
     },
   });
   if (!res.ok) {
-    const t = await res.text();
-    throw new Error(`Z-API contacts failed: ${res.status} ${t}`);
+    await throwZapiHttpError("contacts", res);
   }
 
   const raw: unknown = await res.json().catch(() => []);
@@ -297,8 +302,7 @@ export async function sendZapiContact(
   });
 
   if (!res.ok) {
-    const t = await res.text();
-    throw new Error(`Z-API send-contact failed: ${res.status} ${t}`);
+    await throwZapiHttpError("send-contact", res);
   }
 
   const raw: unknown = await res.json().catch(() => ({}));
@@ -370,8 +374,7 @@ async function sendZapiFile(input: {
   });
 
   if (!res.ok) {
-    const t = await res.text();
-    throw new Error(`Z-API ${input.kind} failed: ${res.status} ${t}`);
+    await throwZapiHttpError(input.kind, res);
   }
 
   const raw: unknown = await res.json().catch(() => ({}));

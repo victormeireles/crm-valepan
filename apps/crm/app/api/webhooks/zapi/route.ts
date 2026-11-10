@@ -2,6 +2,11 @@ import { revalidatePath } from "next/cache";
 import { NextResponse } from "next/server";
 import { agentDebugLog } from "@/lib/agent-debug-log";
 import {
+  clearZapiDisconnectedAlert,
+  getZapiConnectionEvent,
+  notifyZapiDisconnected,
+} from "@/lib/zapi/disconnect-alert";
+import {
   describeZapiParseFailure,
   explainZapiPhoneDiagnostics,
   ingestZapiMessage,
@@ -127,6 +132,31 @@ export async function POST(req: Request) {
     data: { rootKeyCount: rootKeys.length, rootKeys },
   });
   // #endregion
+
+  const connectionEvent = getZapiConnectionEvent(body);
+  if (connectionEvent === "disconnected") {
+    const detail =
+      body && typeof body === "object"
+        ? JSON.stringify(body).slice(0, 1500)
+        : "DisconnectedCallback";
+    const alert = await notifyZapiDisconnected({
+      source: "webhook:DisconnectedCallback",
+      detail,
+    });
+    return NextResponse.json({
+      ok: true as const,
+      connection: "disconnected" as const,
+      alertSent: alert.sent,
+      alertReason: alert.reason ?? null,
+    });
+  }
+  if (connectionEvent === "connected") {
+    await clearZapiDisconnectedAlert();
+    return NextResponse.json({
+      ok: true as const,
+      connection: "connected" as const,
+    });
+  }
 
   const syncedEvent = await syncZapiMessageEvent(body);
   if (syncedEvent.handled) {

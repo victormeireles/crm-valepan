@@ -305,6 +305,28 @@ export interface Database {
           updated_at?: string;
         };
       };
+      zapi_connection_alerts: {
+        Row: {
+          instance_id: string;
+          alert_sent_at: string | null;
+          last_source: string | null;
+          last_detail: string | null;
+          updated_at: string;
+        };
+        Insert: {
+          instance_id: string;
+          alert_sent_at?: string | null;
+          last_source?: string | null;
+          last_detail?: string | null;
+          updated_at?: string;
+        };
+        Update: {
+          alert_sent_at?: string | null;
+          last_source?: string | null;
+          last_detail?: string | null;
+          updated_at?: string;
+        };
+      };
       messages: {
         Row: {
           id: string;
@@ -636,6 +658,20 @@ export interface Database {
           p_phone_e164: string;
         };
         Returns: string | null;
+      };
+      claim_zapi_disconnect_alert: {
+        Args: {
+          p_instance_id: string;
+          p_source: string;
+          p_detail: string;
+        };
+        Returns: boolean;
+      };
+      clear_zapi_disconnect_alert: {
+        Args: {
+          p_instance_id: string;
+        };
+        Returns: undefined;
       };
       inbox_sidebar_snapshot: {
         Args: {
