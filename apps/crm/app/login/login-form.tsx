@@ -1,6 +1,6 @@
 "use client";
 
-import { usernameToLoginEmail } from "@/lib/auth/login-email";
+import { normalizeLoginEmail } from "@/lib/auth/login-email";
 import { safeAuthenticatedPath } from "@/lib/auth/session-navigation";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { useSearchParams } from "next/navigation";
@@ -9,7 +9,7 @@ import { useState } from "react";
 export function LoginForm() {
   const search = useSearchParams();
   const next = safeAuthenticatedPath(search.get("next"));
-  const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -17,11 +17,12 @@ export function LoginForm() {
   function getAuthErrorMessage(err: unknown) {
     if (err instanceof Error) {
       const msg = err.message.trim();
-      if (
-        msg === "Failed to fetch" ||
-        msg.toLowerCase().includes("fetch failed")
-      ) {
+      const lower = msg.toLowerCase();
+      if (lower === "failed to fetch" || lower.includes("fetch failed")) {
         return "Sem conexão com o servidor de autenticação. Verifique internet, VPN/firewall e tente novamente.";
+      }
+      if (lower.includes("invalid login credentials") || lower.includes("invalid_credentials")) {
+        return "E-mail ou senha inválidos.";
       }
       return msg;
     }
@@ -48,16 +49,16 @@ export function LoginForm() {
     e.preventDefault();
     setLoading(true);
     setError(null);
-    let email: string;
+    let loginEmail: string;
     try {
-      email = usernameToLoginEmail(username);
+      loginEmail = normalizeLoginEmail(email);
     } catch (err) {
       setLoading(false);
-      setError(err instanceof Error ? err.message : "Usuário inválido.");
+      setError(err instanceof Error ? err.message : "E-mail inválido.");
       return;
     }
     try {
-      const { error: err } = await signInWithTimeout(email, password);
+      const { error: err } = await signInWithTimeout(loginEmail, password);
       if (err) {
         setError(getAuthErrorMessage(err));
         return;
@@ -93,19 +94,20 @@ export function LoginForm() {
           Entrar
         </h1>
         <p className="mt-2 text-sm text-[var(--muted)]">
-          Informe usuário e senha cadastrados no CRM.
+          Informe o e-mail e a senha cadastrados no CRM.
         </p>
       </div>
       <form onSubmit={onSubmit} className="flex flex-col gap-4">
         <label className="flex flex-col gap-1 text-sm text-[var(--foreground)]">
-          Usuário
+          E-mail
           <input
             className="rounded-[var(--r-sm)] border border-[var(--border)] bg-[var(--vp-paper-pure)] px-3 py-2 text-[var(--foreground)]"
-            type="text"
-            autoComplete="username"
-            name="username"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
+            type="email"
+            autoComplete="email"
+            name="email"
+            inputMode="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
             required
           />
         </label>

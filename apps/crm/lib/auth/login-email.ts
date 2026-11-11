@@ -1,20 +1,16 @@
-/** Domínio sintético: o Supabase Auth exige e-mail; o login na UI é por usuário. */
+/** Domínio antigo de contas criadas quando o login era por usuário, sem e-mail real. */
 export const CRM_LOGIN_EMAIL_DOMAIN = "login.crm.valepan";
 
-export function normalizeUsername(raw: string): string {
-  return raw.trim().toLowerCase().replace(/\s+/g, "");
-}
+const LOGIN_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-/** Converte usuário exibido no formulário no e-mail usado no Auth. */
-export function usernameToLoginEmail(username: string): string {
-  const n = normalizeUsername(username);
-  if (!n) {
-    throw new Error("Informe o usuário.");
+/** Normaliza o e-mail digitado no login para o mesmo formato gravado no cadastro. */
+export function normalizeLoginEmail(raw: string): string {
+  const email = raw.trim().toLowerCase();
+  if (!email) {
+    throw new Error("Informe o e-mail.");
   }
-  if (!/^[a-z0-9._-]+$/.test(n)) {
-    throw new Error(
-      "Usuário inválido. Use apenas letras minúsculas, números, ponto, _ ou -.",
-    );
+  if (!LOGIN_EMAIL_PATTERN.test(email)) {
+    throw new Error("Informe o e-mail completo, como nome@empresa.com.");
   }
-  return `${n}@${CRM_LOGIN_EMAIL_DOMAIN}`;
+  return email;
 }
