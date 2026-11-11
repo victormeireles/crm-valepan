@@ -28,6 +28,23 @@ export function parseCrmUserId(value: string): string | null {
   return USER_ID_PATTERN.test(id) ? id : null;
 }
 
+export function validateCrmUserIdentity(input: {
+  fullName: string;
+  email: string;
+}): { ok: true; fullName: string; email: string } | { ok: false; error: string } {
+  const fullName = input.fullName.trim();
+  const email = input.email.trim().toLowerCase();
+
+  if (fullName.length < 2 || fullName.length > 80) {
+    return { ok: false, error: "Informe o nome com 2 a 80 caracteres." };
+  }
+  if (!EMAIL_PATTERN.test(email)) {
+    return { ok: false, error: "Informe um e-mail válido." };
+  }
+
+  return { ok: true, fullName, email };
+}
+
 export function validateNewCrmUser(input: {
   fullName: string;
   email: string;
@@ -36,23 +53,31 @@ export function validateNewCrmUser(input: {
 }):
   | { ok: true; fullName: string; email: string; password: string; role: CrmUserRole }
   | { ok: false; error: string } {
-  const fullName = input.fullName.trim();
-  const email = input.email.trim().toLowerCase();
+  const identity = validateCrmUserIdentity(input);
+  if (!identity.ok) return identity;
+
   const password = input.password;
   const role = parseCrmUserRole(input.role);
-
-  if (fullName.length < 2 || fullName.length > 80) {
-    return { ok: false, error: "Informe o nome com 2 a 80 caracteres." };
-  }
-  if (!EMAIL_PATTERN.test(email)) {
-    return { ok: false, error: "Informe um e-mail válido." };
-  }
   if (password.length < 8 || password.length > 72) {
     return { ok: false, error: "A senha precisa ter de 8 a 72 caracteres." };
   }
   if (!role) return { ok: false, error: "Escolha um papel válido." };
 
-  return { ok: true, fullName, email, password, role };
+  return { ok: true, fullName: identity.fullName, email: identity.email, password, role };
+}
+
+/** Impede autoexclusão e a remoção do último administrador. */
+export function refuseCrmUserDeletion(input: {
+  actorId: string;
+  targetId: string;
+  targetIsAdmin: boolean;
+  adminCount: number;
+}): string | null {
+  if (input.actorId === input.targetId) return "Você não pode remover a própria conta.";
+  if (input.targetIsAdmin && input.adminCount <= 1) {
+    return "O CRM precisa manter pelo menos um administrador.";
+  }
+  return null;
 }
 
 export function validateCrmPassword(password: string): { ok: true; password: string } | { ok: false; error: string } {

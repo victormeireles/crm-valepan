@@ -4,7 +4,9 @@ import {
   compareCrmUsers,
   parseCrmUserId,
   parseCrmUserRole,
+  refuseCrmUserDeletion,
   validateCrmPassword,
+  validateCrmUserIdentity,
   validateNewCrmUser,
   wouldRemoveLastAdmin,
   type CrmUserDTO,
@@ -107,11 +109,10 @@ export async function createCrmUser(input: {
     app_metadata: { role: draft.role },
   });
   if (error || !data.user) {
-    const message = error?.message.toLowerCase() ?? "";
-    if (message.includes("already") || message.includes("registered") || message.includes("exists")) {
-      return { ok: false, error: "Já existe uma conta com este e-mail." };
-    }
-    return { ok: false, error: "Não foi possível criar a conta." };
+    return {
+      ok: false,
+      error: duplicateAccountMessage(error?.message ?? "") ?? "Não foi possível criar a conta.",
+    };
   }
 
   const crm = crmAdminTables(admin);
@@ -211,6 +212,127 @@ export async function setCrmUserRole(input: {
   revalidatePath("/settings/usuarios");
   if (!user) return { ok: false, error: "O papel foi salvo, mas a lista não pôde ser atualizada." };
   return { ok: true, user };
+}
+
+function duplicateAccountMessage(message: string): string | null {
+  const normalized = message.toLowerCase();
+  if (normalized.includes("already") || normalized.includes("registered") || normalized.includes("exists")) {
+    return "Já existe uma conta com este e-mail.";
+  }
+  return null;
+}
+
+export async function updateCrmUserIdentity(input: {
+  userId: string;
+  fullName: string;
+  email: string;
+}): Promise<{ ok: true; user: CrmUserDTO } | { ok: false; error: string }> {
+  const actor = await requireAdmin();
+  if (!actor.ok) return actor;
+
+  const userId = parseCrmUserId(input.userId);
+  const identity = validateCrmUserIdentity(input);
+  if (!userId) return { ok: false, error: "Usuário inválido." };
+  if (!identity.ok) return identity;
+
+  const admin = createAdminSupabaseClient();
+  const { data: authUser, error: authError } = await admin.auth.admin.getUserById(userId);
+  if (authError || !authUser.user) return { ok: false, error: "Conta não encontrada." };
+
+  const currentEmail = authUser.user.email?.trim().toLowerCase() ?? "";
+  const { error: updateError } = await admin.auth.admin.updateUserById(userId, {
+    user_metadata: { ...(authUser.user.user_metadata ?? {}), full_name: identity.fullName },
+    ...(identity.email === currentEmail
+      ? {}
+      : { email: identity.email, email_confirm: true }),
+  });
+  if (updateError) {
+    return { ok: false, error: duplicateAccountMessage(updateError.message) ?? "Não foi possível atualizar nome e e-mail." };
+  }
+
+  const crm = crmAdminTables(admin);
+  const { data: profile, error: profileError } = await crm
+    .from("profiles")
+    .select("id, role")
+    .eq("id", userId)
+    .maybeSingle();
+  if (profileError) return { ok: false, error: "A conta foi atualizada, mas o perfil não pôde ser lido." };
+
+  if (profile) {
+    const { error: nameError } = await crm
+      .from("profiles")
+      .update({ full_name: identity.fullName })
+      .eq("id", userId);
+    if (nameError) return { ok: false, error: "A conta foi atualizada, mas o nome no CRM não foi gravado." };
+  }
+
+  revalidatePath("/settings/usuarios");
+  return {
+    ok: true,
+    user: {
+      id: userId,
+      email: identity.email,
+      fullName: identity.fullName,
+      role: profile ? parseCrmUserRole(profile.role) : null,
+    },
+  };
+}
+
+async function revokeCrmUserSessions(userId: string): Promise<void> {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SERVICE_ROLE;
+  if (!url || !key) return;
+
+  await fetch(`${url.replace(/\/$/, "")}/auth/v1/admin/users/${userId}/logout`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${key}`,
+      apikey: key,
+    },
+  }).catch(() => undefined);
+}
+
+export async function deleteCrmUser(input: {
+  userId: string;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const actor = await requireAdmin();
+  if (!actor.ok) return actor;
+
+  const userId = parseCrmUserId(input.userId);
+  if (!userId) return { ok: false, error: "Usuário inválido." };
+
+  const admin = createAdminSupabaseClient();
+  const crm = crmAdminTables(admin);
+  const { data: profile, error: profileError } = await crm
+    .from("profiles")
+    .select("role")
+    .eq("id", userId)
+    .maybeSingle();
+  if (profileError) return { ok: false, error: "Não foi possível ler o perfil." };
+
+  const targetIsAdmin = profile?.role === "admin";
+  const { count, error: countError } = targetIsAdmin
+    ? await crm.from("profiles").select("id", { count: "exact", head: true }).eq("role", "admin")
+    : { count: 0, error: null };
+  if (countError) return { ok: false, error: "Não foi possível confirmar os administradores." };
+
+  const refusal = refuseCrmUserDeletion({
+    actorId: actor.userId,
+    targetId: userId,
+    targetIsAdmin,
+    adminCount: count ?? 0,
+  });
+  if (refusal) return { ok: false, error: refusal };
+
+  const { data: authUser, error: authError } = await admin.auth.admin.getUserById(userId);
+  if (authError || !authUser.user) return { ok: false, error: "Conta não encontrada." };
+
+  await revokeCrmUserSessions(userId);
+  const { error } = await admin.auth.admin.deleteUser(userId);
+  if (error) return { ok: false, error: "Não foi possível remover a conta." };
+
+  revalidatePath("/settings/usuarios");
+  return { ok: true };
 }
 
 export async function setCrmUserPassword(input: {
