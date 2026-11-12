@@ -9,7 +9,7 @@ import {
 } from "@/lib/inbox/load-messages";
 import { displayCompanyName, displayPersonName } from "@/lib/lead-identity";
 import { isLeadExcludedFromPipeline } from "@/lib/lead-pipeline-exclusion";
-import type { InboxTab, InboxTabCounts } from "@/app/(dashboard)/inbox/inbox-location";
+import type { InboxSearchScope, InboxTabCounts } from "@/app/(dashboard)/inbox/inbox-location";
 import { getWeeklyBreadCount } from "@/lib/lead-signals";
 import { logInboxPerformance, timeInboxOperation } from "@/lib/inbox-performance";
 import { timelineActivityLabel } from "@/lib/timeline-labels";
@@ -122,8 +122,9 @@ function inboxPreview(body: string | null) {
 }
 
 export async function refreshInboxSidebar(input: {
-  tab: InboxTab;
+  tab: InboxSearchScope;
   page: number;
+  query?: string | null;
 }) {
   const startedAt = performance.now();
   const supabase = await createServerSupabaseClient();
@@ -135,13 +136,14 @@ export async function refreshInboxSidebar(input: {
   }
   const crm = crmTables(supabase);
   const page = Number.isFinite(input.page) && input.page > 0 ? Math.floor(input.page) : 1;
+  const query = input.query?.trim() || null;
   const [snapshotTimed, stagesTimed] = await Promise.all([
     timeInboxOperation("sidebar_snapshot", crm.rpc("inbox_sidebar_snapshot", {
       p_messages_visible_since: INBOX_MESSAGES_VISIBLE_SINCE,
       p_tab: input.tab,
       p_offset: (page - 1) * 20,
       p_limit: 20,
-      p_query: null,
+      p_query: query,
     })),
     timeInboxOperation("pipeline_stages", crm.from("pipeline_stages").select("id, name")),
   ]);
@@ -216,6 +218,7 @@ export async function refreshInboxSidebar(input: {
       clientes: Number(meta?.clientes_count ?? 0),
       perdidos: Number(meta?.perdidos_count ?? 0),
     } satisfies InboxTabCounts,
+    tabTotal: Number(meta?.tab_total ?? 0),
   };
 }
 

@@ -10,11 +10,12 @@ import { createServerSupabaseClient, crmTables } from "@/lib/supabase/server";
 import { InboxLiveRefresh } from "./inbox-live-refresh";
 import { InboxSidebar, type InboxSidebarRow } from "./inbox-sidebar";
 import { InboxConversationPane } from "./inbox-conversation-pane";
-import { inboxTabFromParam, type InboxTab } from "./inbox-location";
+import { inboxSearchScopeFromParam, inboxTabFromParam, type InboxSearchScope } from "./inbox-location";
 import type { InboxConversationView } from "@/app/actions/inbox";
 import { isLeadExcludedFromPipeline } from "@/lib/lead-pipeline-exclusion";
 import { displayPipelineStageName, selectCanonicalPipelineStages } from "@/lib/pipeline-canonical-stages";
 import { getWeeklyBreadCount } from "@/lib/lead-signals";
+import { isInboxSearchQuery } from "@/lib/phone-search-query";
 import type { Database } from "@/lib/database.types";
 import {
   logInboxPerformance,
@@ -82,11 +83,12 @@ export default async function InboxPage({
   const params = await timed("search_params", searchParams);
   const { cid, tab } = params;
   const inboxQuery = typeof params.q === "string" ? params.q.trim() : "";
-  const inboxQueryDigits = inboxQuery.replace(/\D/g, "");
-  const isPhoneSearch = inboxQueryDigits.length >= 4;
+  const hasInboxSearch = isInboxSearchQuery(inboxQuery);
   const requestedPage = params.page ? Number.parseInt(params.page, 10) : 1;
   const page = Number.isFinite(requestedPage) && requestedPage > 0 ? requestedPage : 1;
-  const activeTab: InboxTab = inboxTabFromParam(tab);
+  const activeTab: InboxSearchScope = hasInboxSearch
+    ? (tab ? inboxSearchScopeFromParam(tab) : "all")
+    : inboxTabFromParam(tab);
   const supabase = await timed("supabase_client", createServerSupabaseClient());
   const crm = crmTables(supabase);
   const conversationSelect =
@@ -106,7 +108,7 @@ export default async function InboxPage({
     p_tab: activeTab,
     p_offset: (page - 1) * PAGE_SIZE,
     p_limit: PAGE_SIZE,
-    p_query: isPhoneSearch ? inboxQuery : null,
+    p_query: hasInboxSearch ? inboxQuery : null,
   }));
   const substagesPromise = timed("pipeline_substages", crm
     .from("lost_reasons")
@@ -164,6 +166,7 @@ export default async function InboxPage({
     clientes: Number(snapshotMeta?.clientes_count ?? 0),
     perdidos: Number(snapshotMeta?.perdidos_count ?? 0),
   };
+  const tabTotal = Number(snapshotMeta?.tab_total ?? 0);
   const tailById = new Map(compactRows.map((row) => [row.conversation_id!, {
     conversation_id: row.conversation_id!,
     lead_id: row.lead_id,
@@ -564,6 +567,7 @@ export default async function InboxPage({
               initialQuery={inboxQuery}
               renderNowMs={renderNowMs}
               tabCounts={tabCounts}
+              tabTotal={tabTotal}
             />
           </div>
         </div>

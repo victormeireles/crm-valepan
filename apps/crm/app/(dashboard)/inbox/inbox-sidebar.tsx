@@ -2,7 +2,6 @@
 
 import {
   refreshInboxSidebar,
-  searchInboxConversationsByPhone,
   updateConversationContactName,
 } from "@/app/actions/inbox";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -11,16 +10,18 @@ import { CategoryBadge } from "@/components/lead-identity";
 import { CrmIcon } from "@/components/crm-icon";
 import { CrmMenuSelect } from "@/components/crm-menu-select";
 import { PaginationNav } from "@/components/pagination-nav";
-import { brazilPhoneSearchVariants } from "@crm/shared/phone";
-import { isPhoneSearchQuery } from "@/lib/phone-search-query";
+import { isInboxSearchQuery, isPhoneSearchQuery } from "@/lib/phone-search-query";
 import { formatAbsoluteShort, formatElapsedShort, formatIntegerPt } from "@/lib/format-relative";
 import { INBOX_SELECT_CONVERSATION_EVENT } from "./inbox-conversation-pane";
 import {
   inboxClientHref,
   inboxShareHref,
+  isInboxTab,
   pushInboxClientUrl,
   readInboxLocation,
   replaceInboxClientUrl,
+  sumInboxTabCounts,
+  type InboxSearchScope,
   type InboxTab,
   type InboxTabCounts,
 } from "./inbox-location";
@@ -56,13 +57,6 @@ const INBOX_LISTS: { tab: InboxTab; label: string }[] = [
   { tab: "clientes", label: "Clientes" },
   { tab: "perdidos", label: "Perdidos" },
 ];
-
-function norm(s: string) {
-  return s
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
-}
 
 function validAvatarUrl(v: string | null | undefined): string | null {
   const t = (v ?? "").trim();
@@ -105,25 +99,30 @@ export function InboxSidebar({
   initialQuery,
   renderNowMs,
   tabCounts,
+  tabTotal,
 }: {
   conversations: InboxSidebarRow[];
   selectedId: string | null;
-  activeTab: InboxTab;
+  activeTab: InboxSearchScope;
   page: number;
   initialQuery: string;
   renderNowMs: number;
   tabCounts: InboxTabCounts;
+  tabTotal?: number;
 }) {
+  const initialSearch = isInboxSearchQuery(initialQuery);
   const [nowMs, setNowMs] = useState(renderNowMs);
   const [searchPending, setSearchPending] = useState(false);
-  const [phoneResults, setPhoneResults] = useState<InboxSidebarRow[] | null>(null);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [q, setQ] = useState(initialQuery);
-  const [liveTab, setLiveTab] = useState(activeTab);
+  const [liveTab, setLiveTab] = useState<InboxSearchScope>(activeTab);
   const [livePage, setLivePage] = useState(page);
   const [listPending, setListPending] = useState(false);
   const [liveConversations, setLiveConversations] = useState(conversations);
   const [liveTabCounts, setLiveTabCounts] = useState(tabCounts);
+  const [liveTabTotal, setLiveTabTotal] = useState(
+    tabTotal ?? (activeTab === "all" ? sumInboxTabCounts(tabCounts) : tabCounts[activeTab]),
+  );
   const [optimisticSelectedId, setOptimisticSelectedId] = useState(selectedId);
   const [readIds, setReadIds] = useState<Set<string>>(() => new Set());
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
@@ -132,40 +131,45 @@ export function InboxSidebar({
   const requestVersion = useRef(0);
   const selectedIdRef = useRef(optimisticSelectedId);
   selectedIdRef.current = optimisticSelectedId;
+  const qRef = useRef(q);
+  qRef.current = q;
+  const liveTabRef = useRef(liveTab);
+  liveTabRef.current = liveTab;
+  const tabBeforeSearchRef = useRef<InboxTab>(isInboxTab(activeTab) ? activeTab : "novos");
+  const searchModeRef = useRef(initialSearch);
+  const skipSearchBootstrapRef = useRef(initialSearch);
+
+  const searchActive = isInboxSearchQuery(q);
+  const paginationTotal = liveTab === "all" ? liveTabTotal : liveTabCounts[liveTab];
+
+  const listOptions = useMemo(() => {
+    const stageOptions = INBOX_LISTS.map(({ tab, label }) => ({
+      value: tab,
+      label,
+      meta: formatIntegerPt(liveTabCounts[tab]),
+    }));
+    if (!searchActive && liveTab !== "all") return stageOptions;
+    return [
+      {
+        value: "all",
+        label: "Todas",
+        meta: formatIntegerPt(sumInboxTabCounts(liveTabCounts)),
+      },
+      ...stageOptions,
+    ];
+  }, [liveTab, liveTabCounts, searchActive]);
 
   const conversationHref = (conversationId: string) =>
     inboxShareHref({
       tab: liveTab,
       page: livePage,
       cid: conversationId,
-      lookup: phoneResults !== null && isPhoneSearchQuery(q),
+      lookup: searchActive && isPhoneSearchQuery(q),
+      q: searchActive ? q.trim() : null,
     });
-
-  const visibleConversations = phoneResults ?? liveConversations;
-  const filtered = useMemo(() => {
-    const needle = norm(q.trim());
-    if (!needle) return visibleConversations;
-    const queryVariants = new Set(brazilPhoneSearchVariants(q));
-    return visibleConversations.filter((c) => {
-      const hay = norm(
-        [
-          c.displayName,
-          c.identityName,
-          c.companyName ?? "",
-          c.phone_e164,
-          c.preview,
-          c.leadLine,
-        ].join(" "),
-      );
-      if (hay.includes(needle)) return true;
-      return brazilPhoneSearchVariants(c.phone_e164).some((variant) =>
-        queryVariants.has(variant),
-      );
-    });
-  }, [q, visibleConversations]);
 
   const applySidebarResult = useCallback((
-    tab: InboxTab,
+    tab: InboxSearchScope,
     nextPage: number,
     result: Awaited<ReturnType<typeof refreshInboxSidebar>>,
     startedAt: number,
@@ -179,15 +183,26 @@ export function InboxSidebar({
     setLivePage(nextPage);
     setLiveConversations(result.conversations);
     setLiveTabCounts(result.tabCounts);
+    setLiveTabTotal(
+      result.tabTotal > 0
+        ? result.tabTotal
+        : tab === "all"
+          ? sumInboxTabCounts(result.tabCounts)
+          : result.tabCounts[tab],
+    );
   }, []);
 
   const loadList = useCallback((
-    tab: InboxTab,
+    tab: InboxSearchScope,
     nextPage: number,
     mode: "push" | "replace" | "silent" = "push",
+    query?: string | null,
   ) => {
     const startedAt = performance.now();
     const version = ++requestVersion.current;
+    const activeQuery = query === undefined
+      ? (isInboxSearchQuery(qRef.current) ? qRef.current.trim() : null)
+      : query?.trim() || null;
     setListPending(true);
     setLiveTab(tab);
     setLivePage(nextPage);
@@ -197,14 +212,22 @@ export function InboxSidebar({
       if (mode === "push") pushInboxClientUrl(historyState, href);
       else replaceInboxClientUrl(historyState, href);
     }
-    void refreshInboxSidebar({ tab, page: nextPage }).then((result) => {
+    void refreshInboxSidebar({ tab, page: nextPage, query: activeQuery }).then((result) => {
       if (version !== requestVersion.current) return;
       applySidebarResult(tab, nextPage, result, startedAt);
       setListPending(false);
+      setSearchPending(false);
+      if (!result.ok) {
+        setSearchError("Não foi possível atualizar a lista. Tente novamente.");
+        return;
+      }
+      setSearchError(null);
     }).catch(() => {
       if (version !== requestVersion.current) return;
       recordInboxBrowserMetric("sidebar_refresh", startedAt, { success: false, rows: 0 });
       setListPending(false);
+      setSearchPending(false);
+      setSearchError("Não foi possível atualizar a lista. Tente novamente.");
     });
   }, [applySidebarResult]);
 
@@ -215,7 +238,12 @@ export function InboxSidebar({
   useEffect(() => {
     setLiveConversations(conversations);
     setLiveTabCounts(tabCounts);
-  }, [conversations, tabCounts]);
+    setLiveTabTotal(
+      tabTotal ?? (activeTab === "all" ? sumInboxTabCounts(tabCounts) : isInboxTab(activeTab) ? tabCounts[activeTab] : sumInboxTabCounts(tabCounts)),
+    );
+    setLiveTab(activeTab);
+    setLivePage(page);
+  }, [conversations, tabCounts, tabTotal, activeTab, page]);
 
   useEffect(() => {
     const refresh = () => loadList(liveTab, livePage, "silent");
@@ -234,49 +262,52 @@ export function InboxSidebar({
 
   useEffect(() => {
     const trimmed = q.trim();
-    if (!isPhoneSearchQuery(trimmed)) {
-      setPhoneResults(null);
-      setSearchError(null);
+    const searching = isInboxSearchQuery(trimmed);
+    let cancelled = false;
+
+    if (!searching) {
       setSearchPending(false);
+      if (!searchModeRef.current) return;
+      searchModeRef.current = false;
+      skipSearchBootstrapRef.current = false;
+      const restoreTab = tabBeforeSearchRef.current;
+      setLiveTab(restoreTab);
+      const timeout = window.setTimeout(() => {
+        if (cancelled) return;
+        loadList(restoreTab, 1, "replace", null);
+      }, 0);
+      return () => {
+        cancelled = true;
+        window.clearTimeout(timeout);
+      };
+    }
+
+    if (skipSearchBootstrapRef.current) {
+      skipSearchBootstrapRef.current = false;
+      searchModeRef.current = true;
       return;
     }
-    let cancelled = false;
+
+    const enteringSearch = !searchModeRef.current;
     const timeout = window.setTimeout(() => {
+      if (cancelled) return;
+      if (enteringSearch) {
+        if (isInboxTab(liveTabRef.current)) {
+          tabBeforeSearchRef.current = liveTabRef.current;
+        }
+        searchModeRef.current = true;
+      }
       setSearchPending(true);
       setSearchError(null);
-      void searchInboxConversationsByPhone(trimmed).then((result) => {
-        if (cancelled) return;
-        setSearchPending(false);
-        if (!result.ok) {
-          setPhoneResults([]);
-          setSearchError("Não foi possível buscar o telefone. Tente novamente.");
-          return;
-        }
-        setPhoneResults(result.conversations.map((conversation) => ({
-          id: conversation.id,
-          kind: "lead" as const,
-          displayName: conversation.identityName,
-          phone_e164: conversation.phone,
-          preview: "Telefone encontrado no CRM",
-          lastAt: conversation.lastAt,
-          leadLine: "Resultado da busca",
-          awaiting: false,
-          identityName: conversation.identityName,
-          companyName: conversation.companyName,
-          clientCategory: null,
-          stageName: null,
-          weeklyBreadCount: null,
-          lastDirection: null,
-          unread: false,
-          callStatus: null,
-        })));
-      });
-    }, 500);
+      const nextTab: InboxSearchScope = enteringSearch ? "all" : liveTabRef.current;
+      loadList(nextTab, 1, "replace", trimmed);
+    }, 400);
+
     return () => {
       cancelled = true;
       window.clearTimeout(timeout);
     };
-  }, [q]);
+  }, [q, loadList]);
 
   useEffect(() => {
     setOptimisticSelectedId(selectedId);
@@ -309,14 +340,11 @@ export function InboxSidebar({
           <CrmMenuSelect
             label="Lista de conversas"
             value={liveTab}
-            options={INBOX_LISTS.map(({ tab, label }) => ({
-              value: tab,
-              label,
-              meta: formatIntegerPt(liveTabCounts[tab]),
-            }))}
+            options={listOptions}
             onChange={(tab) => {
-              if (tab === liveTab && livePage === 1) return;
-              loadList(tab as InboxTab, 1);
+              const next = tab as InboxSearchScope;
+              if (next === liveTab && livePage === 1) return;
+              loadList(next, 1);
             }}
           />
         </div>
@@ -334,9 +362,11 @@ export function InboxSidebar({
             spellCheck={false}
           />
         </label>
-        {isPhoneSearchQuery(q) ? (
+        {searchActive ? (
           <p className="mt-1.5 px-2 text-[10px] text-[var(--vp-ink-muted)]">
-            Buscando o telefone em todas as listas.
+            {liveTab === "all"
+              ? "Buscando em todas as listas."
+              : "Resultados filtrados pela lista selecionada."}
           </p>
         ) : null}
         {searchError ? (
@@ -358,7 +388,7 @@ export function InboxSidebar({
                 </div>
               </li>
             ))
-          : filtered.map((c) => (
+          : liveConversations.map((c) => (
           <li
             key={c.id}
             className={`relative transition-colors hover:bg-[rgba(35,0,4,0.05)] ${
@@ -496,12 +526,10 @@ export function InboxSidebar({
             ) : null}
           </li>
         ))}
-        {!listPending && phoneResults === null && liveConversations.length === 0 && (
-          <li className="px-4 py-8 text-center text-sm text-[var(--muted)]">Nenhuma conversa ainda.</li>
-        )}
-        {!listPending && ((phoneResults !== null && phoneResults.length === 0) ||
-        (visibleConversations.length > 0 && filtered.length === 0)) ? (
-          <li className="px-4 py-8 text-center text-sm text-[var(--muted)]">Nenhum resultado.</li>
+        {!listPending && liveConversations.length === 0 ? (
+          <li className="px-4 py-8 text-center text-sm text-[var(--muted)]">
+            {searchActive ? "Nenhum resultado." : "Nenhuma conversa ainda."}
+          </li>
         ) : null}
       </ul>
       <div className="shrink-0">
@@ -509,8 +537,12 @@ export function InboxSidebar({
           pathname="/inbox"
           page={livePage}
           pageSize={PAGE_SIZE}
-          totalCount={liveTabCounts[liveTab]}
-          searchParams={{ tab: liveTab, cid: optimisticSelectedId ?? undefined }}
+          totalCount={paginationTotal}
+          searchParams={{
+            tab: liveTab,
+            cid: optimisticSelectedId ?? undefined,
+            ...(searchActive ? { q: q.trim() } : {}),
+          }}
           showBoundaryLinks
           onNavigate={(href) => {
             const nextPage = Number.parseInt(new URL(href, "http://local.invalid").searchParams.get("page") ?? "1", 10) || 1;

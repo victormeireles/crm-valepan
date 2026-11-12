@@ -47,6 +47,7 @@ beforeAll(async () => {
   `);
   await db.exec(sql("20260919190000_inbox_sidebar_snapshot_page_first.sql"));
   await db.exec(sql("20260922180000_inbox_lists_by_stage.sql"));
+  await db.exec(sql("20261112140000_inbox_sidebar_search_all.sql"));
 
   await db.exec(`
     insert into crm.contacts(full_name, phone_e164) values ('Ana Qualificar', '+5511111111111');
@@ -178,6 +179,7 @@ describe("inbox_sidebar_snapshot", () => {
     expect(perdidos.rows).toEqual([{ last_body_preview: "ultima perdido" }]);
 
     await db.exec(sql("20260922180000_inbox_lists_by_stage.sql"));
+    await db.exec(sql("20261112140000_inbox_sidebar_search_all.sql"));
     const reclassified = await db.query<{
       status: string;
       excluded_from_pipeline_at: string | null;
@@ -197,5 +199,67 @@ describe("inbox_sidebar_snapshot", () => {
       classification: "CLIENTE",
       stage_name: "CONVERTIDO",
     }]);
+  });
+
+  it("busca por nome em todas as listas e devolve contagens do subset", async () => {
+    const byName = await db.query<{
+      contact_name: string | null;
+      tab_total: number;
+      novos_count: number;
+      leads_count: number;
+      groups_count: number;
+      clientes_count: number;
+      perdidos_count: number;
+    }>(
+      `select contact_name, tab_total, novos_count, leads_count, groups_count, clientes_count, perdidos_count
+       from crm.inbox_sidebar_snapshot('2026-08-01T03:00:00Z', 'all', 0, 20, 'Ana')
+       where conversation_id is not null`,
+    );
+
+    expect(byName.rows.map((row) => row.contact_name)).toEqual(["Ana Qualificar"]);
+    expect(byName.rows[0]).toMatchObject({
+      tab_total: 1,
+      novos_count: 1,
+      leads_count: 0,
+      groups_count: 0,
+      clientes_count: 0,
+      perdidos_count: 0,
+    });
+
+    const narrowed = await db.query<{ contact_name: string | null; tab_total: number }>(
+      `select contact_name, tab_total
+       from crm.inbox_sidebar_snapshot('2026-08-01T03:00:00Z', 'leads', 0, 20, 'Ana')
+       where conversation_id is not null`,
+    );
+    expect(narrowed.rows).toEqual([]);
+
+    const inNovos = await db.query<{ contact_name: string | null; tab_total: number }>(
+      `select contact_name, tab_total
+       from crm.inbox_sidebar_snapshot('2026-08-01T03:00:00Z', 'novos', 0, 20, 'Ana')
+       where conversation_id is not null`,
+    );
+    expect(inNovos.rows).toEqual([{ contact_name: "Ana Qualificar", tab_total: 1 }]);
+  });
+
+  it("p_tab=all lista conversas de etapas diferentes e busca grupo por nome", async () => {
+    const all = await db.query<{
+      phone_e164: string | null;
+      group_display_name: string | null;
+      tab_total: number;
+    }>(
+      `select phone_e164, group_display_name, tab_total
+       from crm.inbox_sidebar_snapshot('2026-08-01T03:00:00Z', 'all', 0, 20, null)
+       where conversation_id is not null
+       order by last_message_at desc nulls last`,
+    );
+    expect(all.rows).toHaveLength(7);
+    expect(all.rows[0]?.tab_total).toBe(7);
+
+    const group = await db.query<{ group_display_name: string | null; groups_count: number }>(
+      `select group_display_name, groups_count
+       from crm.inbox_sidebar_snapshot('2026-08-01T03:00:00Z', 'all', 0, 20, 'Grupo novo')
+       where conversation_id is not null`,
+    );
+    expect(group.rows).toEqual([{ group_display_name: "Grupo novo", groups_count: 1 }]);
   });
 });
