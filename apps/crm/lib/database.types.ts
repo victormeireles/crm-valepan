@@ -141,6 +141,25 @@ export interface Database {
         };
         Update: Partial<Database["crm"]["Tables"]["lost_reasons"]["Insert"]>;
       };
+      message_templates: {
+        Row: {
+          id: string;
+          title: string;
+          body: string;
+          sort_order: number;
+          active: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          title: string;
+          body: string;
+          sort_order?: number;
+          active?: boolean;
+        };
+        Update: Partial<Database["crm"]["Tables"]["message_templates"]["Insert"]>;
+      };
       pipeline_advance_suggestions: {
         Row: {
           id: string;

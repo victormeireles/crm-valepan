@@ -13,9 +13,13 @@ import {
   WHATSAPP_MEDIA_BUCKET,
 } from "@/lib/media-constants";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
+import {
+  loadActiveQuickReplies,
+  peekActiveQuickRepliesCache,
+} from "@/lib/inbox/quick-replies-cache";
+import { renderQuickReply, type MessageTemplateDTO } from "@/lib/inbox/quick-replies";
 import { useEffect, useRef, useState } from "react";
 import { EmojiPicker } from "./emoji-picker";
-import { QUICK_REPLIES, renderQuickReply } from "@/lib/inbox/quick-replies";
 
 export function SendMessageForm({
   conversationId,
@@ -30,6 +34,9 @@ export function SendMessageForm({
 }) {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [quickReplies, setQuickReplies] = useState<MessageTemplateDTO[]>(
+    () => peekActiveQuickRepliesCache() ?? [],
+  );
   const [attachOpen, setAttachOpen] = useState(false);
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [contactPickerOpen, setContactPickerOpen] = useState(false);
@@ -58,6 +65,17 @@ export function SendMessageForm({
     }
     document.addEventListener("mousedown", onPointerDown);
     return () => document.removeEventListener("mousedown", onPointerDown);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadActiveQuickReplies().then((templates) => {
+      if (cancelled) return;
+      setQuickReplies(templates);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -210,24 +228,26 @@ export function SendMessageForm({
         </div>
       ) : null}
 
-      <div className={`flex items-center gap-2 overflow-x-auto pb-1 ${compact ? "[scrollbar-width:none] [&::-webkit-scrollbar]:hidden" : ""}`}>
-        <span className="shrink-0 text-[10px] font-extrabold uppercase tracking-[0.14em] text-[var(--vp-ink-soft)]">Respostas rápidas</span>
-        {QUICK_REPLIES.map((reply) => (
-          <button
-            key={reply.title}
-            type="button"
-            className="min-h-9 shrink-0 rounded-full border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] px-3 text-xs font-semibold text-[var(--vp-wine)]"
-            onClick={() => {
-              if (!messageRef.current) return;
-              messageRef.current.value = renderQuickReply(reply.body, firstName);
-              messageRef.current.focus();
-              messageRef.current.setSelectionRange(messageRef.current.value.length, messageRef.current.value.length);
-            }}
-          >
-            {reply.title}
-          </button>
-        ))}
-      </div>
+      {quickReplies.length > 0 ? (
+        <div className={`flex items-center gap-2 overflow-x-auto pb-1 ${compact ? "[scrollbar-width:none] [&::-webkit-scrollbar]:hidden" : ""}`}>
+          <span className="shrink-0 text-[10px] font-extrabold uppercase tracking-[0.14em] text-[var(--vp-ink-soft)]">Respostas rápidas</span>
+          {quickReplies.map((reply) => (
+            <button
+              key={reply.id}
+              type="button"
+              className="min-h-9 shrink-0 rounded-full border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] px-3 text-xs font-semibold text-[var(--vp-wine)]"
+              onClick={() => {
+                if (!messageRef.current) return;
+                messageRef.current.value = renderQuickReply(reply.body, firstName);
+                messageRef.current.focus();
+                messageRef.current.setSelectionRange(messageRef.current.value.length, messageRef.current.value.length);
+              }}
+            >
+              {reply.title}
+            </button>
+          ))}
+        </div>
+      ) : null}
 
       <div className="flex min-w-0 items-end gap-2.5">
         <div className="flex min-h-12 min-w-0 flex-1 items-end gap-0.5 rounded-[1.5rem] border border-[var(--border)] bg-[var(--vp-paper-pure)] px-1 py-1 shadow-[var(--sh-sm)]">
