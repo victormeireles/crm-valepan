@@ -19,6 +19,16 @@ export function normalizeMessageTemplateBody(value: string) {
   return value.replace(/\r\n/g, "\n").trim();
 }
 
-export function renderQuickReply(body: string, firstName: string) {
-  return body.replaceAll("{{primeiro_nome}}", firstName.trim() || "tudo bem");
+/** Primeiro token do nome completo; vazio se não houver nome. */
+export function templateFirstName(fullName: string | null | undefined) {
+  return (fullName ?? "").trim().split(/\s+/)[0] || "";
+}
+
+export function renderQuickReply(
+  body: string,
+  vars: { firstName: string; comercialNome?: string },
+) {
+  return body
+    .replaceAll("{{primeiro_nome}}", vars.firstName.trim() || "tudo bem")
+    .replaceAll("{{comercial_nome}}", vars.comercialNome?.trim() || "equipe");
 }

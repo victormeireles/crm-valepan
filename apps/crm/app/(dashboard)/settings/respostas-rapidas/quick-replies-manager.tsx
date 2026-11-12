@@ -78,7 +78,11 @@ export function QuickRepliesManager({
           <code className="rounded bg-[var(--vp-surface)] px-1.5 py-0.5 text-[12px] text-[var(--vp-wine)]">
             {"{{primeiro_nome}}"}
           </code>{" "}
-          para inserir o nome do contato automaticamente.
+          para o nome do contato e{" "}
+          <code className="rounded bg-[var(--vp-surface)] px-1.5 py-0.5 text-[12px] text-[var(--vp-wine)]">
+            {"{{comercial_nome}}"}
+          </code>{" "}
+          para o seu primeiro nome.
         </p>
       </div>
 
@@ -125,7 +129,7 @@ export function QuickRepliesManager({
               onChange={(event) => setDraftBody(event.target.value)}
               maxLength={MESSAGE_TEMPLATE_BODY_MAX}
               rows={4}
-              placeholder="Olá, {{primeiro_nome}}! …"
+              placeholder="Olá, {{primeiro_nome}}! Aqui é {{comercial_nome}}…"
               className="mt-1 w-full resize-y rounded-[10px] border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] px-3 py-2.5 text-[13px] font-semibold normal-case tracking-normal text-[var(--vp-ink-body)] outline-none placeholder:text-[var(--vp-ink-soft)]"
             />
           </label>

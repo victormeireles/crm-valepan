@@ -36,6 +36,7 @@ import {
 import {
   conversationClassificationForStageAndSubstage,
 } from "@/lib/pipeline-substages";
+import { templateFirstName } from "@/lib/inbox/quick-replies";
 import { WHATSAPP_MEDIA_BUCKET } from "@/lib/media-storage";
 import {
   normalizeAttachmentMetadata,
@@ -89,6 +90,8 @@ export type InboxConversationView = {
     distributorId: string | null;
     distributorName: string | null;
   };
+  /** Primeiro nome do usuário logado para {{comercial_nome}} nas respostas rápidas. */
+  comercialFirstName: string;
   messages: Awaited<ReturnType<typeof loadRecentConversationMessages>>["messages"];
   hasMoreOlder: boolean;
   messagesLoadError?: string;
@@ -261,7 +264,7 @@ export async function loadInboxConversationView(conversationId: string) {
   }
   const crm = crmTables(supabase);
   const messagesPromise = timeInboxOperation("messages_initial", loadRecentConversationMessages(crm, id));
-  const [conversationTimed, tailTimed] = await Promise.all([
+  const [conversationTimed, tailTimed, profileTimed] = await Promise.all([
     timeInboxOperation("selected_conversation", crm.from("conversations").select(`
       id, phone_e164, conversation_kind, group_display_name, last_read_at,
       leads(id, client_category, cliente_distribuidor_id, excluded_from_pipeline_at, city, state,
@@ -273,12 +276,13 @@ export async function loadInboxConversationView(conversationId: string) {
     timeInboxOperation("last_message", crm.from("v_conversation_last_message")
       .select("last_direction, last_sent_at, last_body_preview")
       .eq("conversation_id", id).maybeSingle()),
+    timeInboxOperation("comercial_profile", crm.from("profiles").select("full_name").eq("id", user.id).maybeSingle()),
   ]);
   const messagesTimed = await messagesPromise;
   const conversationResult = conversationTimed.value;
   const tailResult = tailTimed.value;
   const messagesResult = messagesTimed.value;
-  logInboxPerformance("conversation_load", performance.now() - startedAt, [authTimed, conversationTimed, tailTimed, messagesTimed], {
+  logInboxPerformance("conversation_load", performance.now() - startedAt, [authTimed, conversationTimed, tailTimed, profileTimed, messagesTimed], {
     found: Boolean(conversationResult.data),
     messages: messagesResult.messages.length,
     hasError: Boolean(conversationResult.error || messagesResult.error),
@@ -312,6 +316,7 @@ export async function loadInboxConversationView(conversationId: string) {
   const opportunity = [...opportunities].sort((a, b) =>
     String(b.updated_at ?? "").localeCompare(String(a.updated_at ?? "")),
   )[0] ?? null;
+  const comercialFirstName = templateFirstName(profileTimed.value.data?.full_name) || "equipe";
 
   const view: InboxConversationView = {
     conversation: {
@@ -333,6 +338,7 @@ export async function loadInboxConversationView(conversationId: string) {
       distributorId,
       distributorName,
     },
+    comercialFirstName,
     messages: messagesResult.messages,
     hasMoreOlder: messagesResult.hasMoreOlder,
     ...(messagesResult.error ? { messagesLoadError: messagesResult.error.message } : {}),

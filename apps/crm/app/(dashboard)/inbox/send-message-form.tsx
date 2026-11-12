@@ -25,11 +25,13 @@ export function SendMessageForm({
   conversationId,
   phone,
   firstName,
+  comercialFirstName = "equipe",
   compact = false,
 }: {
   conversationId: string;
   phone: string;
   firstName: string;
+  comercialFirstName?: string;
   compact?: boolean;
 }) {
   const [loading, setLoading] = useState(false);
@@ -238,7 +240,10 @@ export function SendMessageForm({
               className="min-h-9 shrink-0 rounded-full border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] px-3 text-xs font-semibold text-[var(--vp-wine)]"
               onClick={() => {
                 if (!messageRef.current) return;
-                messageRef.current.value = renderQuickReply(reply.body, firstName);
+                messageRef.current.value = renderQuickReply(reply.body, {
+                  firstName,
+                  comercialNome: comercialFirstName,
+                });
                 messageRef.current.focus();
                 messageRef.current.setSelectionRange(messageRef.current.value.length, messageRef.current.value.length);
               }}

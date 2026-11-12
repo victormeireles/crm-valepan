@@ -6,7 +6,8 @@ import {
 import { fetchDistributorCatalog } from "@/lib/distributor-catalog";
 import { displayCompanyName, displayPersonName } from "@/lib/lead-identity";
 import { nestOne } from "@/lib/supabase/nested";
-import { createServerSupabaseClient, crmTables } from "@/lib/supabase/server";
+import { createServerSupabaseClient, crmTables, getServerUser } from "@/lib/supabase/server";
+import { templateFirstName } from "@/lib/inbox/quick-replies";
 import { InboxLiveRefresh } from "./inbox-live-refresh";
 import { InboxSidebar, type InboxSidebarRow } from "./inbox-sidebar";
 import { InboxConversationPane } from "./inbox-conversation-pane";
@@ -115,13 +116,21 @@ export default async function InboxPage({
     .select("id, name, stage_key, sort_order, active")
     .order("sort_order", { ascending: true }));
   const distributorsPromise = timed("distributors", fetchDistributorCatalog(crm));
-  const [{ data: stages }, snapshotResult, requestedConversationResult, substagesResult, distributorsResult] = await Promise.all([
+  const comercialProfilePromise = timed("comercial_profile", (async () => {
+    const user = await getServerUser();
+    if (!user) return null;
+    const { data } = await crm.from("profiles").select("full_name").eq("id", user.id).maybeSingle();
+    return data;
+  })());
+  const [{ data: stages }, snapshotResult, requestedConversationResult, substagesResult, distributorsResult, comercialProfile] = await Promise.all([
     stagesPromise,
     snapshotPromise,
     requestedConversationPromise,
     substagesPromise,
     distributorsPromise,
+    comercialProfilePromise,
   ]);
+  const comercialFirstName = templateFirstName(comercialProfile?.full_name) || "equipe";
   const snapshotRows = (snapshotResult.data ?? []) as InboxSidebarSnapshotRow[];
   const snapshotMeta = snapshotRows[0];
   const compactRows = snapshotRows.filter(
@@ -507,6 +516,7 @@ export default async function InboxPage({
           distributorId: selectedDistributor?.id ?? null,
           distributorName: selectedDistributor?.name ?? null,
         },
+        comercialFirstName,
         messages,
         hasMoreOlder,
         ...(messagesError ? { messagesLoadError: messagesError.message } : {}),

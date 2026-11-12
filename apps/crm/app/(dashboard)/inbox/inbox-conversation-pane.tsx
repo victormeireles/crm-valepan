@@ -347,7 +347,7 @@ export function InboxConversationPane({
               </div>
             </div>
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--vp-paper)] px-[18px]"><ChatThread key={conversation.id} conversationId={conversation.id} initialMessages={view.messages} hasMoreOlder={view.hasMoreOlder} messagesLoadError={view.messagesLoadError} lastReadAtIso={conversation.lastReadAt} /></div>
-            <div className="shrink-0 border-t border-[var(--vp-ink-line)] bg-[var(--vp-paper)] px-[18px] pb-4 pt-3"><SendMessageForm key={conversation.id} conversationId={conversation.id} phone={conversation.phone} firstName={conversation.firstName} /></div>
+            <div className="shrink-0 border-t border-[var(--vp-ink-line)] bg-[var(--vp-paper)] px-[18px] pb-4 pt-3"><SendMessageForm key={conversation.id} conversationId={conversation.id} phone={conversation.phone} firstName={conversation.firstName} comercialFirstName={view.comercialFirstName} /></div>
           </>
         ) : <div className="flex flex-1 items-center justify-center px-4 py-12"><p className="text-center text-sm text-[var(--muted)]">Nenhuma conversa para mostrar.</p></div>}
       </section>

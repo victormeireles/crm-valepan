@@ -29,6 +29,7 @@ export function PipelineConversationBody({ view }: { view: InboxConversationView
           conversationId={conversation.id}
           phone={conversation.phone}
           firstName={conversation.firstName}
+          comercialFirstName={view.comercialFirstName}
           compact
         />
       </div>
