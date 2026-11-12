@@ -1,4 +1,3 @@
-import { agentDebugLog } from "@/lib/agent-debug-log";
 import { crmTables } from "@/lib/supabase/server";
 import { isLegacyZapiReactionBody } from "@/lib/zapi/webhook-event";
 
@@ -40,10 +39,17 @@ export type InboxMessageRow = {
 
 };
 
+/**
+ * Inbox omite `media_url` e o embed de favoritos no select principal:
+ * - `data:` URLs incham o payload PostgREST em conversas longas
+ * - `message_favorites(...)` adiciona join/RLS por mensagem e varia bastante
+ *   em latência. Favoritos continuam editáveis via actions; o estado inicial
+ *   fica `false` até o realtime/refresh.
+ * Mídia privada usa `media_storage_path` → `/api/media/messages/:id`.
+ */
 const MESSAGES_SELECT_WITH_MEDIA =
-  "id, provider_message_id, reply_to_message_id, reaction, edited_at, deleted_at, pinned_at, pinned_until, direction, body, event_kind, event_status, provider_call_id, media_kind, media_url, media_mime_type, media_file_name, media_storage_path, media_size_bytes, media_storage_status, message_status, read_at, sent_at, message_favorites(user_id)";
-const MESSAGES_SELECT_WITH_MEDIA_WITHOUT_FAVORITES =
-  "id, provider_message_id, reply_to_message_id, reaction, edited_at, deleted_at, pinned_at, pinned_until, direction, body, event_kind, event_status, provider_call_id, media_kind, media_url, media_mime_type, media_file_name, media_storage_path, media_size_bytes, media_storage_status, message_status, read_at, sent_at";
+  "id, provider_message_id, reply_to_message_id, reaction, edited_at, deleted_at, pinned_at, pinned_until, direction, body, event_kind, event_status, provider_call_id, media_kind, media_mime_type, media_file_name, media_storage_path, media_size_bytes, media_storage_status, message_status, read_at, sent_at";
+const MESSAGES_SELECT_WITH_MEDIA_WITHOUT_FAVORITES = MESSAGES_SELECT_WITH_MEDIA;
 const MESSAGES_SELECT_WITH_LEGACY_MEDIA =
   "id, direction, body, media_kind, media_url, media_mime_type, media_file_name, message_status, read_at, sent_at";
 const MESSAGES_SELECT_LEGACY = "id, direction, body, sent_at";
@@ -148,16 +154,39 @@ function normalizeLegacyMediaRows(rows: LegacyMediaRow[]): InboxMessageRow[] {
 
 type CrmClient = ReturnType<typeof crmTables>;
 
+/**
+ * URLs `data:` (base64) e links enormes incham o payload do Server Action.
+ * Com storage privado usamos `/api/media/messages/:id`; sem path, o chat
+ * mostra o fallback de mídia indisponível em vez de transferir centenas de KB.
+ */
+export const INBOX_MEDIA_URL_MAX_CHARS = 2_048;
+
+export function slimInboxMediaUrl(
+  mediaUrl: string | null | undefined,
+  mediaStoragePath: string | null | undefined,
+): string | null {
+  if (mediaStoragePath) return null;
+  const url = mediaUrl?.trim() || null;
+  if (!url) return null;
+  if (url.startsWith("data:")) return null;
+  if (url.length > INBOX_MEDIA_URL_MAX_CHARS) return null;
+  return url;
+}
+
 function normalizeLoadedRows(rows: unknown[]): InboxMessageRow[] {
   return rows.map((value) => {
     const row = value as InboxMessageRow & { message_favorites?: unknown[] };
+    const { message_favorites: _favorites, ...rest } = row;
     return {
-      ...row,
+      ...rest,
+      media_url: slimInboxMediaUrl(
+        "media_url" in row ? row.media_url : null,
+        row.media_storage_path,
+      ),
       is_favorite: Array.isArray(row.message_favorites) && row.message_favorites.length > 0,
     };
   });
 }
-
 
 
 /** Quantidade de mensagens por “página” (recentes ou bloco de mais antigas). */
@@ -168,7 +197,7 @@ export const INBOX_MESSAGE_PAGE_SIZE = 100;
  * O primeiro lote precisa apenas preencher a área visível do chat. Os blocos
  * de histórico continuam maiores para que “carregar anteriores” seja eficiente.
  */
-export const INBOX_INITIAL_MESSAGE_PAGE_SIZE = 40;
+export const INBOX_INITIAL_MESSAGE_PAGE_SIZE = 25;
 
 /**
  * Filtro temporário de organização do Inbox: mantém visíveis as mensagens de
@@ -258,21 +287,6 @@ export async function loadRecentConversationMessages(
       res = { ...fallback, data } as unknown as typeof res;
     }
   }
-
-  // #region agent log
-  agentDebugLog({
-    location: "load-messages.ts:loadRecentConversationMessages",
-    message: "inbox_messages_loaded",
-    hypothesisId: "H6",
-    data: {
-      conversationIdPrefix: conversationId.slice(0, 8),
-      returnedCount: (res.data ?? []).length,
-      hasMoreOlderHint: (res.data ?? []).length > INBOX_INITIAL_MESSAGE_PAGE_SIZE,
-      dbError: !!res.error,
-      errorCode: res.error?.code ?? null,
-    },
-  });
-  // #endregion
 
   if (res.error) {
 

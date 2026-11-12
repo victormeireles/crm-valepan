@@ -15,6 +15,7 @@ import {
 import { CrmIcon } from "@/components/crm-icon";
 import {
   INBOX_MESSAGES_VISIBLE_SINCE,
+  slimInboxMediaUrl,
   type InboxMessageRow,
 } from "@/lib/inbox/load-messages";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
@@ -812,7 +813,7 @@ export function ChatThread({
         event_status: row.event_status ?? null,
         provider_call_id: row.provider_call_id ?? null,
         media_kind: row.media_kind ?? null,
-        media_url: row.media_url ?? null,
+        media_url: slimInboxMediaUrl(row.media_url, row.media_storage_path),
         media_mime_type: row.media_mime_type ?? null,
         media_file_name: row.media_file_name ?? null,
         media_storage_path: row.media_storage_path ?? null,
