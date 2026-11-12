@@ -89,7 +89,6 @@ export const config = {
     "/leads/:path*",
     "/pipeline/:path*",
     "/tasks/:path*",
-    "/distributors/:path*",
     "/samples/:path*",
     "/settings",
     "/settings/:path*",

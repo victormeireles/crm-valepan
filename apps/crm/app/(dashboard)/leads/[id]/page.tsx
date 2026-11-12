@@ -1,4 +1,4 @@
-import { distributorOptionLabel } from "@/lib/distributors";
+import { fetchDistributorCatalog } from "@/lib/distributor-catalog";
 import { isForwardedToDistributorSubstage, substageLabelOnCard } from "@/lib/pipeline-substages";
 import { LeadIdentity } from "@/components/lead-identity";
 import { displayCompanyName, displayPersonName } from "@/lib/lead-identity";
@@ -53,12 +53,12 @@ export default async function LeadDetailPage({
     { data: teamProfiles },
     { data: registrations },
     { data: lostReasonRows },
-    { data: distributorCatalog },
+    distributorCatalogResult,
   ] = await Promise.all([
     crm
       .from("leads")
       .select(
-        "*, companies(id, name, city, state, document), contacts(id, full_name, email, phone_e164), distributors(id, name)",
+        "*, companies(id, name, city, state, document), contacts(id, full_name, email, phone_e164)",
       )
       .eq("id", id)
       .maybeSingle(),
@@ -84,7 +84,7 @@ export default async function LeadDetailPage({
     crm.from("lead_registrations").select("id, source, cpf_cnpj")
       .eq("lead_id", id).not("cpf_cnpj", "is", null).order("created_at", { ascending: false }).limit(5),
     crm.from("lost_reasons").select("id, name, stage_key, sort_order, active").order("sort_order", { ascending: true }),
-    crm.from("distributors").select("id, name, distributor_regions(region_name, state)").eq("active", true).not("name", "ilike", "PENDENTE CARTEIRA · %").order("name", { ascending: true }),
+    fetchDistributorCatalog(crm),
   ]);
 
   if (!lead) notFound();
@@ -104,13 +104,18 @@ export default async function LeadDetailPage({
   const contact = lead.contacts as
     | { id: string; full_name: string | null; email: string | null; phone_e164: string }
     | null;
-  const distributor = lead.distributors as { id: string; name: string } | null;
+  const distributorId = lead.cliente_distribuidor_id ?? null;
+  let distributorOptions = distributorCatalogResult.options;
+  if (distributorId && !distributorOptions.some((option) => option.id === distributorId)) {
+    distributorOptions = (await fetchDistributorCatalog(crm, distributorId)).options;
+  }
+  const distributor = distributorId
+    ? { id: distributorId, name: distributorOptions.find((option) => option.id === distributorId)?.name ?? "" }
+    : null;
 
   const heading = displayPersonName(contact?.full_name);
   const companyLine = displayCompanyName({
     companyName: company?.name,
-    distributorName: distributor?.name,
-    clientCategory: lead.client_category,
   });
 
   const leadOwnerId = lead.owner_id ?? null;
@@ -174,21 +179,7 @@ export default async function LeadDetailPage({
           clientCategory={lead.client_category ?? null}
           distributorId={distributor?.id ?? null}
           distributorName={(distributor?.name ?? "").trim().toUpperCase()}
-          distributors={(distributorCatalog ?? []).map((row) => {
-            const regions = row.distributor_regions as
-              | { region_name: string; state: string | null }
-              | { region_name: string; state: string | null }[]
-              | null;
-            const region = Array.isArray(regions) ? regions[0] : regions;
-            return {
-              id: row.id,
-              name: distributorOptionLabel({
-                name: row.name,
-                city: region?.region_name,
-                state: region?.state,
-              }),
-            };
-          })}
+          distributors={distributorOptions}
           contact={
             contact
               ? {

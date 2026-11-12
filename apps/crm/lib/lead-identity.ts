@@ -57,14 +57,9 @@ export function displayPersonName(fullName: string | null | undefined): string {
 /** Nome da empresa: usa somente `companies.name` informado no cadastro. */
 export function displayCompanyName(input: {
   companyName: string | null | undefined;
-  distributorName: string | null | undefined;
-  clientCategory: string | null | undefined;
 }): string | null {
   const company = (input.companyName ?? "").trim();
-  if (company.length > 0) return company;
-  void input.distributorName;
-  void input.clientCategory;
-  return null;
+  return company.length > 0 ? company : null;
 }
 
 export function normalizedClientCategory(

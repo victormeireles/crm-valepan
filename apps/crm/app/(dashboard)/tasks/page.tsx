@@ -16,7 +16,6 @@ type LeadN = {
   client_category?: string | null;
   contacts?: { full_name: string | null } | { full_name: string | null }[] | null;
   companies?: { name: string | null } | { name: string | null }[] | null;
-  distributors?: { name: string | null } | { name: string | null }[] | null;
 };
 
 function leadDisplay(lead: LeadN | null) {
@@ -30,15 +29,10 @@ function leadDisplay(lead: LeadN | null) {
   const company = nestOne(
     (lead.companies ?? null) as { name: string | null } | { name: string | null }[] | null,
   );
-  const distributor = nestOne(
-    (lead.distributors ?? null) as { name: string | null } | { name: string | null }[] | null,
-  );
   return {
     personName: displayPersonName(contact?.full_name),
     companyLine: displayCompanyName({
       companyName: company?.name,
-      distributorName: distributor?.name,
-      clientCategory: lead.client_category,
     }),
     lead,
   };
@@ -111,7 +105,7 @@ export default async function TasksPage({
   const { data: tasks } = await crm
     .from("tasks")
       .select(
-        "id, title, due_at, done, lead_id, assignee_id, task_kind, leads(phone_e164, client_category, contacts(full_name), companies(name), distributors(name))",
+        "id, title, due_at, done, lead_id, assignee_id, task_kind, leads(phone_e164, client_category, contacts(full_name), companies(name))",
     )
     .order("due_at", { ascending: true, nullsFirst: false });
 

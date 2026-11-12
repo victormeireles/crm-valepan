@@ -12,7 +12,7 @@ export function isMissingNetworkTypeColumnError(
 }
 
 export const LEAD_LIST_SELECT_BASE =
-  "id, phone_e164, status, source, created_at, owner_id, client_category, distributor_id, company_id, contacts(id,full_name), companies(id,name,city,document), distributors(id,name)";
+  "id, phone_e164, status, source, created_at, owner_id, client_category, company_id, contacts(id,full_name), companies(id,name,city,document)";
 
 export const LEAD_LIST_SELECT_WITH_NETWORK = `${LEAD_LIST_SELECT_BASE}, network_type`;
 
@@ -24,7 +24,6 @@ export type LeadListRow = {
   created_at: string;
   owner_id: string | null;
   client_category: string | null;
-  distributor_id: string | null;
   company_id: string | null;
   network_type?: string | null;
   contacts:
@@ -35,11 +34,6 @@ export type LeadListRow = {
   companies:
     | { id: string; name: string | null; city: string | null; document: string | null }
     | { id: string; name: string | null; city: string | null; document: string | null }[]
-    | null
-    | undefined;
-  distributors:
-    | { id: string; name: string | null }
-    | { id: string; name: string | null }[]
     | null
     | undefined;
 };
@@ -58,7 +52,7 @@ export async function fetchLeadListRows(
   if (campaign) query = query.eq("lead_registrations.source", campaign);
   if (clientCategory === "distribuidor") {
     query = query
-      .or("client_category.eq.distribuidor,distributor_id.not.is.null,network_type.eq.distribuidor")
+      .or("client_category.eq.distribuidor,network_type.eq.distribuidor")
       .or("excluded_from_pipeline_at.is.null,excluded_reason.eq.cliente");
   } else {
     query = query.is("excluded_from_pipeline_at", null);
@@ -77,7 +71,7 @@ export async function fetchLeadListRows(
     if (campaign) fallbackQuery = fallbackQuery.eq("lead_registrations.source", campaign);
     if (clientCategory === "distribuidor") {
       fallbackQuery = fallbackQuery
-        .or("client_category.eq.distribuidor,distributor_id.not.is.null")
+        .or("client_category.eq.distribuidor")
         .or("excluded_from_pipeline_at.is.null,excluded_reason.eq.cliente");
     } else {
       fallbackQuery = fallbackQuery.is("excluded_from_pipeline_at", null);

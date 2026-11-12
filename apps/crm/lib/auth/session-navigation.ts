@@ -4,7 +4,6 @@ export const PROTECTED_ROUTE_PREFIXES = [
   "/leads",
   "/pipeline",
   "/tasks",
-  "/distributors",
   "/samples",
   "/settings",
 ] as const;

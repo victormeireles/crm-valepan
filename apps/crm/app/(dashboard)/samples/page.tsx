@@ -15,7 +15,7 @@ export default async function SamplesPage() {
   const { data: samples } = await crm
     .from("sample_shipments")
     .select(
-      "id, lead_id, status, send_via, network, contact_name, address_line, business_hours, bread_type, created_at, leads(phone_e164, client_category, contacts(full_name), companies(name), distributors(name)), companies(name), sample_items(description)",
+      "id, lead_id, status, send_via, network, contact_name, address_line, business_hours, bread_type, created_at, leads(phone_e164, client_category, contacts(full_name), companies(name)), companies(name), sample_items(description)",
     )
     .order("created_at", { ascending: false });
 
@@ -49,7 +49,6 @@ export default async function SamplesPage() {
                   | { full_name: string | null }[]
                   | null;
                 companies?: { name: string | null } | { name: string | null }[] | null;
-                distributors?: { name: string | null } | { name: string | null }[] | null;
               };
               const lead = nestOne(s.leads as LeadN | LeadN[] | null);
               const contact = nestOne(
@@ -60,12 +59,6 @@ export default async function SamplesPage() {
               );
               const leadCompany = nestOne(
                 (lead?.companies ?? null) as
-                  | { name: string | null }
-                  | { name: string | null }[]
-                  | null,
-              );
-              const distributor = nestOne(
-                (lead?.distributors ?? null) as
                   | { name: string | null }
                   | { name: string | null }[]
                   | null,
@@ -82,8 +75,6 @@ export default async function SamplesPage() {
               const leadCompanyLine = lead
                 ? displayCompanyName({
                     companyName: leadCompany?.name,
-                    distributorName: distributor?.name,
-                    clientCategory: lead.client_category,
                   })
                 : null;
               const leadPersonName = lead ? displayPersonName(contact?.full_name) : "";

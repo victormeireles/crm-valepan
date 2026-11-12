@@ -3,7 +3,6 @@
 import { CategoryBadge } from "@/components/lead-identity";
 import { removeLeadFromCategoryGrid, updateLeadCategoryContactInfo } from "@/app/actions/leads";
 import { NETWORK_TYPE_OPTIONS } from "@/lib/network-types";
-import { SEND_VIA_OPTIONS } from "@/lib/send-via-options";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
@@ -45,9 +44,7 @@ const LEAD_STATUS_OPTIONS = ["em negociação", "cliente"] as const;
 export function LeadCategoryRowEdit(props: {
   leadId: string | null;
   clientCategory: "hamburgueria" | "distribuidor" | "parceiros" | "outros";
-  distributorName: string;
-  distributorOptions?: string[];
-  distributorLocked?: boolean;
+  companyName: string;
   leadStatus: string;
   networkType: string;
   contactName: string;
@@ -57,7 +54,7 @@ export function LeadCategoryRowEdit(props: {
 }) {
   const router = useRouter();
   const [leadId, setLeadId] = useState<string | null>(props.leadId);
-  const [distributorName, setDistributorName] = useState(props.distributorName);
+  const [companyName, setCompanyName] = useState(props.companyName);
   const [leadStatus, setLeadStatus] = useState(props.leadStatus);
   const [networkType, setNetworkType] = useState(props.networkType);
   const [contactName, setContactName] = useState(props.contactName);
@@ -72,7 +69,7 @@ export function LeadCategoryRowEdit(props: {
 
   useEffect(() => {
     setLeadId(props.leadId);
-    setDistributorName(props.distributorName);
+    setCompanyName(props.companyName);
     setLeadStatus(props.leadStatus);
     setNetworkType(props.networkType);
     setContactName(props.contactName);
@@ -81,7 +78,7 @@ export function LeadCategoryRowEdit(props: {
     setCompanyDocument(props.companyDocument);
   }, [
     props.leadId,
-    props.distributorName,
+    props.companyName,
     props.leadStatus,
     props.networkType,
     props.contactName,
@@ -111,7 +108,7 @@ export function LeadCategoryRowEdit(props: {
       const res = await updateLeadCategoryContactInfo({
         leadId,
         clientCategory: props.clientCategory,
-        distributorName: distributorName.trim() || null,
+        companyName: companyName.trim() || null,
         leadStatus: leadStatus.trim().toLowerCase() || null,
         networkType: networkType.trim() || null,
         contactName,
@@ -136,7 +133,7 @@ export function LeadCategoryRowEdit(props: {
 
   async function remove() {
     if (!leadId) {
-      setDistributorName(props.distributorLocked ? props.distributorName : "");
+      setCompanyName("");
       setLeadStatus("");
       setNetworkType("");
       setContactName("");
@@ -194,22 +191,15 @@ export function LeadCategoryRowEdit(props: {
     <>
       <td className="px-2 py-1.5">
         <input
-          className={`${fieldClass} ${props.distributorLocked || fieldsDisabled ? "bg-[var(--card)]" : ""}`}
-          list={`lead-distributor-options-${leadId ?? "pending"}`}
-          value={distributorName}
-          onChange={(e) => setDistributorName(e.target.value)}
+          className={fieldClass}
+          name="companyName"
+          value={companyName}
+          onChange={(e) => setCompanyName(e.target.value)}
           onKeyDown={onEnterSave}
-          readOnly={!!props.distributorLocked || fieldsDisabled}
-          placeholder={props.distributorLocked ? "" : "Selecione ou digite"}
           disabled={fieldsDisabled}
+          maxLength={80}
+          placeholder="Nome da empresa"
         />
-        {!props.distributorLocked ? (
-          <datalist id={`lead-distributor-options-${leadId ?? "pending"}`}>
-            {(props.distributorOptions ?? [...SEND_VIA_OPTIONS]).map((option) => (
-              <option key={option} value={option} />
-            ))}
-          </datalist>
-        ) : null}
       </td>
       <td className="px-2 py-1.5">
         <select

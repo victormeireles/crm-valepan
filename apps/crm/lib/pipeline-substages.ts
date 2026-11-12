@@ -4,8 +4,6 @@ import {
   isLostPipelineStage,
   type CanonicalPipelineStageName,
 } from "@/lib/pipeline-canonical-stages";
-import { isPlaceholderDistributorName } from "@/lib/distributors";
-
 export type PipelineSubstageDTO = {
   id: string;
   name: string;
@@ -84,7 +82,7 @@ export function substageLabelOnCard(
   if (!flag) return null;
   if (!isForwardedToDistributorSubstage(flag)) return flag;
   const name = (distributorName ?? "").trim();
-  if (!name || isPlaceholderDistributorName(name)) return flag;
+  if (!name) return flag;
   return name;
 }
 

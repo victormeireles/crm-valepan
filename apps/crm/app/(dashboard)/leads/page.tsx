@@ -3,8 +3,6 @@ import { PaginationNav } from "@/components/pagination-nav";
 import { displayCompanyName, displayPersonName } from "@/lib/lead-identity";
 import { nestOne } from "@/lib/supabase/nested";
 import { isClientCategoryValue, type ClientCategoryValue } from "@/lib/client-categories";
-import { isPlaceholderDistributorName } from "@/lib/distributors";
-import { SEND_VIA_OPTIONS } from "@/lib/send-via-options";
 import { leadListRowMatchesQuery } from "@/lib/crm-text-search";
 import { fetchLeadListRows, type LeadListRow } from "@/lib/leads/list-query";
 import { createServerSupabaseClient, crmTables } from "@/lib/supabase/server";
@@ -61,7 +59,6 @@ function leadRowSearchFields(l: LeadListRow) {
     phone_e164: l.phone_e164,
     contactName: leadContactName(l),
     companyName: (nestOne(l.companies)?.name ?? "").trim() || null,
-    distributorName: (nestOne(l.distributors)?.name ?? "").trim() || null,
     city: (nestOne(l.companies)?.city ?? "").trim() || null,
     document: (nestOne(l.companies)?.document ?? "").trim() || null,
     status: l.status,
@@ -86,88 +83,18 @@ export default async function LeadsPage({
   const supabase = await createServerSupabaseClient();
   const crm = crmTables(supabase);
 
-  const [leadList, distributorCatalogResult] = await Promise.all([
-    fetchLeadListRows(crm, clientCategory, page, PAGE_SIZE, campaign),
-    crm.from("distributors").select("name").eq("active", true).not("name", "ilike", "PENDENTE CARTEIRA · %").order("name", { ascending: true }),
-  ]);
   const {
     rows: leadRows,
     error: leadsError,
     totalCount: databaseTotalCount,
-  } = leadList;
-  const registeredDistributorNames = distributorCatalogResult.error
-    ? [...SEND_VIA_OPTIONS]
-    : (distributorCatalogResult.data ?? [])
-        .map((row) => row.name.trim().toUpperCase())
-        .filter((name) => name && !isPlaceholderDistributorName(name));
+  } = await fetchLeadListRows(crm, clientCategory, page, PAGE_SIZE, campaign);
 
   const matchesQuery = (l: LeadListRow) =>
     query.trim().length === 0 || leadListRowMatchesQuery(leadRowSearchFields(l), query);
 
   const filteredLeadRows = leadRows.filter(matchesQuery);
 
-  const distributorSourceRows =
-    clientCategory === "distribuidor"
-      ? leadRows.filter((lead) => {
-          const category = (lead.client_category ?? "").trim().toLowerCase();
-          const networkType = (lead.network_type ?? "").trim().toLowerCase();
-          return category === "distribuidor" || !!lead.distributor_id || networkType === "distribuidor";
-        })
-      : filteredLeadRows;
-
-  const filteredDistributorSourceRows = distributorSourceRows.filter(matchesQuery);
-
-  const distributorRows =
-    clientCategory === "distribuidor"
-      ? (() => {
-          const byDistributor = new Map<string, (typeof distributorSourceRows)[number]>();
-          const pending: (typeof distributorSourceRows)[number][] = [];
-
-          for (const lead of filteredDistributorSourceRows) {
-            const distName = (nestOne(lead.distributors)?.name ?? "").trim().toUpperCase();
-            if (distName && registeredDistributorNames.includes(distName)) {
-              if (!byDistributor.has(distName)) {
-                byDistributor.set(distName, lead);
-              }
-            } else {
-              pending.push(lead);
-            }
-          }
-
-          const pendingRows = pending.map((lead) => ({
-            distributorName: (nestOne(lead.distributors)?.name ?? "").trim().toUpperCase(),
-            lead,
-            distributorLocked: false,
-          }));
-
-          const fixedRows = registeredDistributorNames.map((option) => {
-            const mapped = byDistributor.get(option) ?? null;
-            return {
-              distributorName: option,
-              lead: mapped,
-              distributorLocked: true,
-            };
-          }).filter((row) => !campaign || row.lead !== null);
-
-          const all = [...pendingRows, ...fixedRows];
-          if (query.trim().length === 0) return all;
-          return all.filter((row) => {
-            if (row.lead && matchesQuery(row.lead)) return true;
-            return leadListRowMatchesQuery(
-              {
-                phone_e164: "",
-                contactName: "",
-                companyName: null,
-                distributorName: row.distributorName,
-              },
-              query,
-            );
-          });
-        })()
-      : [];
-
-  const visibleCount =
-    clientCategory === "distribuidor" ? distributorRows.length : filteredLeadRows.length;
+  const visibleCount = filteredLeadRows.length;
   const totalCount = databaseTotalCount;
 
   const pageTitle = clientCategory ? CATEGORY_PAGE_TITLES[clientCategory] : "Leads";
@@ -180,12 +107,7 @@ export default async function LeadsPage({
         ? "Nenhum lead nesta categoria."
         : "Nenhum lead na lista.";
 
-  const showEmpty =
-    clientCategory === "distribuidor"
-      ? distributorRows.length === 0
-      : clientCategory
-        ? filteredLeadRows.length === 0
-        : filteredLeadRows.length === 0;
+  const showEmpty = filteredLeadRows.length === 0;
 
   return (
     <div className="space-y-6">
@@ -232,7 +154,7 @@ export default async function LeadsPage({
             <thead className="border-b border-[var(--border)] bg-[rgba(35,0,4,0.04)] text-xs font-semibold uppercase tracking-[0.06em] text-[var(--vp-wine)]">
               {clientCategory ? (
                 <tr>
-                  <th className="px-3 py-2.5">Rede</th>
+                  <th className="px-3 py-2.5">Empresa</th>
                   <th className="px-3 py-2.5">Classificação</th>
                   <th className="px-3 py-2.5">CNPJ</th>
                   <th className="px-3 py-2.5">Nome</th>
@@ -251,30 +173,7 @@ export default async function LeadsPage({
               )}
             </thead>
             <tbody>
-              {clientCategory === "distribuidor"
-                ? distributorRows.map((row) => (
-                    <tr
-                      key={`${row.distributorName || "pendente"}-${row.lead?.id ?? "empty"}`}
-                      className="border-b border-[var(--border)] last:border-0 transition-colors hover:bg-[var(--vp-surface-low)]"
-                    >
-                      <LeadCategoryRowEdit
-                        leadId={row.lead?.id ?? null}
-                        clientCategory="distribuidor"
-                        distributorName={row.distributorName}
-                        distributorOptions={registeredDistributorNames}
-                        distributorLocked={row.distributorLocked}
-                        leadStatus={(row.lead?.status ?? "").trim().toLowerCase()}
-                        networkType={(row.lead?.network_type ?? "").trim().toLowerCase()}
-                        contactName={row.lead ? leadContactName(row.lead) : ""}
-                        leadPhone={row.lead?.phone_e164 ?? ""}
-                        city={row.lead ? (nestOne(row.lead.companies)?.city ?? "").trim() : ""}
-                        companyDocument={
-                          row.lead ? (nestOne(row.lead.companies)?.document ?? "").trim() : ""
-                        }
-                      />
-                    </tr>
-                  ))
-                : clientCategory
+              {clientCategory
                   ? filteredLeadRows.map((l) => (
                       <tr
                         key={l.id}
@@ -283,9 +182,7 @@ export default async function LeadsPage({
                         <LeadCategoryRowEdit
                           leadId={l.id}
                           clientCategory={clientCategory}
-                          distributorName={(nestOne(l.distributors)?.name ?? "").trim().toUpperCase()}
-                          distributorOptions={registeredDistributorNames}
-                          distributorLocked={false}
+                          companyName={(nestOne(l.companies)?.name ?? "").trim()}
                           leadStatus={(l.status ?? "").trim().toLowerCase()}
                           networkType={(l.network_type ?? "").trim().toLowerCase()}
                           contactName={leadContactName(l)}
@@ -309,8 +206,6 @@ export default async function LeadsPage({
                               name={displayPersonName(nestOne(l.contacts)?.full_name)}
                               companyName={displayCompanyName({
                                 companyName: nestOne(l.companies)?.name,
-                                distributorName: nestOne(l.distributors)?.name,
-                                clientCategory: l.client_category,
                               })}
                               category={l.client_category}
                               phoneTitle={l.phone_e164}

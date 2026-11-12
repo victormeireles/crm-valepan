@@ -3,7 +3,7 @@ import {
   loadRecentConversationMessages,
   type InboxMessageRow,
 } from "@/lib/inbox/load-messages";
-import { distributorOptionLabel, isPlaceholderDistributorName } from "@/lib/distributors";
+import { fetchDistributorCatalog } from "@/lib/distributor-catalog";
 import { displayCompanyName, displayPersonName } from "@/lib/lead-identity";
 import { nestOne } from "@/lib/supabase/nested";
 import { createServerSupabaseClient, crmTables } from "@/lib/supabase/server";
@@ -92,7 +92,7 @@ export default async function InboxPage({
   const supabase = await timed("supabase_client", createServerSupabaseClient());
   const crm = crmTables(supabase);
   const conversationSelect =
-    "id, phone_e164, conversation_kind, group_display_name, classification, last_message_at, created_at, updated_at, last_read_at, leads(id, client_category, excluded_from_pipeline_at, excluded_reason, contacts(full_name, avatar_url), companies(name, city, state), distributors(id, name), opportunities(id, stage_id, lost_reason, updated_at))";
+    "id, phone_e164, conversation_kind, group_display_name, classification, last_message_at, created_at, updated_at, last_read_at, leads(id, client_category, cliente_distribuidor_id, excluded_from_pipeline_at, excluded_reason, contacts(full_name, avatar_url), companies(name, city, state), opportunities(id, stage_id, lost_reason, updated_at))";
   // A conversa solicitada já vem na URL; carregue suas mensagens enquanto a
   // barra lateral e a etapa inicial são consultadas.
   const requestedMessagesPromise = cid ? timed("messages_initial", loadRecentConversationMessages(crm, cid)) : null;
@@ -114,12 +114,7 @@ export default async function InboxPage({
     .from("lost_reasons")
     .select("id, name, stage_key, sort_order, active")
     .order("sort_order", { ascending: true }));
-  const distributorsPromise = timed("distributors", crm
-    .from("distributors")
-    .select("id, name, distributor_regions(region_name, state)")
-    .eq("active", true)
-    .not("name", "ilike", "PENDENTE CARTEIRA · %")
-    .order("name", { ascending: true }));
+  const distributorsPromise = timed("distributors", fetchDistributorCatalog(crm));
   const [{ data: stages }, snapshotResult, requestedConversationResult, substagesResult, distributorsResult] = await Promise.all([
     stagesPromise,
     snapshotPromise,
@@ -153,7 +148,7 @@ export default async function InboxPage({
           excluded_from_pipeline_at: row.excluded_from_pipeline_at,
           contacts: { full_name: row.contact_name, avatar_url: row.avatar_url },
           companies: row.company_name ? { name: row.company_name } : null,
-          distributors: row.distributor_name ? { name: row.distributor_name } : null,
+          cliente_distribuidor_name: row.distributor_name,
           opportunities: row.stage_id ? { stage_id: row.stage_id } : null,
         }
       : null,
@@ -259,10 +254,8 @@ export default async function InboxPage({
                 | { full_name: string | null; avatar_url?: string | null }
                 | { full_name: string | null; avatar_url?: string | null }[]
                 | null;
-              distributors?:
-                | { name: string | null }
-                | { name: string | null }[]
-                | null;
+              cliente_distribuidor_id?: string | null;
+              cliente_distribuidor_name?: string | null;
             }
           | {
               id: string;
@@ -298,10 +291,8 @@ export default async function InboxPage({
                 | { full_name: string | null; avatar_url?: string | null }
                 | { full_name: string | null; avatar_url?: string | null }[]
                 | null;
-              distributors?:
-                | { name: string | null }
-                | { name: string | null }[]
-                | null;
+              cliente_distribuidor_id?: string | null;
+              cliente_distribuidor_name?: string | null;
             }[]
           | null,
       )
@@ -322,12 +313,19 @@ export default async function InboxPage({
       | null,
   );
 
-  const selectedDistributor = nestOne(
-    (selectedLead?.distributors ?? null) as
-      | { id: string; name: string | null }
-      | { id: string; name: string | null }[]
-      | null,
-  );
+  const selectedDistributorId = selectedLead?.cliente_distribuidor_id ?? null;
+  let distributorOptions = distributorsResult.options;
+  if (selectedDistributorId && !distributorOptions.some((option) => option.id === selectedDistributorId)) {
+    distributorOptions = (await fetchDistributorCatalog(crm, selectedDistributorId)).options;
+  }
+  const selectedDistributorName =
+    distributorOptions.find((option) => option.id === selectedDistributorId)?.name ??
+    selectedLead?.cliente_distribuidor_name ??
+    null;
+  const selectedDistributor =
+    selectedDistributorId || selectedDistributorName
+      ? { id: selectedDistributorId, name: selectedDistributorName }
+      : null;
 
   const sidebarRows: InboxSidebarRow[] = conversationsSorted.map((c) => {
     const lead = nestOne(
@@ -349,10 +347,6 @@ export default async function InboxPage({
               | { name: string | null }
               | { name: string | null }[]
               | null;
-            distributors?:
-              | { name: string | null }
-              | { name: string | null }[]
-              | null;
           }
         | {
             id: string;
@@ -368,10 +362,6 @@ export default async function InboxPage({
               | { full_name: string | null; avatar_url?: string | null }[]
               | null;
             companies?:
-              | { name: string | null }
-              | { name: string | null }[]
-              | null;
-            distributors?:
               | { name: string | null }
               | { name: string | null }[]
               | null;
@@ -402,19 +392,11 @@ export default async function InboxPage({
         | { name: string | null }[]
         | null,
     );
-    const distributor = nestOne(
-      (lead?.distributors ?? null) as
-        | { name: string | null }
-        | { name: string | null }[]
-        | null,
-    );
     const companyLine =
       c.conversation_kind === "group" || !lead
         ? null
         : displayCompanyName({
             companyName: company?.name,
-            distributorName: distributor?.name,
-            clientCategory: lead.client_category,
           });
     const identityName =
       c.conversation_kind === "group"
@@ -472,8 +454,6 @@ export default async function InboxPage({
   const selectedHeaderCompany = selected?.conversation_kind === "lead" && selectedLead
     ? displayCompanyName({
         companyName: selectedCompany?.name,
-        distributorName: selectedDistributor?.name,
-        clientCategory: selectedLead.client_category,
       })
     : null;
   const selectedAvatarUrl = validAvatarUrl(selectedContact?.avatar_url);
@@ -576,23 +556,7 @@ export default async function InboxPage({
           initialView={initialConversationView}
           stages={catalogStages}
           substages={catalogSubstages}
-          distributors={(distributorsResult.data ?? [])
-            .filter((row) => !isPlaceholderDistributorName(row.name))
-            .map((row) => {
-              const regions = row.distributor_regions as
-                | { region_name: string; state: string | null }
-                | { region_name: string; state: string | null }[]
-                | null;
-              const region = Array.isArray(regions) ? regions[0] : regions;
-              return {
-                id: row.id,
-                name: distributorOptionLabel({
-                  name: row.name,
-                  city: region?.region_name,
-                  state: region?.state,
-                }),
-              };
-            })}
+          distributors={distributorOptions}
         />
       </div>
     </div>

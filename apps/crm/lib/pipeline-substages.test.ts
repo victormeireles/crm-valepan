@@ -38,7 +38,7 @@ describe("pipeline substages", () => {
     expect(substageLabelOnCard("Encaminhado para o distribuidor", null)).toBe(
       "Encaminhado para o distribuidor",
     );
-    expect(substageLabelOnCard("Encaminhado para o distribuidor", "PENDENTE CARTEIRA · NOÉ")).toBe(
+    expect(substageLabelOnCard("Encaminhado para o distribuidor", "  ")).toBe(
       "Encaminhado para o distribuidor",
     );
     expect(substageLabelOnCard("Pediu amostra", "DICON")).toBe("Pediu amostra");

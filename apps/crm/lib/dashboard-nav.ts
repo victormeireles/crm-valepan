@@ -37,7 +37,6 @@ export const dashboardNavItems: DashboardNavItem[] = [
     label: "Configurações",
     items: [
       { href: "/settings/subetapas", label: "Subetapas" },
-      { href: "/settings/distribuidores", label: "Distribuidores" },
       { href: "/settings/respostas-rapidas", label: "Respostas rápidas" },
     ],
   },

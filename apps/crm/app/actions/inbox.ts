@@ -8,6 +8,7 @@ import {
   loadOlderMessagesPage,
 } from "@/lib/inbox/load-messages";
 import { displayCompanyName, displayPersonName } from "@/lib/lead-identity";
+import { fetchDistributorCatalog } from "@/lib/distributor-catalog";
 import { isLeadExcludedFromPipeline } from "@/lib/lead-pipeline-exclusion";
 import type { InboxSearchScope, InboxTabCounts } from "@/app/(dashboard)/inbox/inbox-location";
 import { getWeeklyBreadCount } from "@/lib/lead-signals";
@@ -171,8 +172,6 @@ export async function refreshInboxSidebar(input: {
         : row.lead_id ? displayPersonName(row.contact_name) : "Sem lead";
       const companyName = group || !row.lead_id ? null : displayCompanyName({
         companyName: row.company_name,
-        distributorName: row.distributor_name,
-        clientCategory: row.client_category,
       });
       const lastAt = row.last_sent_at ?? row.last_message_at ?? row.updated_at!;
       const lastDirection = row.last_direction;
@@ -265,10 +264,9 @@ export async function loadInboxConversationView(conversationId: string) {
   const [conversationTimed, tailTimed] = await Promise.all([
     timeInboxOperation("selected_conversation", crm.from("conversations").select(`
       id, phone_e164, conversation_kind, group_display_name, last_read_at,
-      leads(id, client_category, excluded_from_pipeline_at, city, state,
+      leads(id, client_category, cliente_distribuidor_id, excluded_from_pipeline_at, city, state,
         contacts(full_name, avatar_url),
         companies(name, city, state),
-        distributors(id, name),
         opportunities(id, stage_id, lost_reason, updated_at)
       )
     `).eq("id", id).maybeSingle()),
@@ -293,15 +291,16 @@ export async function loadInboxConversationView(conversationId: string) {
   const lead = nestOne(conversation.leads);
   const contact = nestOne(lead?.contacts ?? null);
   const company = nestOne(lead?.companies ?? null);
-  const distributor = nestOne(lead?.distributors ?? null);
+  const distributorId = lead?.cliente_distribuidor_id ?? null;
+  const distributorName = distributorId
+    ? (await fetchDistributorCatalog(crm, distributorId)).options.find((option) => option.id === distributorId)?.name ?? null
+    : null;
   const headerName = conversation.conversation_kind === "group"
     ? conversation.group_display_name?.trim() || conversation.phone_e164
     : lead ? displayPersonName(contact?.full_name) : "Sem lead";
   const headerCompany = conversation.conversation_kind === "lead" && lead
     ? displayCompanyName({
         companyName: company?.name,
-        distributorName: distributor?.name,
-        clientCategory: lead.client_category,
       })
     : null;
 
@@ -331,8 +330,8 @@ export async function loadInboxConversationView(conversationId: string) {
       leadExcluded: isLeadExcludedFromPipeline(lead),
       stageId: opportunity?.stage_id ?? null,
       substage: opportunity?.lost_reason ?? null,
-      distributorId: distributor?.id ?? null,
-      distributorName: distributor?.name ?? null,
+      distributorId,
+      distributorName,
     },
     messages: messagesResult.messages,
     hasMoreOlder: messagesResult.hasMoreOlder,
@@ -359,7 +358,7 @@ export async function loadInboxLeadPanel(conversationId: string) {
       id, phone_e164,
       leads(id, owner_id, client_category, zip_code, street, neighborhood, city, state,
         weekly_bread_consumption, bread_type, bread_weight_grams,
-        contacts(full_name), companies(name, document, city, state), distributors(name),
+        contacts(full_name), companies(name, document, city, state),
         opportunities(id, stage_id, lost_reason, updated_at)
       )
     `).eq("id", id).maybeSingle()),
@@ -377,11 +376,10 @@ export async function loadInboxLeadPanel(conversationId: string) {
   if (!lead?.id) return { ok: true as const, panel: null };
   const contact = nestOne(lead.contacts);
   const company = nestOne(lead.companies);
-  const distributor = nestOne(lead.distributors);
   const opportunities = Array.isArray(lead.opportunities) ? lead.opportunities : lead.opportunities ? [lead.opportunities] : [];
   const opportunity = [...opportunities].sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0] ?? null;
   const contactName = displayPersonName(contact?.full_name);
-  const companyName = company?.name ?? displayCompanyName({ companyName: company?.name, distributorName: distributor?.name, clientCategory: lead.client_category });
+  const companyName = company?.name ?? displayCompanyName({ companyName: company?.name });
   const [tasksTimed, historyTimed] = await Promise.all([
     timeInboxOperation("lead_tasks", crm.from("tasks").select("id, title, due_at, done, assignee_id, task_kind")
       .eq("lead_id", lead.id).order("done").order("due_at", { ascending: true, nullsFirst: false })),

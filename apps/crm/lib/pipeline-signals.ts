@@ -81,7 +81,6 @@ export function cardMatchesPipelineFilters(
     companyLine: string | null;
     phone_e164: string | null;
     client_category?: string | null;
-    distributor_id?: string | null;
     network_type?: string | null;
     title: string | null;
     ownerId: string | null;
@@ -104,7 +103,7 @@ export function cardMatchesPipelineFilters(
     const category = (card.client_category ?? "").trim().toLowerCase();
     if (filters.clientCategory === "distribuidor") {
       const networkType = (card.network_type ?? "").trim().toLowerCase();
-      if (category !== "distribuidor" && !card.distributor_id && networkType !== "distribuidor") {
+      if (category !== "distribuidor" && networkType !== "distribuidor") {
         return false;
       }
     } else if (!isClientCategoryValue(category) || category !== filters.clientCategory) {

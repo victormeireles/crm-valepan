@@ -70,7 +70,8 @@ export interface Database {
           company_id: string | null;
           contact_id: string | null;
           owner_id: string | null;
-          distributor_id: string | null;
+          /** `public.clientes` (tipo_cliente=distribuidor) que atende o lead. */
+          cliente_distribuidor_id: string | null;
           client_category: string | null;
           network_type: string | null;
           zip_code: string | null;
@@ -95,7 +96,7 @@ export interface Database {
           company_id?: string | null;
           contact_id?: string | null;
           owner_id?: string | null;
-          distributor_id?: string | null;
+          cliente_distribuidor_id?: string | null;
           client_category?: string | null;
           network_type?: string | null;
           zip_code?: string | null;
@@ -247,7 +248,6 @@ export interface Database {
           company_id: string | null;
           stage_id: string;
           owner_id: string | null;
-          distributor_id: string | null;
           title: string | null;
           next_action_at: string | null;
           lost_reason: string | null;
@@ -260,7 +260,6 @@ export interface Database {
           company_id?: string | null;
           stage_id: string;
           owner_id?: string | null;
-          distributor_id?: string | null;
           title?: string | null;
           next_action_at?: string | null;
           lost_reason?: string | null;
@@ -494,38 +493,6 @@ export interface Database {
           body: string;
         };
       };
-      distributors: {
-        Row: {
-          id: string;
-          name: string;
-          notes: string | null;
-          active: boolean;
-          created_at: string;
-          updated_at: string;
-        };
-        Insert: {
-          id?: string;
-          name: string;
-          notes?: string | null;
-          active?: boolean;
-        };
-        Update: Partial<Database["crm"]["Tables"]["distributors"]["Insert"]>;
-      };
-      distributor_regions: {
-        Row: {
-          id: string;
-          distributor_id: string;
-          region_name: string;
-          state: string | null;
-          created_at: string;
-        };
-        Insert: {
-          id?: string;
-          distributor_id: string;
-          region_name: string;
-          state?: string | null;
-        };
-      };
       sample_shipments: {
         Row: {
           id: string;
@@ -671,6 +638,16 @@ export interface Database {
       };
     };
     Functions: {
+      list_distribuidores_ativos: {
+        Args: {
+          p_include_id?: string | null;
+        };
+        Returns: {
+          id: string;
+          name: string;
+          ativo: boolean;
+        }[];
+      };
       merge_zapi_lid_identity: {
         Args: {
           p_lid_key: string;

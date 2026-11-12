@@ -3,7 +3,6 @@
 import { updateLeadDistributor } from "@/app/actions/leads";
 import { CrmMenuSelect } from "@/components/crm-menu-select";
 import type { DistributorOption } from "@/lib/distributors";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
@@ -77,14 +76,6 @@ export function LeadDistributorSelect({
           })();
         }}
       />
-      {options.length === 0 ? (
-        <Link
-          href="/settings/distribuidores"
-          className="mt-1 inline-block text-[11px] font-semibold text-[var(--vp-wine)] underline-offset-2 hover:underline"
-        >
-          Cadastrar em Configurações
-        </Link>
-      ) : null}
       {error ? <p className="mt-1 text-[11px] text-[var(--vp-error)]">{error}</p> : null}
     </div>
   );

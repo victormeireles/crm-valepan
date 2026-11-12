@@ -1,7 +1,8 @@
 "use server";
 
 import { updateConversationPipelineClassification } from "@/app/actions/inbox";
-import { distributorOptionLabel, isPlaceholderDistributorName, type DistributorOption } from "@/lib/distributors";
+import type { DistributorOption } from "@/lib/distributors";
+import { fetchDistributorCatalog } from "@/lib/distributor-catalog";
 import { evaluateAdvanceAccept, suggestionResolutionStatus } from "@/lib/pipeline-advance";
 import { runPipelineAdvanceJob } from "@/lib/pipeline-advance-job";
 import { canonicalPipelineStageKey, selectCanonicalPipelineStages } from "@/lib/pipeline-canonical-stages";
@@ -53,7 +54,7 @@ export async function listPendingPipelineAdvanceSuggestions(): Promise<{
   const { data, error } = await crm
     .from("pipeline_advance_suggestions")
     .select(
-      "id, lead_id, conversation_id, from_stage_id, to_stage_id, from_substage, to_substage, to_classification, rationale, evidence_quote, confidence, leads(phone_e164, client_category, contacts(full_name), companies(name), distributors(id, name))",
+      "id, lead_id, conversation_id, from_stage_id, to_stage_id, from_substage, to_substage, to_classification, rationale, evidence_quote, confidence, leads(phone_e164, client_category, contacts(full_name), companies(name), cliente_distribuidor_id)",
     )
     .eq("status", "pending")
     .order("created_at", { ascending: false })
@@ -63,11 +64,30 @@ export async function listPendingPipelineAdvanceSuggestions(): Promise<{
   const { data: stages } = await crm.from("pipeline_stages").select("id, name");
   const stageNameById = new Map((stages ?? []).map((stage) => [stage.id, stage.name]));
 
+  const distributorNameById = new Map<string, string>();
+  const distributorIds = [
+    ...new Set(
+      (data ?? [])
+        .map((row) => nestOne(row.leads)?.cliente_distribuidor_id)
+        .filter((value): value is string => Boolean(value)),
+    ),
+  ];
+  if (distributorIds.length > 0) {
+    const activeCatalog = await fetchDistributorCatalog(crm);
+    for (const option of activeCatalog.options) distributorNameById.set(option.id, option.name);
+    for (const distributorId of distributorIds) {
+      if (distributorNameById.has(distributorId)) continue;
+      const withCurrent = await fetchDistributorCatalog(crm, distributorId);
+      const match = withCurrent.options.find((option) => option.id === distributorId);
+      if (match) distributorNameById.set(match.id, match.name);
+    }
+  }
+
   const items: PipelineAdvanceSuggestionDTO[] = (data ?? []).map((row) => {
     const lead = nestOne(row.leads);
     const contact = nestOne(lead?.contacts);
     const company = nestOne(lead?.companies);
-    const distributor = nestOne(lead?.distributors);
+    const distributorId = lead?.cliente_distribuidor_id ?? null;
     return {
       id: row.id,
       leadId: row.lead_id,
@@ -75,16 +95,14 @@ export async function listPendingPipelineAdvanceSuggestions(): Promise<{
       personName: displayPersonName(contact?.full_name) || lead?.phone_e164 || "Cliente",
       companyLine: displayCompanyName({
         companyName: company?.name,
-        distributorName: distributor?.name,
-        clientCategory: lead?.client_category,
       }),
       fromStageName: stageNameById.get(row.from_stage_id) ?? "",
       fromSubstage: row.from_substage,
       toStageId: row.to_stage_id,
       toStageName: stageNameById.get(row.to_stage_id) ?? "",
       toSubstage: row.to_substage,
-      distributorId: distributor?.id ?? null,
-      distributorName: distributor?.name ?? null,
+      distributorId,
+      distributorName: distributorId ? (distributorNameById.get(distributorId) ?? null) : null,
       toClassification: row.to_classification,
       rationale: row.rationale,
       evidenceQuote: row.evidence_quote,
@@ -241,16 +259,11 @@ export async function loadPipelineClassificationCatalog(): Promise<
   const [stagesResult, substagesResult, distributorsResult] = await Promise.all([
     crm.from("pipeline_stages").select("id, name, sort_order, is_final").order("sort_order", { ascending: true }),
     crm.from("lost_reasons").select("id, name, stage_key, sort_order, active").order("sort_order", { ascending: true }),
-    crm
-      .from("distributors")
-      .select("id, name, distributor_regions(region_name, state)")
-      .eq("active", true)
-      .not("name", "ilike", "PENDENTE CARTEIRA · %")
-      .order("name", { ascending: true }),
+    fetchDistributorCatalog(crm),
   ]);
   if (stagesResult.error) return { ok: false, error: stagesResult.error.message };
   if (substagesResult.error) return { ok: false, error: substagesResult.error.message };
-  if (distributorsResult.error) return { ok: false, error: distributorsResult.error.message };
+  if (distributorsResult.error) return { ok: false, error: distributorsResult.error };
 
   const stages = selectCanonicalPipelineStages(stagesResult.data ?? []).map((stage) => ({
     id: stage.id,
@@ -268,23 +281,7 @@ export async function loadPipelineClassificationCatalog(): Promise<
       active: row.active,
     }];
   });
-  const distributors = (distributorsResult.data ?? [])
-    .filter((row) => !isPlaceholderDistributorName(row.name))
-    .map((row) => {
-      const regions = row.distributor_regions as
-        | { region_name: string; state: string | null }
-        | { region_name: string; state: string | null }[]
-        | null;
-      const region = Array.isArray(regions) ? regions[0] : regions;
-      return {
-        id: row.id,
-        name: distributorOptionLabel({
-          name: row.name,
-          city: region?.region_name,
-          state: region?.state,
-        }),
-      };
-    });
+  const distributors = distributorsResult.options;
 
   return { ok: true, catalog: { stages, substages, distributors } };
 }

@@ -314,6 +314,17 @@ export function InboxLeadPanel(props: InboxLeadPanelProps) {
               ]}
               onChange={(next) => void saveQualification({ category: next }, "category")}
             />
+            <label className="flex min-h-11 items-center justify-between gap-2.5 rounded-[10px] border border-[var(--vp-ink-line)] bg-[var(--vp-paper)] px-3">
+              <span className="shrink-0 text-[11px] font-bold uppercase tracking-[0.06em] text-[var(--vp-ink-soft)]">Nome da empresa</span>
+              <input
+                className={controlClass}
+                value={qualification.companyName}
+                maxLength={80}
+                placeholder="Não informado"
+                onChange={(event) => updateQualificationDraft({ companyName: event.target.value })}
+                onBlur={() => void saveQualification({ companyName: qualificationRef.current.companyName }, "companyName")}
+              />
+            </label>
             <div className="flex min-h-11 items-center justify-between gap-2 rounded-[10px] border border-[var(--vp-ink-line)] bg-[var(--vp-paper)] px-3">
               <label htmlFor={cepFieldId} className="shrink-0 text-[11px] font-bold uppercase tracking-[0.06em] text-[var(--vp-ink-soft)]">CEP</label>
               <input

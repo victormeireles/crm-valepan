@@ -84,7 +84,7 @@ export default async function DashboardPage() {
     crm
       .from("leads")
       .select(
-        "id, phone_e164, created_at, client_category, contacts(full_name), companies(name), distributors(name)",
+        "id, phone_e164, created_at, client_category, contacts(full_name), companies(name)",
       )
       .is("excluded_from_pipeline_at", null)
       .order("created_at", { ascending: false })
@@ -329,17 +329,9 @@ export default async function DashboardPage() {
                   | { name: string | null }[]
                   | null,
               );
-              const distributor = nestOne(
-                row.distributors as
-                  | { name: string | null }
-                  | { name: string | null }[]
-                  | null,
-              );
               const personName = displayPersonName(contact?.full_name);
               const companyLine = displayCompanyName({
                 companyName: company?.name,
-                distributorName: distributor?.name,
-                clientCategory: row.client_category,
               });
               return (
                 <li key={row.id}>

@@ -8,11 +8,13 @@ import { isMissingNetworkTypeColumnError } from "@/lib/leads/list-query";
 import { lookupCep, parseLeadAddress } from "@/lib/cep-lookup";
 import { parseNullableNonNegativeInt } from "@/lib/parse-localized-integer";
 import { displayCompanyName, displayPersonName } from "@/lib/lead-identity";
+import { COMPANY_NAME_MAX_LEN, ensureLeadCompanyName } from "@/lib/lead-company";
+import type { Database } from "@/lib/database.types";
 import { nestOne } from "@/lib/supabase/nested";
 import { createServerSupabaseClient, crmTables } from "@/lib/supabase/server";
 
 const LEAD_PICKER_SELECT =
-  "id, phone_e164, client_category, contacts(full_name), companies(name), distributors(name)";
+  "id, phone_e164, client_category, contacts(full_name), companies(name)";
 
 type LeadPickerRow = {
   id: string;
@@ -20,7 +22,6 @@ type LeadPickerRow = {
   client_category: string | null;
   contacts?: { full_name: string | null } | { full_name: string | null }[] | null;
   companies?: { name: string | null } | { name: string | null }[] | null;
-  distributors?: { name: string | null } | { name: string | null }[] | null;
 };
 
 export type LeadPickerOption = {
@@ -37,13 +38,8 @@ function sanitizeLeadSearchFragment(value: string) {
 function leadRowToPickerOption(row: LeadPickerRow): LeadPickerOption {
   const contact = nestOne(row.contacts ?? null);
   const company = nestOne(row.companies ?? null);
-  const distributor = nestOne(row.distributors ?? null);
   const personName = displayPersonName(contact?.full_name);
-  const companyLine = displayCompanyName({
-    companyName: company?.name,
-    distributorName: distributor?.name,
-    clientCategory: row.client_category,
-  });
+  const companyLine = displayCompanyName({ companyName: company?.name });
   const label = companyLine ? `${personName} · ${companyLine}` : personName;
   return { id: row.id, label, personName, companyName: companyLine };
 }
@@ -77,9 +73,9 @@ export async function createLead(formData: FormData) {
   const source = String(formData.get("source") ?? "manual").trim() || "manual";
   const contactName = String(formData.get("contact_name") ?? "").trim();
   const rawCategory = String(formData.get("client_category") ?? "").trim();
-  const rawDistributorName = String(formData.get("distributor_name") ?? "").trim().toUpperCase();
+  const rawCompanyName = String(formData.get("company_name") ?? "").trim();
   const baseCategory = rawCategory.length > 0 ? rawCategory : null;
-  const clientCategory = rawDistributorName ? "distribuidor" : baseCategory;
+  const clientCategory = baseCategory;
   const normalized = normalizeBrazilPhoneToE164(rawPhone);
   if (!normalized) {
     return { ok: false as const, error: "Telefone inválido." };
@@ -95,7 +91,7 @@ export async function createLead(formData: FormData) {
     const upsertRes = await updateLeadCategoryContactInfo({
       leadId: null,
       clientCategory: "distribuidor",
-      distributorName: rawDistributorName || null,
+      companyName: rawCompanyName || null,
       leadStatus: null,
       networkType: null,
       contactName,
@@ -107,37 +103,7 @@ export async function createLead(formData: FormData) {
       return { ok: false as const, error: upsertRes.error ?? "Erro ao incluir lead." };
     }
 
-    const supabase = await createServerSupabaseClient();
-    const crm = crmTables(supabase);
     const createdLeadId = upsertRes.leadId ?? "";
-    if (createdLeadId) {
-      const { data: dist } = rawDistributorName
-        ? await crm
-            .from("distributors")
-            .select("id")
-            .ilike("name", rawDistributorName)
-            .maybeSingle()
-        : { data: null };
-
-      const { data: leadSnapshot } = await crm
-        .from("leads")
-        .select("id, client_category, distributor_id")
-        .eq("id", createdLeadId)
-        .maybeSingle();
-
-      const needsFixCategory = (leadSnapshot?.client_category ?? "").trim().toLowerCase() !== "distribuidor";
-      const needsFixDistributor = !!rawDistributorName && !leadSnapshot?.distributor_id;
-      if (needsFixCategory || needsFixDistributor) {
-        await crm
-          .from("leads")
-          .update({
-            client_category: "distribuidor",
-            distributor_id: dist?.id ?? leadSnapshot?.distributor_id ?? null,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", createdLeadId);
-      }
-    }
 
     revalidatePath("/leads", "page");
     revalidatePath("/leads", "layout");
@@ -151,28 +117,6 @@ export async function createLead(formData: FormData) {
   if (!user) return { ok: false as const, error: "Não autenticado" };
 
   const crm = crmTables(supabase);
-  let distributorId: string | null = null;
-  if (clientCategory === "distribuidor" && rawDistributorName) {
-    const { data: dist, error: distErr } = await crm
-      .from("distributors")
-      .select("id")
-      .ilike("name", rawDistributorName)
-      .maybeSingle();
-    if (distErr) return { ok: false as const, error: distErr.message };
-    if (dist?.id) {
-      distributorId = dist.id;
-    } else {
-      const { data: insertedDist, error: insertedDistErr } = await crm
-        .from("distributors")
-        .insert({ name: rawDistributorName, active: true })
-        .select("id")
-        .single();
-      if (insertedDistErr || !insertedDist) {
-        return { ok: false as const, error: insertedDistErr?.message ?? "Erro ao vincular rede." };
-      }
-      distributorId = insertedDist.id;
-    }
-  }
   const { data: existing } = await crm
     .from("leads")
     .select("id, contact_id")
@@ -183,7 +127,6 @@ export async function createLead(formData: FormData) {
       .from("leads")
       .update({
         client_category: clientCategory ?? "distribuidor",
-        distributor_id: distributorId,
         updated_at: new Date().toISOString(),
       })
       .eq("id", existing.id);
@@ -246,6 +189,11 @@ export async function createLead(formData: FormData) {
       }
     }
 
+    if (rawCompanyName) {
+      const companyRes = await ensureLeadCompanyName(crm, existing.id, { name: rawCompanyName });
+      if (!companyRes.ok) return { ok: false as const, error: companyRes.error };
+    }
+
     revalidatePath("/leads");
     revalidatePath(`/leads/${existing.id}`);
     return { ok: true as const, id: existing.id };
@@ -259,7 +207,6 @@ export async function createLead(formData: FormData) {
       status: "open",
       owner_id: user.id,
       client_category: clientCategory,
-      distributor_id: distributorId,
     })
     .select("id, contact_id")
     .single();
@@ -314,6 +261,11 @@ export async function createLead(formData: FormData) {
         })
         .eq("id", inserted.id);
     }
+  }
+
+  if (rawCompanyName) {
+    const companyRes = await ensureLeadCompanyName(crm, inserted.id, { name: rawCompanyName });
+    if (!companyRes.ok) return { ok: false as const, error: companyRes.error };
   }
 
   const { data: firstStage } = await crm
@@ -382,13 +334,9 @@ export async function updateLeadClientCategory(input: { leadId: string; category
   if (!updated) return { ok: false as const, error: "Não foi possível salvar a categoria." };
 
   if (category === "distribuidor") {
-    const portfolioRes = await ensureDistribuidorLeadLinkedToDistributorsTable(
-      crm,
-      input.leadId,
-      null,
-    );
-    if (!portfolioRes.ok) {
-      return { ok: false as const, error: portfolioRes.error };
+    const companyRes = await ensureLeadCompanyName(crm, input.leadId, {});
+    if (!companyRes.ok) {
+      return { ok: false as const, error: companyRes.error };
     }
   }
 
@@ -490,14 +438,14 @@ export async function syncLeadToDistributorCategory(input: { leadId: string }) {
   let { data: lead, error: leadErr } = await crm
     .from("leads")
     .select(
-      "id, phone_e164, network_type, contacts(full_name), companies(city,document), distributors(name)",
+      "id, phone_e164, network_type, contacts(full_name), companies(name,city,document)",
     )
     .eq("id", leadId)
     .maybeSingle();
   if (leadErr && isMissingNetworkTypeError(leadErr)) {
     ({ data: lead, error: leadErr } = await crm
       .from("leads")
-      .select("id, phone_e164, contacts(full_name), companies(city,document), distributors(name)")
+      .select("id, phone_e164, contacts(full_name), companies(name,city,document)")
       .eq("id", leadId)
       .maybeSingle());
   }
@@ -505,12 +453,8 @@ export async function syncLeadToDistributorCategory(input: { leadId: string }) {
   if (!lead?.id) return { ok: false as const, error: "Lead não encontrado." };
 
   const contact = firstOrNull(lead.contacts as { full_name: string | null } | { full_name: string | null }[] | null);
-  const company = firstOrNull(
-    lead.companies as { city: string | null; document: string | null } | { city: string | null; document: string | null }[] | null,
-  );
-  const distributor = firstOrNull(
-    lead.distributors as { name: string | null } | { name: string | null }[] | null,
-  );
+  type CompanyRow = { name: string | null; city: string | null; document: string | null };
+  const company = firstOrNull(lead.companies as CompanyRow | CompanyRow[] | null);
 
   let companyDocument = (company?.document ?? "").trim();
   if (!companyDocument) {
@@ -545,7 +489,7 @@ export async function syncLeadToDistributorCategory(input: { leadId: string }) {
   const syncRes = await updateLeadCategoryContactInfo({
     leadId: lead.id,
     clientCategory: "distribuidor",
-    distributorName: (distributor?.name ?? "").trim() || null,
+    companyName: (company?.name ?? "").trim() || null,
     leadStatus: null,
     networkType: (lead.network_type ?? "").trim().toLowerCase() || null,
     contactName: (contact?.full_name ?? "").trim(),
@@ -561,74 +505,6 @@ export async function syncLeadToDistributorCategory(input: { leadId: string }) {
   revalidatePath("/leads", "page");
   revalidatePath("/leads", "layout");
   return { ok: true as const };
-}
-
-/** Nome máximo em `crm.distributors.name` (alinhado a `updateLeadCategoryContactInfo`). */
-const DISTRIBUTOR_NAME_MAX_LEN = 80;
-
-const PLACEHOLDER_DISTRIBUTOR_PREFIX = "PENDENTE CARTEIRA · ";
-
-/**
- * Garante um registro em `crm.distributors` e `leads.distributor_id` para leads classificados
- * como distribuidor pelo inbox, mesmo sem rede/CNPJ — o usuário completa depois na carteira.
- */
-async function ensureDistribuidorLeadLinkedToDistributorsTable(
-  crm: ReturnType<typeof crmTables>,
-  leadId: string,
-  phoneE164Fallback: string | null | undefined,
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  const { data: lead, error: leadErr } = await crm
-    .from("leads")
-    .select("id, distributor_id, phone_e164")
-    .eq("id", leadId)
-    .maybeSingle();
-  if (leadErr) return { ok: false, error: leadErr.message };
-  if (!lead?.id) return { ok: false, error: "Lead não encontrado." };
-  if (lead.distributor_id) return { ok: true };
-
-  const phone =
-    (phoneE164Fallback ?? "").trim() || (lead.phone_e164 ?? "").trim() || "sem telefone";
-  let name = `${PLACEHOLDER_DISTRIBUTOR_PREFIX}${phone}`;
-  if (name.length > DISTRIBUTOR_NAME_MAX_LEN) {
-    name = name.slice(0, DISTRIBUTOR_NAME_MAX_LEN);
-  }
-
-  const { data: existing, error: exErr } = await crm
-    .from("distributors")
-    .select("id")
-    .eq("name", name)
-    .maybeSingle();
-  if (exErr) return { ok: false, error: exErr.message };
-
-  let distributorId = existing?.id ?? null;
-  if (!distributorId) {
-    const { data: inserted, error: insErr } = await crm
-      .from("distributors")
-      .insert({
-        name,
-        active: true,
-        notes:
-          "Cadastro iniciado pela classificação no inbox (dados incompletos). Edite o nome ou vincule à rede oficial na Carteira de Distribuidores.",
-      })
-      .select("id")
-      .single();
-    if (insErr || !inserted) {
-      return { ok: false, error: insErr?.message ?? "Erro ao criar distribuidor na carteira." };
-    }
-    distributorId = inserted.id;
-  }
-
-  const { error: updErr } = await crm
-    .from("leads")
-    .update({
-      distributor_id: distributorId,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", leadId);
-  if (updErr) return { ok: false, error: updErr.message };
-
-  revalidatePath("/distributors");
-  return { ok: true };
 }
 
 export async function updateConversationLeadClientCategory(input: {
@@ -662,7 +538,7 @@ export async function updateConversationLeadClientCategory(input: {
     const bootstrapRes = await updateLeadCategoryContactInfo({
       leadId: null,
       clientCategory: normalizedCategory,
-      distributorName: null,
+      companyName: null,
       leadStatus: null,
       networkType: null,
       contactName: null,
@@ -706,13 +582,11 @@ export async function updateConversationLeadClientCategory(input: {
     if (!syncRes.ok) {
       console.warn("[leads] syncLeadToDistributorCategory falhou após salvar categoria:", syncRes.error);
     }
-    const portfolioRes = await ensureDistribuidorLeadLinkedToDistributorsTable(
-      crm,
-      leadId,
-      conv.phone_e164,
-    );
-    if (!portfolioRes.ok) {
-      return { ok: false as const, error: portfolioRes.error };
+    const companyRes = await ensureLeadCompanyName(crm, leadId, {
+      phoneE164Fallback: conv.phone_e164,
+    });
+    if (!companyRes.ok) {
+      return { ok: false as const, error: companyRes.error };
     }
   }
 
@@ -859,7 +733,7 @@ export async function updateConversationLeadQualification(input: {
     const bootstrapRes = await updateLeadCategoryContactInfo({
       leadId: null,
       clientCategory: normalizedCategory ?? "outros",
-      distributorName: null,
+      companyName: null,
       leadStatus: null,
       networkType: null,
       contactName: null,
@@ -898,7 +772,7 @@ export async function updateConversationLeadQualification(input: {
     const { error: companyErr } = await crm
       .from("companies")
       .update({
-        name: companyName,
+        ...(companyName ? { name: companyName } : {}),
         city,
         state,
         document: cnpj,
@@ -921,6 +795,14 @@ export async function updateConversationLeadQualification(input: {
       return { ok: false as const, error: insertedCompanyErr?.message ?? "Erro ao criar empresa." };
     }
     nextCompanyId = insertedCompany.id;
+  }
+
+  if (normalizedCategory === "distribuidor" && !nextCompanyId) {
+    const companyRes = await ensureLeadCompanyName(crm, leadId, {
+      phoneE164Fallback: conv.phone_e164,
+    });
+    if (!companyRes.ok) return { ok: false as const, error: companyRes.error };
+    nextCompanyId = companyRes.companyId;
   }
 
   const { error: leadUpdateErr } = await crm
@@ -1035,7 +917,8 @@ export async function updateConversationLeadQualification(input: {
 export async function updateLeadCategoryContactInfo(input: {
   leadId: string | null;
   clientCategory: string;
-  distributorName: string | null;
+  /** Nome da empresa (`crm.companies.name`), identidade do lead junto ao contato. */
+  companyName: string | null;
   leadStatus?: string | null;
   networkType: string | null;
   contactName?: string | null;
@@ -1052,7 +935,7 @@ export async function updateLeadCategoryContactInfo(input: {
   const crm = crmTables(supabase);
   const rawLeadId = input.leadId?.trim() ?? "";
 
-  const distributorName = input.distributorName?.trim().toUpperCase() || null;
+  const companyName = input.companyName?.trim() || null;
   const rawLeadStatus = String(input.leadStatus ?? "").trim().toLowerCase();
   const leadStatus = rawLeadStatus.length > 0 ? rawLeadStatus : null;
   if (
@@ -1074,57 +957,15 @@ export async function updateLeadCategoryContactInfo(input: {
   const city = String(input.city ?? "").trim();
   const companyDocument = String(input.companyDocument ?? "").trim() || null;
 
-  if (distributorName && distributorName.length > 80) {
-    return { ok: false as const, error: "Distribuidora muito longa (máximo 80 caracteres)." };
-  }
-
-  let distributorId: string | null = null;
-  if (distributorName) {
-    const { data: dist, error: distErr } = await crm
-      .from("distributors")
-      .select("id, name")
-      .ilike("name", distributorName)
-      .maybeSingle();
-    if (distErr) {
-      return { ok: false as const, error: distErr.message };
-    }
-    if (dist?.id) {
-      distributorId = dist.id;
-    } else {
-      const { data: insertedDist, error: insertedDistErr } = await crm
-        .from("distributors")
-        .insert({ name: distributorName, active: true })
-        .select("id")
-        .single();
-      if (insertedDistErr || !insertedDist) {
-        return {
-          ok: false as const,
-          error: insertedDistErr?.message ?? "Erro ao vincular distribuidora.",
-        };
-      }
-      distributorId = insertedDist.id;
-    }
+  if (companyName && companyName.length > COMPANY_NAME_MAX_LEN) {
+    return {
+      ok: false as const,
+      error: `Nome da empresa muito longo (máximo ${COMPANY_NAME_MAX_LEN} caracteres).`,
+    };
   }
 
   let leadId = rawLeadId;
   if (!leadId) {
-    if (input.clientCategory === "distribuidor" && distributorId) {
-      const { data: byDistributor, error: byDistributorErr } = await crm
-        .from("leads")
-        .select("id")
-        .eq("client_category", "distribuidor")
-        .eq("distributor_id", distributorId)
-        .order("updated_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (byDistributorErr) {
-        return { ok: false as const, error: byDistributorErr.message };
-      }
-      if (byDistributor?.id) {
-        leadId = byDistributor.id;
-      }
-    }
-
     if (!leadId && normalizedLeadPhone) {
       const { data: byPhone, error: byPhoneErr } = await crm
         .from("leads")
@@ -1147,7 +988,6 @@ export async function updateLeadCategoryContactInfo(input: {
         status: leadStatus ?? "open",
         owner_id: user.id,
         client_category: input.clientCategory,
-        distributor_id: distributorId,
       };
 
       let insertedLead: { id: string } | null = null;
@@ -1319,18 +1159,19 @@ export async function updateLeadCategoryContactInfo(input: {
     const { error: companyErr } = await crm
       .from("companies")
       .update({
+        ...(companyName ? { name: companyName } : {}),
         city: city || null,
         document: companyDocument,
         updated_at: new Date().toISOString(),
       })
       .eq("id", nextCompanyId);
     if (companyErr) return { ok: false as const, error: companyErr.message };
-  } else if (city || companyDocument) {
-    const companyName = contactName || `Empresa ${lead.phone_e164}`;
+  } else if (companyName || city || companyDocument) {
+    const insertedCompanyName = companyName || contactName || `Empresa ${lead.phone_e164}`;
     const { data: insertedCompany, error: insertCompanyErr } = await crm
       .from("companies")
       .insert({
-        name: companyName,
+        name: insertedCompanyName,
         city,
         document: companyDocument,
       })
@@ -1348,7 +1189,6 @@ export async function updateLeadCategoryContactInfo(input: {
     // Mudar o status dispara a sincronizacao da etapa no banco. Atribua o
     // lead na mesma operacao para ele nao sair da visao do usuario comercial.
     owner_id: lead.owner_id ?? (leadStatus === "em negociação" ? user.id : null),
-    distributor_id: distributorId,
     contact_id: nextContactId,
     company_id: nextCompanyId,
     client_category: input.clientCategory,
@@ -1495,27 +1335,33 @@ export async function updateLeadDistributor(input: {
   if (!leadId) return { ok: false as const, error: "Lead inválido." };
 
   const requestedId = input.distributorId?.trim() || null;
-  let distributorId: string | null = null;
+  let clienteDistribuidorId: string | null = null;
   if (requestedId) {
-    const { data: dist, error: distErr } = await crm
-      .from("distributors")
-      .select("id, active")
-      .eq("id", requestedId)
+    const { data: leadRow, error: leadErr } = await crm
+      .from("leads")
+      .select("cliente_distribuidor_id")
+      .eq("id", leadId)
       .maybeSingle();
-    if (distErr) return { ok: false as const, error: distErr.message };
-    if (!dist?.id || !dist.active) {
-      return {
-        ok: false as const,
-        error: "Distribuidor inválido. Cadastre ou ative em Configurações → Distribuidores.",
-      };
+    if (leadErr) return { ok: false as const, error: leadErr.message };
+    if (!leadRow) return { ok: false as const, error: "Lead não encontrado." };
+
+    const { data: options, error: optionsErr } = await crm.rpc("list_distribuidores_ativos", {
+      p_include_id: leadRow.cliente_distribuidor_id,
+    });
+    if (optionsErr) return { ok: false as const, error: optionsErr.message };
+    const rows = (options ?? []) as Database["crm"]["Functions"]["list_distribuidores_ativos"]["Returns"];
+    const match = rows.find((option) => option.id === requestedId);
+    const keepingCurrent = leadRow.cliente_distribuidor_id === requestedId;
+    if (!match?.id || (!match.ativo && !keepingCurrent)) {
+      return { ok: false as const, error: "Distribuidor inválido ou inativo." };
     }
-    distributorId = dist.id;
+    clienteDistribuidorId = match.id;
   }
 
   const { data: updated, error } = await crm
     .from("leads")
     .update({
-      distributor_id: distributorId,
+      cliente_distribuidor_id: clienteDistribuidorId,
       updated_at: new Date().toISOString(),
     })
     .eq("id", leadId)
@@ -1545,7 +1391,7 @@ export async function removeLeadFromCategoryGrid(input: { leadId: string }) {
     .from("leads")
     .update({
       client_category: null,
-      distributor_id: null,
+      cliente_distribuidor_id: null,
       network_type: null,
       updated_at: new Date().toISOString(),
     })

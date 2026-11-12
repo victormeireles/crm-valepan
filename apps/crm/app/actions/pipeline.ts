@@ -63,8 +63,6 @@ function mapRow(
     personName: displayPersonName(row.contact_name),
     companyLine: displayCompanyName({
       companyName: row.company_name,
-      distributorName: row.distributor_name,
-      clientCategory: row.client_category,
     }),
     phone_e164: row.phone_e164,
     client_category: row.client_category,
