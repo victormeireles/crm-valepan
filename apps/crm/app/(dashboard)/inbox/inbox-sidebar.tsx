@@ -405,7 +405,16 @@ export function InboxSidebar({
                 const href = inboxClientHref({ tab: liveTab, page: livePage, cid: c.id });
                 setOptimisticSelectedId(c.id);
                 window.dispatchEvent(new CustomEvent(INBOX_SELECT_CONVERSATION_EVENT, {
-                  detail: { conversationId: c.id, href },
+                  detail: {
+                    conversationId: c.id,
+                    href,
+                    preview: {
+                      name: c.identityName,
+                      phone: c.phone_e164,
+                      company: c.companyName,
+                      avatarUrl: c.avatarUrl ?? null,
+                    },
+                  },
                 }));
               }}
               className="block px-3.5 py-3 pr-10"

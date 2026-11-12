@@ -18,8 +18,101 @@ import type { PipelineSubstageDTO } from "@/lib/pipeline-substages";
 
 export const INBOX_SELECT_CONVERSATION_EVENT = "crm:inbox-select-conversation";
 
-type SelectConversationDetail = { conversationId: string; href: string };
+export type InboxConversationPreview = {
+  name: string;
+  phone?: string | null;
+  company?: string | null;
+  avatarUrl?: string | null;
+};
+
+type SelectConversationDetail = {
+  conversationId: string;
+  href: string;
+  preview?: InboxConversationPreview | null;
+};
 type CatalogStage = { id: string; name: string; sortOrder: number; isFinal?: boolean };
+
+function ConversationLoadingSkeleton({
+  preview,
+}: {
+  preview?: InboxConversationPreview | null;
+}) {
+  const bubbles = [
+    { side: "in" as const, width: "w-[58%]" },
+    { side: "out" as const, width: "w-[46%]" },
+    { side: "in" as const, width: "w-[64%]" },
+    { side: "out" as const, width: "w-[52%]" },
+    { side: "in" as const, width: "w-[40%]" },
+    { side: "out" as const, width: "w-[57%]" },
+  ];
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden" aria-hidden={false}>
+      <div className="shrink-0 border-b border-[var(--vp-ink-line)] bg-[var(--vp-paper)] px-[18px] py-3.5">
+        <div className="flex items-center gap-3">
+          {preview?.name ? (
+            <ContactAvatar
+              name={preview.name}
+              src={preview.avatarUrl}
+              phone={preview.phone}
+              className="size-11 shrink-0"
+              loading="eager"
+              allowRefresh={false}
+            />
+          ) : (
+            <span className="size-11 shrink-0 motion-safe:animate-pulse rounded-full bg-[var(--vp-surface-high)]" />
+          )}
+          <div className="min-w-0 flex-1 space-y-2">
+            {preview?.name ? (
+              <>
+                <h1 className="truncate text-[17px] font-bold text-[var(--vp-ink-body)]">{preview.name}</h1>
+                <p className="truncate text-xs text-[var(--vp-ink-muted)]">
+                  {[preview.company, preview.phone].filter(Boolean).join(" · ") || "Carregando conversa…"}
+                </p>
+              </>
+            ) : (
+              <>
+                <span className="block h-4 w-40 motion-safe:animate-pulse rounded bg-[var(--vp-surface-high)]" />
+                <span className="block h-3 w-56 motion-safe:animate-pulse rounded bg-[var(--vp-surface)]" />
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+      <div
+        role="status"
+        aria-live="polite"
+        className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden bg-[var(--vp-paper)] px-[18px] py-4"
+      >
+        <span className="sr-only">Carregando conversa…</span>
+        <div className="flex items-center justify-center gap-2 pb-1">
+          <span className="size-1.5 rounded-full bg-[var(--vp-wine)] motion-safe:animate-pulse" />
+          <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--vp-ink-muted)]">
+            Carregando mensagens
+          </span>
+        </div>
+        {bubbles.map((bubble, index) => (
+          <div
+            key={`inbox-load-bubble-${index}`}
+            className={`flex ${bubble.side === "out" ? "justify-end" : "justify-start"}`}
+          >
+            <span
+              className={`h-14 ${bubble.width} motion-safe:animate-pulse rounded-2xl ${
+                bubble.side === "out"
+                  ? "rounded-br-[4px] bg-[rgba(35,0,4,0.14)]"
+                  : "rounded-bl-[4px] border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)]"
+              }`}
+              style={{ animationDelay: `${index * 40}ms` }}
+            />
+          </div>
+        ))}
+      </div>
+      <div className="shrink-0 border-t border-[var(--vp-ink-line)] bg-[var(--vp-paper)] px-[18px] pb-4 pt-3">
+        <span className="block h-12 w-full motion-safe:animate-pulse rounded-xl bg-[var(--vp-surface)]" />
+      </div>
+    </div>
+  );
+}
 
 export function InboxConversationPane({
   initialView,
@@ -36,7 +129,9 @@ export function InboxConversationPane({
   const [panelLoading, setPanelLoading] = useState(false);
   const [mobilePanelOpen, setMobilePanelOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [isPending, startTransition] = useTransition();
+  const [, startTransition] = useTransition();
+  const [pendingPreview, setPendingPreview] = useState<InboxConversationPreview | null>(null);
+  const [loadingConversationId, setLoadingConversationId] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState<number | null>(null);
   const requestVersion = useRef(0);
 
@@ -46,32 +141,59 @@ export function InboxConversationPane({
     return () => window.clearInterval(interval);
   }, []);
 
-  const selectConversation = useCallback((conversationId: string, href?: string) => {
+  const selectConversation = useCallback((
+    conversationId: string,
+    href?: string,
+    preview?: InboxConversationPreview | null,
+  ) => {
     const startedAt = performance.now();
     const version = ++requestVersion.current;
     setError(null);
     setPanelLoading(false);
     setMobilePanelOpen(false);
+    setPendingPreview(preview ?? null);
+    setLoadingConversationId(conversationId);
+    setView((current) =>
+      current
+        ? { ...current, leadPanel: null }
+        : current,
+    );
     if (href) pushInboxClientUrl({ inboxConversationId: conversationId }, href);
     startTransition(async () => {
-      const result = await loadInboxConversationView(conversationId);
-      if (version !== requestVersion.current) return;
-      recordInboxBrowserMetric("conversation", startedAt, {
-        success: result.ok,
-        changedUrl: Boolean(href),
-      });
-      if (!result.ok) {
-        setError(result.error);
-        return;
+      try {
+        const result = await loadInboxConversationView(conversationId);
+        if (version !== requestVersion.current) return;
+        recordInboxBrowserMetric("conversation", startedAt, {
+          success: result.ok,
+          changedUrl: Boolean(href),
+        });
+        if (!result.ok) {
+          setError(result.error);
+          return;
+        }
+        setView(result.view);
+      } catch {
+        if (version !== requestVersion.current) return;
+        recordInboxBrowserMetric("conversation", startedAt, {
+          success: false,
+          changedUrl: Boolean(href),
+        });
+        setError("Não foi possível carregar a conversa. Tente novamente.");
+      } finally {
+        if (version === requestVersion.current) {
+          setLoadingConversationId(null);
+          setPendingPreview(null);
+        }
       }
-      setView(result.view);
     });
   }, []);
 
   useEffect(() => {
     const onSelect = (event: Event) => {
       const detail = (event as CustomEvent<SelectConversationDetail>).detail;
-      if (detail?.conversationId) selectConversation(detail.conversationId, detail.href);
+      if (detail?.conversationId) {
+        selectConversation(detail.conversationId, detail.href, detail.preview);
+      }
     };
     const onPopState = () => {
       const conversationId = readInboxLocation().cid;
@@ -138,17 +260,20 @@ export function InboxConversationPane({
         nowMs,
       })
     : null;
+  const showLoading = loadingConversationId != null;
 
   return (
     <>
-      <section aria-busy={isPending} className="relative flex h-full min-h-0 flex-col overflow-hidden rounded-[14px] border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] shadow-[var(--sh-sm)]">
-        {isPending ? (
+      <section aria-busy={showLoading} className="relative flex h-full min-h-0 flex-col overflow-hidden rounded-[14px] border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] shadow-[var(--sh-sm)]">
+        {showLoading ? (
           <div className="pointer-events-none absolute inset-x-0 top-0 z-30 h-0.5 overflow-hidden bg-[var(--vp-surface-high)]">
-            <span className="block h-full w-1/2 animate-pulse bg-[var(--vp-gold-classic)]" />
+            <span className="block h-full w-1/2 motion-safe:animate-pulse bg-[var(--vp-gold-classic)]" />
           </div>
         ) : null}
         {error ? <p role="alert" className="m-3 rounded-lg bg-[var(--vp-error-container)] px-3 py-2 text-xs text-[var(--vp-error)]">{error}</p> : null}
-        {conversation && view ? (
+        {showLoading ? (
+          <ConversationLoadingSkeleton preview={pendingPreview} />
+        ) : conversation && view ? (
           <>
             <MarkConversationRead conversationId={conversation.id} fingerprint={`${conversation.lastSentAt ?? ""}|${conversation.lastDirection ?? ""}|${conversation.lastBodyPreview ?? ""}`} />
             <div className="shrink-0 border-b border-[var(--vp-ink-line)] bg-[var(--vp-paper)] px-[18px] py-3.5">
@@ -226,7 +351,14 @@ export function InboxConversationPane({
           </>
         ) : <div className="flex flex-1 items-center justify-center px-4 py-12"><p className="text-center text-sm text-[var(--muted)]">Nenhuma conversa para mostrar.</p></div>}
       </section>
-      {view?.leadPanel ? (
+      {showLoading ? (
+        <aside className="hidden h-full min-h-0 flex-col overflow-hidden rounded-[14px] border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] px-5 py-5 xl:flex">
+          <span className="mb-4 block h-4 w-28 motion-safe:animate-pulse rounded bg-[var(--vp-surface-high)]" />
+          <span className="mb-3 block h-10 w-full motion-safe:animate-pulse rounded-xl bg-[var(--vp-surface)]" />
+          <span className="mb-3 block h-10 w-full motion-safe:animate-pulse rounded-xl bg-[var(--vp-surface)]" />
+          <span className="mt-auto block h-11 w-full motion-safe:animate-pulse rounded-full bg-[var(--vp-surface-high)]" />
+        </aside>
+      ) : view?.leadPanel ? (
         <div className="hidden h-full min-h-0 overflow-hidden xl:flex xl:flex-col">
           <InboxLeadPanel
             key={view.conversation.id}
