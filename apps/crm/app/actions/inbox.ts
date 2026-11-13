@@ -48,6 +48,7 @@ import {
   outboundAttachmentStoragePath,
   type AttachmentMetadataInput,
 } from "@/lib/inbox/attachment-upload";
+import { claimLeadOwnerOnOutbound } from "@/lib/inbox/claim-lead-owner-on-outbound";
 
 import { createServerSupabaseClient, crmTables } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
@@ -756,6 +757,14 @@ export async function sendConversationMessage(formData: FormData) {
       actor_id: user.id,
       payload: { message },
     });
+
+    const claim = await claimLeadOwnerOnOutbound(crm, {
+      leadId: conv.lead_id,
+      userId: user.id,
+    });
+    if (!claim.ok) {
+      console.warn("[inbox] claimLeadOwnerOnOutbound after text:", claim.error);
+    }
   }
 
   revalidatePath("/inbox");
@@ -1677,6 +1686,14 @@ export async function sendConversationContactCard(input: {
       actor_id: user.id,
       payload: { contact_name: contactName, contact_phone: contactPhone },
     });
+
+    const claim = await claimLeadOwnerOnOutbound(crm, {
+      leadId: conv.lead_id,
+      userId: user.id,
+    });
+    if (!claim.ok) {
+      console.warn("[inbox] claimLeadOwnerOnOutbound after contact:", claim.error);
+    }
   }
 
   revalidatePath("/inbox");
@@ -1916,6 +1933,14 @@ export async function finishConversationAttachmentUpload(input: AttachmentFinali
         mode: metadata.mode,
       },
     });
+
+    const claim = await claimLeadOwnerOnOutbound(crm, {
+      leadId: conversation.lead_id,
+      userId: user.id,
+    });
+    if (!claim.ok) {
+      console.warn("[inbox] claimLeadOwnerOnOutbound after attachment:", claim.error);
+    }
   }
 
   revalidatePath("/inbox");
