@@ -76,7 +76,10 @@ export default async function DashboardLayout({
           </div>
         </div>
       </header>
-      <div className="relative mx-auto flex min-h-0 w-full flex-1 flex-col overflow-y-auto px-4 py-6 lg:px-6 md:py-8">
+      <div
+        data-dashboard-main
+        className="relative mx-auto flex min-h-0 w-full flex-1 flex-col overflow-y-auto px-4 py-6 lg:px-6 md:py-8"
+      >
         {profileError ? (
           <div className="mx-auto max-w-lg rounded-xl border border-[var(--border)] bg-[var(--card)] p-6">
             <h1 className="text-lg font-semibold">Não foi possível abrir o CRM</h1>

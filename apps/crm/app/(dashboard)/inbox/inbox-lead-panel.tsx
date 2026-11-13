@@ -244,7 +244,10 @@ export function InboxLeadPanel(props: InboxLeadPanelProps) {
   const controlClass = "min-w-0 flex-1 border-0 bg-transparent text-right text-[13px] font-bold text-[var(--vp-ink-body)] outline-none";
 
   return (
-    <aside className="flex h-full min-h-0 flex-col overflow-hidden border-l-[3px] border-l-[var(--vp-gold-classic)] bg-[var(--vp-paper-pure)]">
+    <aside
+      data-inbox-panel
+      className="flex h-full min-h-0 flex-col overflow-hidden rounded-none bg-[var(--vp-paper-pure)]"
+    >
       <header className="shrink-0 border-b border-[var(--vp-ink-line)] px-4 py-3.5">
         <p className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-[var(--vp-gold-classic)]">Ficha do lead</p>
         <p className="mt-1 truncate text-[15px] font-bold text-[var(--vp-wine)]">{props.companyName ?? props.contactName}</p>
@@ -499,7 +502,7 @@ export function InboxLeadPanelDrawer({
       ) : null}
       {open ? (
         <div className="fixed inset-0 z-50 bg-[rgba(35,0,4,0.35)] xl:hidden" role="dialog" aria-modal="true" aria-label="Ficha do lead">
-          <div className="absolute inset-y-0 right-0 w-[min(92vw,348px)] p-2">
+          <div className="absolute inset-y-0 right-0 w-[min(92vw,348px)] overflow-hidden rounded-none bg-[var(--vp-paper-pure)] shadow-[var(--sh-lg)]">
             <button type="button" className="absolute right-5 top-5 z-10 grid size-9 place-items-center rounded-full bg-[var(--vp-surface)] text-[var(--vp-wine)]" onClick={() => setOpen(false)} aria-label="Fechar ficha">
               <CrmIcon name="close" className="text-xl" />
             </button>

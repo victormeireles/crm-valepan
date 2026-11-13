@@ -25,6 +25,16 @@ html:has([data-inbox-shell]) body {
   overflow: hidden;
 }
 
+/* Inbox full-bleed: sem padding do shell e sem cantos arredondados nos painéis. */
+html:has([data-inbox-shell]) [data-dashboard-main] {
+  padding: 0;
+  overflow: hidden;
+}
+
+[data-inbox-shell] [data-inbox-panel] {
+  border-radius: 0;
+}
+
 :focus-visible {
   outline: 2px solid var(--vp-gold-deep);
   outline-offset: 2px;
