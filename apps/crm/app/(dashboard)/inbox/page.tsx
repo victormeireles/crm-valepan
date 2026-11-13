@@ -417,7 +417,7 @@ export default async function InboxPage({
       c.conversation_kind === "group"
         ? c.group_display_name?.trim() || c.phone_e164
         : lead
-          ? displayPersonName(contact?.full_name)
+          ? displayPersonName(contact?.full_name, c.phone_e164)
           : "Sem lead";
 
     return {
@@ -464,7 +464,7 @@ export default async function InboxPage({
   const selectedHeaderName = selected?.conversation_kind === "group"
     ? selected.group_display_name?.trim() || selected.phone_e164
     : selectedLead
-      ? displayPersonName(selectedContact?.full_name)
+      ? displayPersonName(selectedContact?.full_name, selected?.phone_e164)
       : "Sem lead";
   const selectedHeaderCompany = selected?.conversation_kind === "lead" && selectedLead
     ? displayCompanyName({

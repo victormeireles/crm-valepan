@@ -4,7 +4,8 @@ import { useState } from "react";
 import { resolveContactAvatarSrc } from "@/lib/contact-avatar";
 
 function firstInitial(name: string) {
-  return Array.from(name.trim())[0]?.toUpperCase() ?? "?";
+  const match = name.trim().match(/[\p{L}\p{N}]/u);
+  return match?.[0]?.toUpperCase() ?? "?";
 }
 
 export function ContactAvatar({

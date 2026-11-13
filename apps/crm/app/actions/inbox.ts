@@ -178,7 +178,7 @@ export async function refreshInboxSidebar(input: {
       const group = row.conversation_kind === "group";
       const identityName = group
         ? row.group_display_name?.trim() || row.phone_e164!
-        : row.lead_id ? displayPersonName(row.contact_name) : "Sem lead";
+        : row.lead_id ? displayPersonName(row.contact_name, row.phone_e164) : "Sem lead";
       const companyName = group || !row.lead_id ? null : displayCompanyName({
         companyName: row.company_name,
       });
@@ -312,7 +312,7 @@ export async function loadInboxConversationView(conversationId: string) {
     : null;
   const headerName = conversation.conversation_kind === "group"
     ? conversation.group_display_name?.trim() || conversation.phone_e164
-    : lead ? displayPersonName(contact?.full_name) : "Sem lead";
+    : lead ? displayPersonName(contact?.full_name, conversation.phone_e164) : "Sem lead";
   const headerCompany = conversation.conversation_kind === "lead" && lead
     ? displayCompanyName({
         companyName: company?.name,
@@ -395,7 +395,7 @@ export async function loadInboxLeadPanel(conversationId: string) {
   const company = nestOne(lead.companies);
   const opportunities = Array.isArray(lead.opportunities) ? lead.opportunities : lead.opportunities ? [lead.opportunities] : [];
   const opportunity = [...opportunities].sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0] ?? null;
-  const contactName = displayPersonName(contact?.full_name);
+  const contactName = displayPersonName(contact?.full_name, conversation.phone_e164);
   const companyName = company?.name ?? displayCompanyName({ companyName: company?.name });
   const [tasksTimed, historyTimed] = await Promise.all([
     timeInboxOperation("lead_tasks", crm.from("tasks").select("id, title, due_at, done, assignee_id, task_kind")

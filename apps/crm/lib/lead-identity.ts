@@ -48,10 +48,17 @@ export function categoryLabel(category: string | null | undefined): string | nul
   return CATEGORY_LABEL_PT[c];
 }
 
-/** Nome para exibição: trim do contato ou texto neutro (telefone não entra aqui). */
-export function displayPersonName(fullName: string | null | undefined): string {
+/** Nome para exibição: trim do contato; sem nome, telefone formatado (se informado). */
+export function displayPersonName(
+  fullName: string | null | undefined,
+  phoneFallback?: string | null,
+): string {
   const t = (fullName ?? "").trim();
-  return t.length > 0 ? t : LEAD_NO_NAME_LABEL;
+  if (t.length > 0) return t;
+  const phone =
+    formatBrazilPhoneForDisplay(phoneFallback) ?? (phoneFallback ?? "").trim();
+  if (phone.length > 0) return phone;
+  return LEAD_NO_NAME_LABEL;
 }
 
 /** Nome da empresa: usa somente `companies.name` informado no cadastro. */
