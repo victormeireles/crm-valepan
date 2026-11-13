@@ -704,6 +704,8 @@ export interface Database {
           event_kind: string | null;
           event_status: string | null;
           last_inbound_sent_at: string | null;
+          owner_id: string | null;
+          owner_name: string | null;
           tab_total: number;
           novos_count: number;
           leads_count: number;

@@ -152,7 +152,7 @@ export default async function InboxPage({
       ? {
           id: row.lead_id,
           status: "open",
-          owner_id: null,
+          owner_id: row.owner_id,
           client_category: row.client_category,
           weekly_bread_consumption: row.weekly_bread_consumption,
           bread_weight_grams: row.bread_weight_grams,
@@ -164,6 +164,17 @@ export default async function InboxPage({
         }
       : null,
   }));
+  const ownerByConversationId = new Map(
+    compactRows
+      .filter((row) => row.conversation_id && row.owner_id)
+      .map((row) => [
+        row.conversation_id!,
+        {
+          ownerId: row.owner_id!,
+          ownerName: row.owner_name?.trim() || null,
+        },
+      ]),
+  );
   const conversationsError = snapshotResult.error;
   const tabCounts = {
     leads: Number(snapshotMeta?.leads_count ?? 0),
@@ -348,6 +359,7 @@ export default async function InboxPage({
         | {
             id: string;
             status: string;
+            owner_id?: string | null;
             excluded_from_pipeline_at?: string | null;
             excluded_reason?: string | null;
             client_category?: string | null;
@@ -366,6 +378,7 @@ export default async function InboxPage({
         | {
             id: string;
             status: string;
+            owner_id?: string | null;
             excluded_from_pipeline_at?: string | null;
             excluded_reason?: string | null;
             client_category?: string | null;
@@ -452,6 +465,8 @@ export default async function InboxPage({
           tail.event_status === "missed_video")
           ? tail.event_status
           : null,
+      ownerId: ownerByConversationId.get(c.id)?.ownerId ?? null,
+      ownerName: ownerByConversationId.get(c.id)?.ownerName ?? null,
     };
   });
 

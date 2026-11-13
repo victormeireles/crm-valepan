@@ -3,6 +3,7 @@
 import {
   markConversationUnread,
   refreshInboxSidebar,
+  refreshInboxSidebarConversation,
   updateConversationContactName,
 } from "@/app/actions/inbox";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -12,6 +13,11 @@ import { PaginationNav } from "@/components/pagination-nav";
 import { isInboxSearchQuery, isPhoneSearchQuery } from "@/lib/phone-search-query";
 import { formatAbsoluteShort, formatElapsedShort } from "@/lib/format-relative";
 import { INBOX_SELECT_CONVERSATION_EVENT } from "./inbox-conversation-pane";
+import {
+  INBOX_SIDEBAR_CHANGED_EVENT,
+  INBOX_SIDEBAR_ROW_CHANGED_EVENT,
+  type InboxSidebarRowChangedDetail,
+} from "./inbox-live-refresh";
 import {
   formatUnreadBadge,
   inboxClientHref,
@@ -29,6 +35,45 @@ import {
   type InboxUnreadCounts,
 } from "./inbox-location";
 import { recordInboxBrowserMetric } from "@/lib/inbox-browser-performance";
+import { ownerChipColor, ownerInitial } from "@/lib/owner-chip";
+
+function sidebarPreview(body: string | null | undefined): string {
+  const text = (body ?? "").trim().replace(/\s+/g, " ");
+  if (!text) return "Sem mensagem ainda";
+  return text.length > 80 ? `${text.slice(0, 79)}…` : text;
+}
+
+function callStatusFromEvent(
+  kind: string | null | undefined,
+  status: string | null | undefined,
+): InboxSidebarRow["callStatus"] {
+  if (kind !== "whatsapp_call") return null;
+  if (status === "ringing" || status === "missed_voice" || status === "missed_video") return status;
+  return null;
+}
+
+function isUnreadFromTimestamps(
+  lastInboundSentAt: string | null | undefined,
+  lastReadAt: string | null | undefined,
+): boolean {
+  if (!lastInboundSentAt) return false;
+  if (!lastReadAt?.trim()) return true;
+  return lastInboundSentAt > lastReadAt;
+}
+
+function bumpUnreadCount(
+  counts: InboxUnreadCounts,
+  tab: InboxTab,
+  delta: number,
+): InboxUnreadCounts {
+  if (!delta) return counts;
+  return { ...counts, [tab]: Math.max(0, counts[tab] + delta) };
+}
+
+function moveConversationToFront(rows: InboxSidebarRow[], next: InboxSidebarRow): InboxSidebarRow[] {
+  const without = rows.filter((row) => row.id !== next.id);
+  return [next, ...without].slice(0, PAGE_SIZE);
+}
 
 export type InboxSidebarRow = {
   id: string;
@@ -49,7 +94,31 @@ export type InboxSidebarRow = {
   lastDirection: string | null;
   unread: boolean;
   callStatus: "ringing" | "missed_voice" | "missed_video" | null;
+  ownerId: string | null;
+  ownerName: string | null;
 };
+
+function OwnerInitialChip({
+  ownerId,
+  ownerName,
+}: {
+  ownerId: string;
+  ownerName: string | null;
+}) {
+  const color = ownerChipColor(ownerId);
+  const label = (ownerName ?? "").trim() || "Responsável";
+  return (
+    <span
+      className="grid size-4 shrink-0 place-items-center rounded-full text-[9px] font-extrabold leading-none"
+      style={{ backgroundColor: color.bg, color: color.fg }}
+      title={`Responsável: ${label}`}
+      aria-label={`Responsável: ${label}`}
+      role="img"
+    >
+      {ownerInitial(ownerName)}
+    </span>
+  );
+}
 
 const PAGE_SIZE = 20;
 
@@ -234,7 +303,8 @@ export function InboxSidebar({
       ? (isInboxSearchQuery(qRef.current) ? qRef.current.trim() : null)
       : query?.trim() || null;
     const unreadFilter = unread === undefined ? liveUnreadOnlyRef.current : unread;
-    setListPending(true);
+    // Silent = reconcile/realtime: mantém a lista visível (sem skeleton/toast).
+    if (mode !== "silent") setListPending(true);
     setLiveTab(tab);
     setLivePage(nextPage);
     setLiveUnreadOnly(unreadFilter);
@@ -252,7 +322,7 @@ export function InboxSidebar({
     void refreshInboxSidebar({ tab, page: nextPage, query: activeQuery, unread: unreadFilter }).then((result) => {
       if (version !== requestVersion.current) return;
       applySidebarResult(tab, nextPage, result, startedAt, unreadFilter, mode);
-      setListPending(false);
+      if (mode !== "silent") setListPending(false);
       setSearchPending(false);
       if (!result.ok) {
         setSearchError("Não foi possível atualizar a lista. Tente novamente.");
@@ -262,7 +332,7 @@ export function InboxSidebar({
     }).catch(() => {
       if (version !== requestVersion.current) return;
       recordInboxBrowserMetric("sidebar_refresh", startedAt, { success: false, rows: 0 });
-      setListPending(false);
+      if (mode !== "silent") setListPending(false);
       setSearchPending(false);
       setSearchError("Não foi possível atualizar a lista. Tente novamente.");
     });
@@ -298,10 +368,127 @@ export function InboxSidebar({
   }, [conversations, tabCounts, unreadCounts, unreadOnly, tabTotal, activeTab, page]);
 
   useEffect(() => {
-    const refresh = () => loadList(liveTab, livePage, "silent");
-    window.addEventListener("crm:inbox-sidebar-changed", refresh);
-    return () => window.removeEventListener("crm:inbox-sidebar-changed", refresh);
-  }, [liveTab, livePage, loadList]);
+    const refresh = () => loadList(liveTabRef.current, livePageRef.current, "silent");
+    window.addEventListener(INBOX_SIDEBAR_CHANGED_EVENT, refresh);
+    return () => window.removeEventListener(INBOX_SIDEBAR_CHANGED_EVENT, refresh);
+  }, [loadList]);
+
+  useEffect(() => {
+    const inflight = new Set<string>();
+
+    const applyFetchedRow = (
+      conversation: InboxSidebarRow,
+      railTab: InboxTab,
+      wasUnread: boolean,
+    ) => {
+      const nowUnread = conversation.unread && !readIdsRef.current.has(conversation.id);
+      const unreadDelta = Number(nowUnread) - Number(wasUnread);
+      if (unreadDelta) {
+        setLiveUnreadCounts((counts) => bumpUnreadCount(counts, railTab, unreadDelta));
+      }
+
+      const tab = liveTabRef.current;
+      const unreadOnly = liveUnreadOnlyRef.current;
+      const searching = isInboxSearchQuery(qRef.current);
+      const belongsToTab = tab === "all"
+        || (tab === "groups" && conversation.kind === "group")
+        || (tab !== "groups" && conversation.kind === "lead" && railTab === tab);
+
+      if (searching) return;
+      if (unreadOnly && !nowUnread && !readIdsRef.current.has(conversation.id)) return;
+      if (!belongsToTab) return;
+      // Página > 1: só badge (já atualizado acima).
+      if (livePageRef.current > 1) return;
+
+      setLiveConversations((rows) => {
+        const exists = rows.some((row) => row.id === conversation.id);
+        const next = moveConversationToFront(rows, conversation);
+        if (!exists && (unreadOnly || nowUnread)) {
+          setLiveTabTotal((total) => total + 1);
+        }
+        return next;
+      });
+      if (nowUnread) {
+        setReadIds((previous) => {
+          if (!previous.has(conversation.id)) return previous;
+          const next = new Set(previous);
+          next.delete(conversation.id);
+          return next;
+        });
+      }
+    };
+
+    const onRowChanged = (event: Event) => {
+      const detail = (event as CustomEvent<InboxSidebarRowChangedDetail>).detail;
+      if (!detail?.conversationId) return;
+
+      const existing = liveConversationsRef.current.find((row) => row.id === detail.conversationId);
+      if (existing) {
+        const wasUnread = existing.unread && !readIdsRef.current.has(existing.id);
+        const nextUnread = isUnreadFromTimestamps(detail.lastInboundSentAt, detail.lastReadAt);
+        const patched: InboxSidebarRow = {
+          ...existing,
+          preview: sidebarPreview(detail.lastBodyPreview),
+          lastAt: detail.lastMessageAt ?? existing.lastAt,
+          lastDirection: detail.lastDirection,
+          awaiting: detail.lastDirection === "in",
+          unread: nextUnread,
+          callStatus: callStatusFromEvent(detail.lastEventKind, detail.lastEventStatus),
+        };
+
+        const unreadOnly = liveUnreadOnlyRef.current;
+        if (unreadOnly && !nextUnread && !readIdsRef.current.has(existing.id)) {
+          // Someu do filtro no servidor; sticky só se o usuário leu nesta sessão.
+          setLiveConversations((rows) => rows.filter((row) => row.id !== existing.id));
+          setLiveTabTotal((total) => Math.max(0, total - 1));
+        } else {
+          setLiveConversations((rows) => moveConversationToFront(rows, patched));
+        }
+
+        if (nextUnread !== wasUnread && isInboxTab(liveTabRef.current)) {
+          // Ajuste otimista no badge da aba atual; reconcile corrige depois.
+          setLiveUnreadCounts((counts) =>
+            bumpUnreadCount(counts, liveTabRef.current as InboxTab, nextUnread ? 1 : -1),
+          );
+        } else if (nextUnread !== wasUnread) {
+          // Aba "all": bump em leads por padrão até o reconcile.
+          setLiveUnreadCounts((counts) => bumpUnreadCount(counts, "leads", nextUnread ? 1 : -1));
+        }
+
+        if (nextUnread) {
+          setReadIds((previous) => {
+            if (!previous.has(existing.id)) return previous;
+            const next = new Set(previous);
+            next.delete(existing.id);
+            return next;
+          });
+        }
+        return;
+      }
+
+      // Fora da lista: só busca 1 linha se puder aparecer na página atual.
+      if (inflight.has(detail.conversationId)) return;
+      if (isInboxSearchQuery(qRef.current)) return;
+      const becomesUnread = isUnreadFromTimestamps(detail.lastInboundSentAt, detail.lastReadAt);
+      const onFirstPage = livePageRef.current === 1;
+      const wantUnreadInsert = liveUnreadOnlyRef.current && becomesUnread;
+      if (!onFirstPage && !wantUnreadInsert) return;
+      if (liveUnreadOnlyRef.current && !becomesUnread) return;
+
+      inflight.add(detail.conversationId);
+      void refreshInboxSidebarConversation(detail.conversationId)
+        .then((result) => {
+          if (!result.ok) return;
+          applyFetchedRow(result.conversation, result.railTab, false);
+        })
+        .finally(() => {
+          inflight.delete(detail.conversationId);
+        });
+    };
+
+    window.addEventListener(INBOX_SIDEBAR_ROW_CHANGED_EVENT, onRowChanged);
+    return () => window.removeEventListener(INBOX_SIDEBAR_ROW_CHANGED_EVENT, onRowChanged);
+  }, []);
 
   useEffect(() => {
     const onPopState = () => {
@@ -579,10 +766,13 @@ export function InboxSidebar({
                           allowRefresh={false}
                         />
                         <div className="min-w-0 flex-1">
-                          <div className="flex items-baseline gap-2">
-                            <span className={`truncate text-sm text-[var(--vp-ink-body)] ${showUnread ? "font-extrabold" : "font-bold"}`}>
+                          <div className="flex items-center gap-2">
+                            <span className={`min-w-0 truncate text-sm text-[var(--vp-ink-body)] ${showUnread ? "font-extrabold" : "font-bold"}`}>
                               {c.identityName}
                             </span>
+                            {c.ownerId ? (
+                              <OwnerInitialChip ownerId={c.ownerId} ownerName={c.ownerName} />
+                            ) : null}
                             <ConversationElapsed lastAt={c.lastAt} awaiting={c.awaiting} nowMs={nowMs} />
                           </div>
                           <div className="flex items-center gap-2">
@@ -720,7 +910,6 @@ export function InboxSidebar({
               ...(liveUnreadOnly ? { unread: "1" } : {}),
               ...(searchActive ? { q: q.trim() } : {}),
             }}
-            showBoundaryLinks
             onNavigate={(href) => {
               const nextPage = Number.parseInt(new URL(href, "http://local.invalid").searchParams.get("page") ?? "1", 10) || 1;
               loadList(liveTab, nextPage);
@@ -728,11 +917,6 @@ export function InboxSidebar({
           />
         </div>
       </div>
-      {searchPending || listPending ? (
-        <div className="pointer-events-none absolute bottom-2 left-1/2 z-20 -translate-x-1/2 rounded-full bg-[var(--vp-wine)] px-3 py-1 text-[10px] font-medium text-[var(--vp-gold)] shadow-[var(--sh-md)]">
-          {searchPending ? "Buscando…" : "Atualizando lista…"}
-        </div>
-      ) : null}
     </div>
   );
 }

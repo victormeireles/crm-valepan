@@ -12,6 +12,7 @@ import { fetchDistributorCatalog } from "@/lib/distributor-catalog";
 import { isLeadExcludedFromPipeline } from "@/lib/lead-pipeline-exclusion";
 import type {
   InboxSearchScope,
+  InboxTab,
   InboxTabCounts,
   InboxUnreadCounts,
 } from "@/app/(dashboard)/inbox/inbox-location";
@@ -120,6 +121,8 @@ export type InboxSidebarRefreshRow = {
   lastDirection: string | null;
   unread: boolean;
   callStatus: "ringing" | "missed_voice" | "missed_video" | null;
+  ownerId: string | null;
+  ownerName: string | null;
 };
 type InboxSidebarSnapshotRow = Database["crm"]["Functions"]["inbox_sidebar_snapshot"]["Returns"][number];
 
@@ -127,6 +130,72 @@ function inboxPreview(body: string | null) {
   const text = (body ?? "").trim().replace(/\s+/g, " ");
   if (!text) return "Sem mensagem ainda";
   return text.length > 80 ? `${text.slice(0, 79)}…` : text;
+}
+
+function mapSidebarSnapshotRow(
+  row: InboxSidebarSnapshotRow,
+  stageNames: Map<string, string>,
+): InboxSidebarRefreshRow | null {
+  if (!row.conversation_id || !row.phone_e164 || !row.conversation_kind || !row.created_at || !row.updated_at) {
+    return null;
+  }
+  const group = row.conversation_kind === "group";
+  const identityName = group
+    ? row.group_display_name?.trim() || row.phone_e164
+    : row.lead_id ? displayPersonName(row.contact_name, row.phone_e164) : "Sem lead";
+  const companyName = group || !row.lead_id ? null : displayCompanyName({
+    companyName: row.company_name,
+  });
+  const lastAt = row.last_sent_at ?? row.last_message_at ?? row.updated_at;
+  const lastDirection = row.last_direction;
+  const callStatus = row.event_kind === "whatsapp_call" &&
+    (row.event_status === "ringing" || row.event_status === "missed_voice" || row.event_status === "missed_video")
+    ? row.event_status
+    : null;
+  return {
+    id: row.conversation_id,
+    kind: group ? "group" : "lead",
+    displayName: row.contact_name?.trim() || row.phone_e164,
+    phone_e164: row.phone_e164,
+    avatarUrl: validInboxAvatarUrl(row.avatar_url),
+    preview: inboxPreview(row.last_body_preview),
+    lastAt,
+    leadLine: group
+      ? "Conversa em grupo"
+      : row.lead_id
+        ? "Conversa"
+        : "Sem lead",
+    awaiting: lastDirection === "in",
+    identityName,
+    companyName,
+    clientCategory: row.client_category,
+    stageName: row.excluded_from_pipeline_at
+      ? "Cliente"
+      : row.stage_id
+        ? stageNames.get(row.stage_id) ?? null
+        : null,
+    weeklyBreadCount: getWeeklyBreadCount(row.weekly_bread_consumption),
+    lastDirection,
+    unread: Boolean(row.last_inbound_sent_at && (!row.last_read_at || row.last_inbound_sent_at > row.last_read_at)),
+    callStatus,
+    ownerId: row.owner_id ?? null,
+    ownerName: row.owner_name?.trim() || null,
+  };
+}
+
+function sidebarRailTabFromFlags(input: {
+  kind: "lead" | "group";
+  stageKey: string | null;
+  excludedFromPipeline: boolean;
+  classification: string | null;
+}): InboxTab {
+  if (input.kind === "group") return "groups";
+  const isClient = input.excludedFromPipeline
+    || input.stageKey === "CONVERTIDO"
+    || (!input.stageKey && ["CLIENTE", "JÁ É CLIENTE"].includes((input.classification ?? "").trim().toUpperCase()));
+  if (isClient) return "clientes";
+  if (input.stageKey === "PERDIDO") return "perdidos";
+  return "leads";
 }
 
 export async function refreshInboxSidebar(input: {
@@ -173,49 +242,8 @@ export async function refreshInboxSidebar(input: {
     (stagesResult.data ?? []).map((stage) => [stage.id, displayPipelineStageName(stage.name) || stage.name]),
   );
   const conversations: InboxSidebarRefreshRow[] = rows
-    .filter((row) => row.conversation_id && row.phone_e164 && row.conversation_kind && row.created_at && row.updated_at)
-    .map((row) => {
-      const group = row.conversation_kind === "group";
-      const identityName = group
-        ? row.group_display_name?.trim() || row.phone_e164!
-        : row.lead_id ? displayPersonName(row.contact_name, row.phone_e164) : "Sem lead";
-      const companyName = group || !row.lead_id ? null : displayCompanyName({
-        companyName: row.company_name,
-      });
-      const lastAt = row.last_sent_at ?? row.last_message_at ?? row.updated_at!;
-      const lastDirection = row.last_direction;
-      const callStatus = row.event_kind === "whatsapp_call" &&
-        (row.event_status === "ringing" || row.event_status === "missed_voice" || row.event_status === "missed_video")
-        ? row.event_status
-        : null;
-      return {
-        id: row.conversation_id!,
-        kind: group ? "group" : "lead",
-        displayName: row.contact_name?.trim() || row.phone_e164!,
-        phone_e164: row.phone_e164!,
-        avatarUrl: validInboxAvatarUrl(row.avatar_url),
-        preview: inboxPreview(row.last_body_preview),
-        lastAt,
-        leadLine: group
-          ? "Conversa em grupo"
-          : row.lead_id
-            ? "Conversa"
-            : "Sem lead",
-        awaiting: lastDirection === "in",
-        identityName,
-        companyName,
-        clientCategory: row.client_category,
-        stageName: row.excluded_from_pipeline_at
-          ? "Cliente"
-          : row.stage_id
-            ? stageNames.get(row.stage_id) ?? null
-            : null,
-        weeklyBreadCount: getWeeklyBreadCount(row.weekly_bread_consumption),
-        lastDirection,
-        unread: Boolean(row.last_inbound_sent_at && (!row.last_read_at || row.last_inbound_sent_at > row.last_read_at)),
-        callStatus,
-      };
-    });
+    .map((row) => mapSidebarSnapshotRow(row, stageNames))
+    .filter((row): row is InboxSidebarRefreshRow => Boolean(row));
   return {
     ok: true as const,
     conversations,
@@ -233,6 +261,148 @@ export async function refreshInboxSidebar(input: {
     } satisfies InboxUnreadCounts,
     tabTotal: Number(meta?.tab_total ?? 0),
   };
+}
+
+/** Busca uma única conversa no formato da sidebar (upsert incremental). */
+export async function refreshInboxSidebarConversation(conversationId: string) {
+  const id = conversationId.trim();
+  if (!id) return { ok: false as const, error: "ID inválido" };
+
+  const startedAt = performance.now();
+  const supabase = await createServerSupabaseClient();
+  const authTimed = await timeInboxOperation("auth_user", supabase.auth.getUser());
+  const { data: { user } } = authTimed.value;
+  if (!user) {
+    logInboxPerformance("sidebar_row", performance.now() - startedAt, [authTimed], { rows: 0, hasError: true });
+    return { ok: false as const, error: "Não autenticado" };
+  }
+
+  const crm = crmTables(supabase);
+  const [conversationTimed, stagesTimed] = await Promise.all([
+    timeInboxOperation(
+      "sidebar_row_select",
+      crm.from("conversations").select(`
+        id, phone_e164, conversation_kind, group_display_name, classification,
+        last_message_at, created_at, updated_at, last_read_at,
+        last_direction, last_body_preview, last_event_kind, last_event_status, last_inbound_sent_at,
+        leads(
+          id, client_category, excluded_from_pipeline_at, weekly_bread_consumption, owner_id,
+          contacts(full_name, avatar_url),
+          companies(name),
+          opportunities(stage_id, updated_at)
+        )
+      `).eq("id", id).maybeSingle(),
+    ),
+    timeInboxOperation("pipeline_stages", crm.from("pipeline_stages").select("id, name")),
+  ]);
+
+  const conversationResult = conversationTimed.value;
+  const stagesResult = stagesTimed.value;
+  const operations: Array<{ operation: string; durationMs: number }> = [
+    authTimed,
+    conversationTimed,
+    stagesTimed,
+  ];
+
+  if (conversationResult.error) {
+    logInboxPerformance("sidebar_row", performance.now() - startedAt, operations, { rows: 0, hasError: true });
+    return { ok: false as const, error: conversationResult.error.message };
+  }
+  const raw = conversationResult.data;
+  if (!raw?.phone_e164 || !raw.conversation_kind || !raw.created_at || !raw.updated_at) {
+    logInboxPerformance("sidebar_row", performance.now() - startedAt, operations, { rows: 0, hasError: true });
+    return { ok: false as const, error: "Conversa não encontrada" };
+  }
+
+  const lead = nestOne(raw.leads as Parameters<typeof nestOne>[0]);
+  const leadRow = lead as {
+    id?: string;
+    client_category?: string | null;
+    excluded_from_pipeline_at?: string | null;
+    weekly_bread_consumption?: number | null;
+    owner_id?: string | null;
+    contacts?: { full_name?: string | null; avatar_url?: string | null } | { full_name?: string | null; avatar_url?: string | null }[] | null;
+    companies?: { name?: string | null } | { name?: string | null }[] | null;
+    opportunities?: { stage_id: string; updated_at?: string | null } | { stage_id: string; updated_at?: string | null }[] | null;
+  } | null;
+
+  const contact = nestOne(leadRow?.contacts ?? null);
+  const company = nestOne(leadRow?.companies ?? null);
+  const opportunities = Array.isArray(leadRow?.opportunities)
+    ? leadRow.opportunities
+    : leadRow?.opportunities
+      ? [leadRow.opportunities]
+      : [];
+  const opportunity = [...opportunities].sort((a, b) =>
+    String(b.updated_at ?? "").localeCompare(String(a.updated_at ?? "")),
+  )[0] ?? null;
+
+  const stageById = new Map((stagesResult.data ?? []).map((stage) => [stage.id, stage.name]));
+  const stageNameRaw = opportunity?.stage_id ? stageById.get(opportunity.stage_id) ?? null : null;
+  const stageKey = stageNameRaw ? canonicalPipelineStageKey(stageNameRaw) : null;
+
+  let ownerName: string | null = null;
+  const ownerId = leadRow?.owner_id ?? null;
+  if (ownerId) {
+    const ownerTimed = await timeInboxOperation(
+      "sidebar_row_owner",
+      crm.from("profiles").select("full_name").eq("id", ownerId).maybeSingle(),
+    );
+    operations.push(ownerTimed);
+    ownerName = ownerTimed.value.data?.full_name?.trim() || null;
+  }
+
+  const group = raw.conversation_kind === "group";
+  const phone = raw.phone_e164;
+  const contactName = contact?.full_name?.trim() || null;
+  const identityName = group
+    ? raw.group_display_name?.trim() || phone
+    : leadRow?.id ? displayPersonName(contactName, phone) : "Sem lead";
+  const lastAt = raw.last_message_at ?? raw.updated_at;
+  const lastDirection = raw.last_direction;
+  const callStatus = raw.last_event_kind === "whatsapp_call" &&
+    (raw.last_event_status === "ringing" || raw.last_event_status === "missed_voice" || raw.last_event_status === "missed_video")
+    ? raw.last_event_status
+    : null;
+  const unread = Boolean(
+    raw.last_inbound_sent_at && (!raw.last_read_at || raw.last_inbound_sent_at > raw.last_read_at),
+  );
+
+  const conversation: InboxSidebarRefreshRow = {
+    id: raw.id,
+    kind: group ? "group" : "lead",
+    displayName: contactName || phone,
+    phone_e164: phone,
+    avatarUrl: validInboxAvatarUrl(contact?.avatar_url),
+    preview: inboxPreview(raw.last_body_preview),
+    lastAt,
+    leadLine: group ? "Conversa em grupo" : leadRow?.id ? "Conversa" : "Sem lead",
+    awaiting: lastDirection === "in",
+    identityName,
+    companyName: group || !leadRow?.id ? null : displayCompanyName({ companyName: company?.name }),
+    clientCategory: leadRow?.client_category ?? null,
+    stageName: leadRow?.excluded_from_pipeline_at
+      ? "Cliente"
+      : stageNameRaw
+        ? displayPipelineStageName(stageNameRaw) || stageNameRaw
+        : null,
+    weeklyBreadCount: getWeeklyBreadCount(leadRow?.weekly_bread_consumption),
+    lastDirection,
+    unread,
+    callStatus,
+    ownerId,
+    ownerName,
+  };
+
+  const railTab = sidebarRailTabFromFlags({
+    kind: conversation.kind,
+    stageKey,
+    excludedFromPipeline: Boolean(leadRow?.excluded_from_pipeline_at),
+    classification: raw.classification,
+  });
+
+  logInboxPerformance("sidebar_row", performance.now() - startedAt, operations, { rows: 1, hasError: false });
+  return { ok: true as const, conversation, railTab, unread };
 }
 
 const INBOX_TEAM_ROLE_LABEL: Record<string, string> = {
