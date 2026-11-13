@@ -45,6 +45,26 @@ export function sumInboxTabCounts(counts: InboxTabCounts): number {
   return counts.leads + counts.groups + counts.clientes + counts.perdidos;
 }
 
+export function resolveInboxTabTotal(input: {
+  unreadActive: boolean;
+  tab: InboxSearchScope;
+  tabTotal: number;
+  tabCounts: InboxTabCounts;
+}): number {
+  if (input.unreadActive || input.tabTotal > 0) return input.tabTotal;
+  return input.tab === "all"
+    ? sumInboxTabCounts(input.tabCounts)
+    : input.tabCounts[input.tab];
+}
+
+export function removeReadConversation<T extends { id: string }>(
+  rows: T[],
+  conversationId: string,
+  unreadActive: boolean,
+): T[] {
+  return unreadActive ? rows.filter((row) => row.id !== conversationId) : rows;
+}
+
 export function inboxShareHref(input: {
   tab: InboxSearchScope;
   page: number;

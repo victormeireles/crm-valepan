@@ -19,7 +19,9 @@ import {
   isInboxTab,
   pushInboxClientUrl,
   readInboxLocation,
+  removeReadConversation,
   replaceInboxClientUrl,
+  resolveInboxTabTotal,
   sumInboxTabCounts,
   type InboxSearchScope,
   type InboxTab,
@@ -178,6 +180,7 @@ export function InboxSidebar({
     nextPage: number,
     result: Awaited<ReturnType<typeof refreshInboxSidebar>>,
     startedAt: number,
+    unreadActive: boolean,
   ) => {
     recordInboxBrowserMetric("sidebar_refresh", startedAt, {
       success: result.ok,
@@ -188,13 +191,12 @@ export function InboxSidebar({
     setLivePage(nextPage);
     setLiveConversations(result.conversations);
     setLiveUnreadCounts(result.unreadCounts);
-    setLiveTabTotal(
-      result.tabTotal > 0
-        ? result.tabTotal
-        : tab === "all"
-          ? sumInboxTabCounts(result.tabCounts)
-          : result.tabCounts[tab],
-    );
+    setLiveTabTotal(resolveInboxTabTotal({
+      unreadActive,
+      tab,
+      tabTotal: result.tabTotal,
+      tabCounts: result.tabCounts,
+    }));
   }, []);
 
   const loadList = useCallback((
@@ -227,7 +229,7 @@ export function InboxSidebar({
     }
     void refreshInboxSidebar({ tab, page: nextPage, query: activeQuery, unread: unreadFilter }).then((result) => {
       if (version !== requestVersion.current) return;
-      applySidebarResult(tab, nextPage, result, startedAt);
+      applySidebarResult(tab, nextPage, result, startedAt, unreadFilter);
       setListPending(false);
       setSearchPending(false);
       if (!result.ok) {
@@ -345,6 +347,10 @@ export function InboxSidebar({
       if (wasUnread && isInboxTab(tab)) {
         setLiveUnreadCounts((counts) => ({ ...counts, [tab]: Math.max(0, counts[tab] - 1) }));
       }
+      if (wasUnread && liveUnreadOnlyRef.current) {
+        setLiveConversations((rows) => removeReadConversation(rows, conversationId, true));
+        setLiveTabTotal((total) => Math.max(0, total - 1));
+      }
     };
     window.addEventListener("crm:conversation-read", onRead);
     return () => window.removeEventListener("crm:conversation-read", onRead);
@@ -352,6 +358,7 @@ export function InboxSidebar({
 
   const markUnread = useCallback(async (c: InboxSidebarRow) => {
     const wasUnread = c.unread && !readIdsRef.current.has(c.id);
+    const tab = liveTabRef.current;
     setSavingId(c.id);
     setErrorById((prev) => ({ ...prev, [c.id]: null }));
     const res = await markConversationUnread(c.id);
@@ -369,7 +376,6 @@ export function InboxSidebar({
     setLiveConversations((rows) => rows.map((r) => (r.id === c.id ? { ...r, unread: true } : r)));
     setOpenMenuId(null);
     if (wasUnread) return;
-    const tab = liveTabRef.current;
     if (isInboxTab(tab)) {
       setLiveUnreadCounts((counts) => ({ ...counts, [tab]: counts[tab] + 1 }));
     } else {
