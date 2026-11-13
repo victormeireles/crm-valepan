@@ -1,23 +1,30 @@
-export type InboxTab = "novos" | "leads" | "groups" | "clientes" | "perdidos";
+export type InboxTab = "leads" | "groups" | "clientes" | "perdidos";
 
 /** Escopo da lista: abas fixas + "all" só no modo busca. */
 export type InboxSearchScope = InboxTab | "all";
 
 export type InboxTabCounts = Record<InboxTab, number>;
+export type InboxUnreadCounts = Record<InboxTab, number>;
 
 export function inboxTabFromParam(value: string | null | undefined): InboxTab {
-  if (
-    value === "novos" ||
-    value === "leads" ||
-    value === "groups" ||
-    value === "clientes" ||
-    value === "perdidos"
-  ) {
+  if (value === "groups" || value === "clientes" || value === "perdidos" || value === "leads") {
     return value;
   }
-  if (value === "archived") return "clientes";
-  if (value === "pipeline") return "leads";
-  return "novos";
+  if (value === "novos" || value === "pipeline" || value === "archived") {
+    if (value === "archived") return "clientes";
+    return "leads";
+  }
+  return "leads";
+}
+
+export function inboxUnreadFromParam(value: string | null | undefined): boolean {
+  return value === "1" || value === "true";
+}
+
+export function formatUnreadBadge(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) return "";
+  if (n >= 100) return "99+";
+  return String(Math.floor(n));
 }
 
 export function inboxSearchScopeFromParam(value: string | null | undefined): InboxSearchScope {
@@ -27,7 +34,6 @@ export function inboxSearchScopeFromParam(value: string | null | undefined): Inb
 
 export function isInboxTab(value: string | null | undefined): value is InboxTab {
   return (
-    value === "novos" ||
     value === "leads" ||
     value === "groups" ||
     value === "clientes" ||
@@ -36,7 +42,7 @@ export function isInboxTab(value: string | null | undefined): value is InboxTab 
 }
 
 export function sumInboxTabCounts(counts: InboxTabCounts): number {
-  return counts.novos + counts.leads + counts.groups + counts.clientes + counts.perdidos;
+  return counts.leads + counts.groups + counts.clientes + counts.perdidos;
 }
 
 export function inboxShareHref(input: {
@@ -45,12 +51,14 @@ export function inboxShareHref(input: {
   cid?: string | null;
   lookup?: boolean;
   q?: string | null;
+  unread?: boolean;
 }) {
   const params = new URLSearchParams({ tab: input.tab });
   if (input.page > 1) params.set("page", String(input.page));
   if (input.cid) params.set("cid", input.cid);
   if (input.lookup) params.set("lookup", "1");
   if (input.q?.trim()) params.set("q", input.q.trim());
+  if (input.unread) params.set("unread", "1");
   return `/inbox?${params.toString()}`;
 }
 
@@ -59,11 +67,13 @@ export function inboxClientHref(input: {
   tab: InboxSearchScope;
   page: number;
   cid?: string | null;
+  unread?: boolean;
 }) {
   const url = new URL(window.location.href);
   const hash = new URLSearchParams({ tab: input.tab });
   if (input.page > 1) hash.set("page", String(input.page));
   if (input.cid) hash.set("cid", input.cid);
+  if (input.unread) hash.set("unread", "1");
   return `${url.pathname}${url.search}#${hash.toString()}`;
 }
 
@@ -90,5 +100,6 @@ export function readInboxLocation(href = window.location.href) {
     tab: inboxSearchScopeFromParam(hash.get("tab") ?? url.searchParams.get("tab")),
     page: Math.max(1, Number.parseInt(hash.get("page") ?? url.searchParams.get("page") ?? "1", 10) || 1),
     cid: hash.get("cid") ?? url.searchParams.get("cid"),
+    unread: inboxUnreadFromParam(hash.get("unread") ?? url.searchParams.get("unread")),
   };
 }
