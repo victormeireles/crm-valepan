@@ -11,7 +11,7 @@ import { templateFirstName } from "@/lib/inbox/quick-replies";
 import { InboxLiveRefresh } from "./inbox-live-refresh";
 import { InboxSidebar, type InboxSidebarRow } from "./inbox-sidebar";
 import { InboxConversationPane } from "./inbox-conversation-pane";
-import { inboxSearchScopeFromParam, inboxTabFromParam, type InboxSearchScope } from "./inbox-location";
+import { inboxSearchScopeFromParam, inboxTabFromParam, inboxUnreadFromParam, type InboxSearchScope } from "./inbox-location";
 import type { InboxConversationView } from "@/app/actions/inbox";
 import { isLeadExcludedFromPipeline } from "@/lib/lead-pipeline-exclusion";
 import { displayPipelineStageName, selectCanonicalPipelineStages } from "@/lib/pipeline-canonical-stages";
@@ -71,7 +71,7 @@ function validAvatarUrl(v: string | null | undefined): string | null {
 export default async function InboxPage({
   searchParams,
 }: {
-  searchParams: Promise<{ cid?: string; tab?: string; page?: string; q?: string; lookup?: string }>;
+  searchParams: Promise<{ cid?: string; tab?: string; page?: string; q?: string; lookup?: string; unread?: string }>;
 }) {
   const pageStartedAt = performance.now();
   const performanceOperations: InboxPerformanceOperation[] = [];
@@ -87,6 +87,7 @@ export default async function InboxPage({
   const hasInboxSearch = isInboxSearchQuery(inboxQuery);
   const requestedPage = params.page ? Number.parseInt(params.page, 10) : 1;
   const page = Number.isFinite(requestedPage) && requestedPage > 0 ? requestedPage : 1;
+  const unreadOnly = inboxUnreadFromParam(params.unread);
   const activeTab: InboxSearchScope = hasInboxSearch
     ? (tab ? inboxSearchScopeFromParam(tab) : "all")
     : inboxTabFromParam(tab);
@@ -110,6 +111,7 @@ export default async function InboxPage({
     p_offset: (page - 1) * PAGE_SIZE,
     p_limit: PAGE_SIZE,
     p_query: hasInboxSearch ? inboxQuery : null,
+    p_unread: unreadOnly,
   }));
   const substagesPromise = timed("pipeline_substages", crm
     .from("lost_reasons")
@@ -168,6 +170,12 @@ export default async function InboxPage({
     groups: Number(snapshotMeta?.groups_count ?? 0),
     clientes: Number(snapshotMeta?.clientes_count ?? 0),
     perdidos: Number(snapshotMeta?.perdidos_count ?? 0),
+  };
+  const unreadCounts = {
+    leads: Number(snapshotMeta?.leads_unread_count ?? 0),
+    groups: Number(snapshotMeta?.groups_unread_count ?? 0),
+    clientes: Number(snapshotMeta?.clientes_unread_count ?? 0),
+    perdidos: Number(snapshotMeta?.perdidos_unread_count ?? 0),
   };
   const tabTotal = Number(snapshotMeta?.tab_total ?? 0);
   const tailById = new Map(compactRows.map((row) => [row.conversation_id!, {
@@ -556,6 +564,8 @@ export default async function InboxPage({
               initialQuery={inboxQuery}
               renderNowMs={renderNowMs}
               tabCounts={tabCounts}
+              unreadCounts={unreadCounts}
+              unreadOnly={unreadOnly}
               tabTotal={tabTotal}
             />
           </div>

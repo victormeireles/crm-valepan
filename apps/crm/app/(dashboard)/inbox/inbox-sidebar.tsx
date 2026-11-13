@@ -24,6 +24,7 @@ import {
   type InboxSearchScope,
   type InboxTab,
   type InboxTabCounts,
+  type InboxUnreadCounts,
 } from "./inbox-location";
 import { recordInboxBrowserMetric } from "@/lib/inbox-browser-performance";
 
@@ -108,6 +109,8 @@ export function InboxSidebar({
   renderNowMs: number;
   tabCounts: InboxTabCounts;
   tabTotal?: number;
+  unreadCounts?: InboxUnreadCounts;
+  unreadOnly?: boolean;
 }) {
   const initialSearch = isInboxSearchQuery(initialQuery);
   const [nowMs, setNowMs] = useState(renderNowMs);
