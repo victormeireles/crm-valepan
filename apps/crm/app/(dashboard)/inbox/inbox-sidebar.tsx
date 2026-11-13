@@ -51,7 +51,6 @@ export type InboxSidebarRow = {
 const PAGE_SIZE = 20;
 
 const INBOX_LISTS: { tab: InboxTab; label: string }[] = [
-  { tab: "novos", label: "Novos" },
   { tab: "leads", label: "Leads" },
   { tab: "groups", label: "Grupos" },
   { tab: "clientes", label: "Clientes" },
@@ -135,7 +134,7 @@ export function InboxSidebar({
   qRef.current = q;
   const liveTabRef = useRef(liveTab);
   liveTabRef.current = liveTab;
-  const tabBeforeSearchRef = useRef<InboxTab>(isInboxTab(activeTab) ? activeTab : "novos");
+  const tabBeforeSearchRef = useRef<InboxTab>(isInboxTab(activeTab) ? activeTab : "leads");
   const searchModeRef = useRef(initialSearch);
   const skipSearchBootstrapRef = useRef(initialSearch);
 

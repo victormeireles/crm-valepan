@@ -10,7 +10,11 @@ import {
 import { displayCompanyName, displayPersonName } from "@/lib/lead-identity";
 import { fetchDistributorCatalog } from "@/lib/distributor-catalog";
 import { isLeadExcludedFromPipeline } from "@/lib/lead-pipeline-exclusion";
-import type { InboxSearchScope, InboxTabCounts } from "@/app/(dashboard)/inbox/inbox-location";
+import type {
+  InboxSearchScope,
+  InboxTabCounts,
+  InboxUnreadCounts,
+} from "@/app/(dashboard)/inbox/inbox-location";
 import { getWeeklyBreadCount } from "@/lib/lead-signals";
 import { logInboxPerformance, timeInboxOperation } from "@/lib/inbox-performance";
 import { timelineActivityLabel } from "@/lib/timeline-labels";
@@ -129,6 +133,7 @@ export async function refreshInboxSidebar(input: {
   tab: InboxSearchScope;
   page: number;
   query?: string | null;
+  unread?: boolean;
 }) {
   const startedAt = performance.now();
   const supabase = await createServerSupabaseClient();
@@ -148,6 +153,7 @@ export async function refreshInboxSidebar(input: {
       p_offset: (page - 1) * 20,
       p_limit: 20,
       p_query: query,
+      p_unread: Boolean(input.unread),
     })),
     timeInboxOperation("pipeline_stages", crm.from("pipeline_stages").select("id, name")),
   ]);
@@ -214,12 +220,17 @@ export async function refreshInboxSidebar(input: {
     ok: true as const,
     conversations,
     tabCounts: {
-      novos: Number(meta?.novos_count ?? 0),
       leads: Number(meta?.leads_count ?? 0),
       groups: Number(meta?.groups_count ?? 0),
       clientes: Number(meta?.clientes_count ?? 0),
       perdidos: Number(meta?.perdidos_count ?? 0),
     } satisfies InboxTabCounts,
+    unreadCounts: {
+      leads: Number(meta?.leads_unread_count ?? 0),
+      groups: Number(meta?.groups_unread_count ?? 0),
+      clientes: Number(meta?.clientes_unread_count ?? 0),
+      perdidos: Number(meta?.perdidos_unread_count ?? 0),
+    } satisfies InboxUnreadCounts,
     tabTotal: Number(meta?.tab_total ?? 0),
   };
 }
@@ -632,6 +643,26 @@ export async function markConversationRead(conversationId: string) {
 
   if (error) return { ok: false as const, error: error.message };
 
+  return { ok: true as const };
+}
+
+export async function markConversationUnread(conversationId: string) {
+  const id = conversationId.trim();
+  if (!id) return { ok: false as const, error: "Conversa inválida." };
+
+  const supabase = await createServerSupabaseClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false as const, error: "Não autenticado" };
+
+  const crm = crmTables(supabase);
+  const { error } = await crm
+    .from("conversations")
+    .update({ last_read_at: null })
+    .eq("id", id);
+
+  if (error) return { ok: false as const, error: error.message };
   return { ok: true as const };
 }
 

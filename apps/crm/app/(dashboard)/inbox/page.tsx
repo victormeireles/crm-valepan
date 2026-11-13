@@ -164,7 +164,6 @@ export default async function InboxPage({
   }));
   const conversationsError = snapshotResult.error;
   const tabCounts = {
-    novos: Number(snapshotMeta?.novos_count ?? 0),
     leads: Number(snapshotMeta?.leads_count ?? 0),
     groups: Number(snapshotMeta?.groups_count ?? 0),
     clientes: Number(snapshotMeta?.clientes_count ?? 0),
