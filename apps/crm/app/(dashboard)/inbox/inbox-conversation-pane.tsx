@@ -48,7 +48,7 @@ function ConversationLoadingSkeleton({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden" aria-hidden={false}>
-      <div className="shrink-0 border-b border-[var(--vp-ink-line)] bg-[var(--vp-paper)] px-[18px] py-3.5">
+      <div className="shrink-0 border-b border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] px-[18px] py-3.5">
         <div className="flex items-center gap-3">
           {preview?.name ? (
             <ContactAvatar
@@ -107,7 +107,7 @@ function ConversationLoadingSkeleton({
           </div>
         ))}
       </div>
-      <div className="shrink-0 border-t border-[var(--vp-ink-line)] bg-[var(--vp-paper)] px-[18px] pb-4 pt-3">
+      <div className="shrink-0 border-t border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] px-[18px] pb-4 pt-3">
         <span className="block h-12 w-full motion-safe:animate-pulse rounded-xl bg-[var(--vp-surface)]" />
       </div>
     </div>
@@ -280,7 +280,7 @@ export function InboxConversationPane({
         ) : conversation && view ? (
           <>
             <MarkConversationRead conversationId={conversation.id} fingerprint={`${conversation.lastSentAt ?? ""}|${conversation.lastDirection ?? ""}|${conversation.lastBodyPreview ?? ""}`} />
-            <div className="shrink-0 border-b border-[var(--vp-ink-line)] bg-[var(--vp-paper)] px-[18px] py-3.5">
+            <div className="shrink-0 border-b border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] px-[18px] py-3.5">
               <div className="flex items-center justify-between gap-4">
                 <div className="flex min-w-0 items-center gap-3">
                   <ContactAvatar name={conversation.headerName} src={conversation.avatarUrl} phone={conversation.phone} className="size-11 shrink-0" loading="eager" allowRefresh={false} />
@@ -351,7 +351,7 @@ export function InboxConversationPane({
               </div>
             </div>
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--vp-paper)] px-[18px]"><ChatThread key={conversation.id} conversationId={conversation.id} initialMessages={view.messages} hasMoreOlder={view.hasMoreOlder} messagesLoadError={view.messagesLoadError} lastReadAtIso={conversation.lastReadAt} /></div>
-            <div className="shrink-0 border-t border-[var(--vp-ink-line)] bg-[var(--vp-paper)] px-[18px] pb-4 pt-3"><SendMessageForm key={conversation.id} conversationId={conversation.id} phone={conversation.phone} firstName={conversation.firstName} comercialFirstName={view.comercialFirstName} /></div>
+            <div className="shrink-0 border-t border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] px-[18px] pb-4 pt-3"><SendMessageForm key={conversation.id} conversationId={conversation.id} phone={conversation.phone} firstName={conversation.firstName} comercialFirstName={view.comercialFirstName} /></div>
           </>
         ) : <div className="flex flex-1 items-center justify-center px-4 py-12"><p className="text-center text-sm text-[var(--muted)]">Nenhuma conversa para mostrar.</p></div>}
       </section>

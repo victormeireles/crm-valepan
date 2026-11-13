@@ -27,12 +27,15 @@ html:has([data-inbox-shell]) body {
 
 /* Inbox full-bleed: sem padding do shell e sem cantos arredondados nos painéis. */
 html:has([data-inbox-shell]) [data-dashboard-main] {
-  padding: 0;
+  padding: 0 !important;
   overflow: hidden;
 }
 
-[data-inbox-shell] [data-inbox-panel] {
-  border-radius: 0;
+[data-inbox-shell] [data-inbox-panel],
+[data-inbox-shell] section,
+[data-inbox-shell] aside {
+  border-radius: 0 !important;
+  box-shadow: none !important;
 }
 
 :focus-visible {
