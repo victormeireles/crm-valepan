@@ -11,13 +11,17 @@ export type CrmIconName =
   | "check"
   | "check_box"
   | "check_box_outline_blank"
+  | "chevron_left"
+  | "chevron_right"
   | "close"
   | "contact_page"
   | "conversion_path"
   | "event"
   | "event_busy"
   | "expand_more"
+  | "first_page"
   | "flag"
+  | "last_page"
   | "groups"
   | "history"
   | "hourglass_bottom"
@@ -55,6 +59,10 @@ function IconDrawing({ name }: { name: CrmIconName }) {
       return <><rect x="4" y="4" width="16" height="16" rx="2" /><path d="m7.5 12 3 3 6-6" /></>;
     case "check_box_outline_blank":
       return <rect x="4" y="4" width="16" height="16" rx="2" />;
+    case "chevron_left":
+      return <path d="m15 6-6 6 6 6" />;
+    case "chevron_right":
+      return <path d="m9 6 6 6-6 6" />;
     case "close":
       return <path d="M6 6l12 12M18 6 6 18" />;
     case "contact_page":
@@ -67,6 +75,8 @@ function IconDrawing({ name }: { name: CrmIconName }) {
       return <><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M7 3v4m10-4v4M3 10h18M9 14l5 5m0-5-5 5" /></>;
     case "expand_more":
       return <path d="m6 9 6 6 6-6" />;
+    case "first_page":
+      return <path d="M7 6v12M17 6l-6 6 6 6" />;
     case "flag":
       return <path d="M5 21V4m0 1h11l-1.5 3L16 11H5" />;
     case "groups":
@@ -79,6 +89,8 @@ function IconDrawing({ name }: { name: CrmIconName }) {
       return <><path d="M4 8h16v13H4zM3 4h18v4H3zM9 12h6" /></>;
     case "keep":
       return <><path d="M8 3h8l-1 6 3 3H6l3-3zM12 12v9" /></>;
+    case "last_page":
+      return <path d="M17 6v12M7 6l6 6-6 6" />;
     case "mark_chat_unread":
       return <><path d="M4 6h11a5 5 0 0 0 5 5v6H9l-5 4z" /><circle cx="18" cy="5" r="3" fill="currentColor" stroke="none" /></>;
     case "mood":
