@@ -1,19 +1,19 @@
 "use client";
 
 import {
+  markConversationUnread,
   refreshInboxSidebar,
   updateConversationContactName,
 } from "@/app/actions/inbox";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ContactAvatar } from "@/components/contact-avatar";
-import { CategoryBadge } from "@/components/lead-identity";
-import { CrmIcon } from "@/components/crm-icon";
-import { CrmMenuSelect } from "@/components/crm-menu-select";
+import { CrmIcon, type CrmIconName } from "@/components/crm-icon";
 import { PaginationNav } from "@/components/pagination-nav";
 import { isInboxSearchQuery, isPhoneSearchQuery } from "@/lib/phone-search-query";
-import { formatAbsoluteShort, formatElapsedShort, formatIntegerPt } from "@/lib/format-relative";
+import { formatAbsoluteShort, formatElapsedShort } from "@/lib/format-relative";
 import { INBOX_SELECT_CONVERSATION_EVENT } from "./inbox-conversation-pane";
 import {
+  formatUnreadBadge,
   inboxClientHref,
   inboxShareHref,
   isInboxTab,
@@ -51,12 +51,17 @@ export type InboxSidebarRow = {
 
 const PAGE_SIZE = 20;
 
-const INBOX_LISTS: { tab: InboxTab; label: string }[] = [
-  { tab: "leads", label: "Leads" },
-  { tab: "groups", label: "Grupos" },
-  { tab: "clientes", label: "Clientes" },
-  { tab: "perdidos", label: "Perdidos" },
+const INBOX_RAIL: { tab: InboxTab; label: string; icon: CrmIconName }[] = [
+  { tab: "leads", label: "Leads", icon: "chat" },
+  { tab: "groups", label: "Grupos", icon: "groups" },
+  { tab: "clientes", label: "Clientes", icon: "archive" },
+  { tab: "perdidos", label: "Perdidos", icon: "flag" },
 ];
+
+function unreadCountForScope(counts: InboxUnreadCounts, scope: InboxSearchScope): number {
+  if (scope === "all") return counts.leads + counts.groups + counts.clientes + counts.perdidos;
+  return counts[scope];
+}
 
 function validAvatarUrl(v: string | null | undefined): string | null {
   const t = (v ?? "").trim();
@@ -99,6 +104,8 @@ export function InboxSidebar({
   initialQuery,
   renderNowMs,
   tabCounts,
+  unreadCounts,
+  unreadOnly,
   tabTotal,
 }: {
   conversations: InboxSidebarRow[];
@@ -108,9 +115,9 @@ export function InboxSidebar({
   initialQuery: string;
   renderNowMs: number;
   tabCounts: InboxTabCounts;
+  unreadCounts: InboxUnreadCounts;
+  unreadOnly: boolean;
   tabTotal?: number;
-  unreadCounts?: InboxUnreadCounts;
-  unreadOnly?: boolean;
 }) {
   const initialSearch = isInboxSearchQuery(initialQuery);
   const [nowMs, setNowMs] = useState(renderNowMs);
@@ -121,7 +128,8 @@ export function InboxSidebar({
   const [livePage, setLivePage] = useState(page);
   const [listPending, setListPending] = useState(false);
   const [liveConversations, setLiveConversations] = useState(conversations);
-  const [liveTabCounts, setLiveTabCounts] = useState(tabCounts);
+  const [liveUnreadCounts, setLiveUnreadCounts] = useState(unreadCounts);
+  const [liveUnreadOnly, setLiveUnreadOnly] = useState(unreadOnly);
   const [liveTabTotal, setLiveTabTotal] = useState(
     tabTotal ?? (activeTab === "all" ? sumInboxTabCounts(tabCounts) : tabCounts[activeTab]),
   );
@@ -137,29 +145,23 @@ export function InboxSidebar({
   qRef.current = q;
   const liveTabRef = useRef(liveTab);
   liveTabRef.current = liveTab;
+  const livePageRef = useRef(livePage);
+  livePageRef.current = livePage;
+  const liveUnreadOnlyRef = useRef(liveUnreadOnly);
+  liveUnreadOnlyRef.current = liveUnreadOnly;
+  const liveConversationsRef = useRef(liveConversations);
+  liveConversationsRef.current = liveConversations;
+  const readIdsRef = useRef(readIds);
+  readIdsRef.current = readIds;
   const tabBeforeSearchRef = useRef<InboxTab>(isInboxTab(activeTab) ? activeTab : "leads");
   const searchModeRef = useRef(initialSearch);
   const skipSearchBootstrapRef = useRef(initialSearch);
 
   const searchActive = isInboxSearchQuery(q);
-  const paginationTotal = liveTab === "all" ? liveTabTotal : liveTabCounts[liveTab];
+  const paginationTotal = liveTabTotal;
 
-  const listOptions = useMemo(() => {
-    const stageOptions = INBOX_LISTS.map(({ tab, label }) => ({
-      value: tab,
-      label,
-      meta: formatIntegerPt(liveTabCounts[tab]),
-    }));
-    if (!searchActive && liveTab !== "all") return stageOptions;
-    return [
-      {
-        value: "all",
-        label: "Todas",
-        meta: formatIntegerPt(sumInboxTabCounts(liveTabCounts)),
-      },
-      ...stageOptions,
-    ];
-  }, [liveTab, liveTabCounts, searchActive]);
+  const scopeUnreadCount = unreadCountForScope(liveUnreadCounts, liveTab);
+  const scopeUnreadBadge = formatUnreadBadge(scopeUnreadCount);
 
   const conversationHref = (conversationId: string) =>
     inboxShareHref({
@@ -168,6 +170,7 @@ export function InboxSidebar({
       cid: conversationId,
       lookup: searchActive && isPhoneSearchQuery(q),
       q: searchActive ? q.trim() : null,
+      unread: liveUnreadOnly,
     });
 
   const applySidebarResult = useCallback((
@@ -184,7 +187,7 @@ export function InboxSidebar({
     setLiveTab(tab);
     setLivePage(nextPage);
     setLiveConversations(result.conversations);
-    setLiveTabCounts(result.tabCounts);
+    setLiveUnreadCounts(result.unreadCounts);
     setLiveTabTotal(
       result.tabTotal > 0
         ? result.tabTotal
@@ -199,22 +202,30 @@ export function InboxSidebar({
     nextPage: number,
     mode: "push" | "replace" | "silent" = "push",
     query?: string | null,
+    unread?: boolean,
   ) => {
     const startedAt = performance.now();
     const version = ++requestVersion.current;
     const activeQuery = query === undefined
       ? (isInboxSearchQuery(qRef.current) ? qRef.current.trim() : null)
       : query?.trim() || null;
+    const unreadFilter = unread === undefined ? liveUnreadOnlyRef.current : unread;
     setListPending(true);
     setLiveTab(tab);
     setLivePage(nextPage);
+    setLiveUnreadOnly(unreadFilter);
     if (mode !== "silent") {
-      const href = inboxClientHref({ tab, page: nextPage, cid: selectedIdRef.current });
-      const historyState = { inboxTab: tab, inboxPage: nextPage, inboxConversationId: selectedIdRef.current };
+      const href = inboxClientHref({ tab, page: nextPage, cid: selectedIdRef.current, unread: unreadFilter });
+      const historyState = {
+        inboxTab: tab,
+        inboxPage: nextPage,
+        inboxConversationId: selectedIdRef.current,
+        inboxUnread: unreadFilter,
+      };
       if (mode === "push") pushInboxClientUrl(historyState, href);
       else replaceInboxClientUrl(historyState, href);
     }
-    void refreshInboxSidebar({ tab, page: nextPage, query: activeQuery }).then((result) => {
+    void refreshInboxSidebar({ tab, page: nextPage, query: activeQuery, unread: unreadFilter }).then((result) => {
       if (version !== requestVersion.current) return;
       applySidebarResult(tab, nextPage, result, startedAt);
       setListPending(false);
@@ -239,13 +250,14 @@ export function InboxSidebar({
 
   useEffect(() => {
     setLiveConversations(conversations);
-    setLiveTabCounts(tabCounts);
+    setLiveUnreadCounts(unreadCounts);
+    setLiveUnreadOnly(unreadOnly);
     setLiveTabTotal(
       tabTotal ?? (activeTab === "all" ? sumInboxTabCounts(tabCounts) : isInboxTab(activeTab) ? tabCounts[activeTab] : sumInboxTabCounts(tabCounts)),
     );
     setLiveTab(activeTab);
     setLivePage(page);
-  }, [conversations, tabCounts, tabTotal, activeTab, page]);
+  }, [conversations, tabCounts, unreadCounts, unreadOnly, tabTotal, activeTab, page]);
 
   useEffect(() => {
     const refresh = () => loadList(liveTab, livePage, "silent");
@@ -256,7 +268,7 @@ export function InboxSidebar({
   useEffect(() => {
     const onPopState = () => {
       const next = readInboxLocation();
-      loadList(next.tab, next.page, "silent");
+      loadList(next.tab, next.page, "silent", undefined, next.unread);
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
@@ -326,240 +338,355 @@ export function InboxSidebar({
       const conversationId = (event as CustomEvent<{ conversationId?: string }>).detail
         ?.conversationId;
       if (!conversationId) return;
+      const row = liveConversationsRef.current.find((r) => r.id === conversationId);
+      const wasUnread = Boolean(row?.unread) && !readIdsRef.current.has(conversationId);
       setReadIds((previous) => new Set(previous).add(conversationId));
+      const tab = liveTabRef.current;
+      if (wasUnread && isInboxTab(tab)) {
+        setLiveUnreadCounts((counts) => ({ ...counts, [tab]: Math.max(0, counts[tab] - 1) }));
+      }
     };
     window.addEventListener("crm:conversation-read", onRead);
     return () => window.removeEventListener("crm:conversation-read", onRead);
   }, []);
 
+  const markUnread = useCallback(async (c: InboxSidebarRow) => {
+    const wasUnread = c.unread && !readIdsRef.current.has(c.id);
+    setSavingId(c.id);
+    setErrorById((prev) => ({ ...prev, [c.id]: null }));
+    const res = await markConversationUnread(c.id);
+    setSavingId(null);
+    if (!res.ok) {
+      setErrorById((prev) => ({ ...prev, [c.id]: res.error ?? "Erro ao marcar como não lida." }));
+      return;
+    }
+    window.dispatchEvent(new CustomEvent("crm:conversation-unread", { detail: { conversationId: c.id } }));
+    setReadIds((prev) => {
+      const next = new Set(prev);
+      next.delete(c.id);
+      return next;
+    });
+    setLiveConversations((rows) => rows.map((r) => (r.id === c.id ? { ...r, unread: true } : r)));
+    setOpenMenuId(null);
+    if (wasUnread) return;
+    const tab = liveTabRef.current;
+    if (isInboxTab(tab)) {
+      setLiveUnreadCounts((counts) => ({ ...counts, [tab]: counts[tab] + 1 }));
+    } else {
+      loadList(tab, livePageRef.current, "silent");
+    }
+  }, [loadList]);
+
+  const setUnreadFilter = (next: boolean) => {
+    if (next === liveUnreadOnly) return;
+    loadList(liveTab, 1, "push", undefined, next);
+  };
+
+  const selectRailTab = (tab: InboxTab) => {
+    // Em modo busca, clicar na lista já ativa volta ao escopo "Todas".
+    const nextTab: InboxSearchScope = searchActive && liveTab === tab ? "all" : tab;
+    if (nextTab === liveTab && livePage === 1 && !liveUnreadOnly) return;
+    loadList(nextTab, 1, "push", undefined, false);
+  };
+
   return (
     <div
       aria-busy={searchPending || listPending}
-      className="relative flex h-full min-h-0 flex-1 flex-col overflow-hidden"
+      className="relative flex h-full min-h-0 flex-1 overflow-hidden"
     >
-      <div className="shrink-0 border-b border-[var(--vp-ink-line)] p-3">
-        <div className="mb-2.5">
-          <CrmMenuSelect
-            label="Lista de conversas"
-            value={liveTab}
-            options={listOptions}
-            onChange={(tab) => {
-              const next = tab as InboxSearchScope;
-              if (next === liveTab && livePage === 1) return;
-              loadList(next, 1);
+      <nav
+        aria-label="Listas do inbox"
+        className="flex w-14 shrink-0 flex-col items-center gap-1 border-r border-[var(--vp-ink-line)] bg-[var(--vp-paper)] py-2"
+      >
+        {INBOX_RAIL.map(({ tab, label, icon }) => {
+          const active = liveTab === tab;
+          const badge = formatUnreadBadge(liveUnreadCounts[tab]);
+          return (
+            <button
+              key={tab}
+              type="button"
+              title={label}
+              aria-label={badge ? `${label}, ${badge} não lidas` : label}
+              aria-current={active ? "page" : undefined}
+              onClick={() => selectRailTab(tab)}
+              className={`relative flex size-10 items-center justify-center rounded-xl text-[22px] transition-colors ${
+                active
+                  ? "bg-[rgba(35,0,4,0.09)] text-[var(--vp-wine)]"
+                  : "text-[var(--vp-ink-soft)] hover:bg-[rgba(35,0,4,0.05)] hover:text-[var(--vp-ink-body)]"
+              }`}
+            >
+              <CrmIcon name={icon} />
+              {badge ? (
+                <span className="absolute -right-1 -top-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-[var(--vp-wine)] px-1 text-[10px] font-bold leading-none tabular-nums text-[var(--vp-paper-pure)]">
+                  {badge}
+                </span>
+              ) : null}
+            </button>
+          );
+        })}
+      </nav>
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <div className="shrink-0 border-b border-[var(--vp-ink-line)] p-3">
+          <label htmlFor="inbox-search" className="flex min-h-10 items-center gap-2 rounded-full border border-[var(--vp-ink-line)] bg-[var(--vp-paper)] px-3">
+            <CrmIcon name="search" className="text-[17px] text-[var(--vp-ink-soft)]" />
+            <span className="sr-only">Buscar conversas</span>
+            <input
+              id="inbox-search"
+              type="search"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Buscar conversa"
+              className="w-full border-0 bg-transparent text-[13px] outline-none placeholder:text-[var(--vp-ink-soft)]"
+              autoComplete="off"
+              spellCheck={false}
+            />
+          </label>
+          <div role="tablist" aria-label="Filtro de leitura" className="mt-2 flex gap-1.5">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={!liveUnreadOnly}
+              onClick={() => setUnreadFilter(false)}
+              className={`rounded-full px-3 py-1 text-xs font-bold transition-colors ${
+                !liveUnreadOnly
+                  ? "bg-[var(--vp-wine)] text-[var(--vp-paper-pure)]"
+                  : "bg-[var(--vp-surface)] text-[var(--vp-ink-muted)] hover:bg-[var(--vp-surface-high)]"
+              }`}
+            >
+              Tudo
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={liveUnreadOnly}
+              onClick={() => setUnreadFilter(true)}
+              className={`rounded-full px-3 py-1 text-xs font-bold transition-colors ${
+                liveUnreadOnly
+                  ? "bg-[var(--vp-wine)] text-[var(--vp-paper-pure)]"
+                  : "bg-[var(--vp-surface)] text-[var(--vp-ink-muted)] hover:bg-[var(--vp-surface-high)]"
+              }`}
+            >
+              Não lidas{scopeUnreadBadge ? ` ${scopeUnreadBadge}` : ""}
+            </button>
+          </div>
+          {searchActive ? (
+            <p className="mt-1.5 px-1 text-[10px] text-[var(--vp-ink-muted)]">
+              {liveTab === "all"
+                ? "Buscando em todas as listas."
+                : "Resultados filtrados pela lista selecionada."}
+            </p>
+          ) : null}
+          {searchError ? (
+            <p role="alert" className="mt-1.5 px-1 text-[10px] font-semibold text-[var(--vp-error)]">
+              {searchError} A conversa atual foi preservada.
+            </p>
+          ) : null}
+        </div>
+        <ul className="min-h-0 flex-1 divide-y divide-[var(--vp-surface-high)] overflow-y-auto overscroll-contain">
+          {listPending
+            ? Array.from({ length: 10 }, (_, index) => (
+                <li key={`inbox-skeleton-${index}`} className="px-3 py-2">
+                  <div className="flex items-center gap-2.5">
+                    <span className="size-10 shrink-0 animate-pulse rounded-full bg-[var(--vp-surface-high)]" />
+                    <div className="min-w-0 flex-1 space-y-2">
+                      <span className="block h-3 w-2/3 animate-pulse rounded bg-[var(--vp-surface-high)]" />
+                      <span className="block h-3 w-full animate-pulse rounded bg-[var(--vp-surface)]" />
+                    </div>
+                  </div>
+                </li>
+              ))
+            : liveConversations.map((c) => {
+                const showUnread = c.unread && !readIds.has(c.id);
+                return (
+                  <li
+                    key={c.id}
+                    className={`relative transition-colors hover:bg-[rgba(35,0,4,0.05)] ${
+                      c.id === optimisticSelectedId
+                        ? "border-l-[3px] border-l-[var(--vp-wine)] bg-[rgba(35,0,4,0.09)]"
+                        : "border-l-[3px] border-l-transparent"
+                    }`}
+                  >
+                    <a
+                      href={conversationHref(c.id)}
+                      onClick={(event) => {
+                        if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
+                        event.preventDefault();
+                        const href = inboxClientHref({ tab: liveTab, page: livePage, cid: c.id, unread: liveUnreadOnly });
+                        setOptimisticSelectedId(c.id);
+                        window.dispatchEvent(new CustomEvent(INBOX_SELECT_CONVERSATION_EVENT, {
+                          detail: {
+                            conversationId: c.id,
+                            href,
+                            preview: {
+                              name: c.identityName,
+                              phone: c.phone_e164,
+                              company: c.companyName,
+                              avatarUrl: c.avatarUrl ?? null,
+                            },
+                          },
+                        }));
+                      }}
+                      className="block px-3 py-2 pr-9"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <ContactAvatar
+                          name={c.identityName}
+                          src={validAvatarUrl(c.avatarUrl)}
+                          phone={c.phone_e164}
+                          className="size-10 shrink-0"
+                          textClassName="text-[13px]"
+                          allowRemoteFallback={false}
+                          allowRefresh={false}
+                        />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-baseline gap-2">
+                            <span className={`truncate text-sm text-[var(--vp-ink-body)] ${showUnread ? "font-extrabold" : "font-bold"}`}>
+                              {c.identityName}
+                            </span>
+                            <ConversationElapsed lastAt={c.lastAt} awaiting={c.awaiting} nowMs={nowMs} />
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <p className="min-w-0 flex-1 truncate text-xs text-[var(--vp-ink-muted)]">
+                              {c.callStatus === "ringing" ? (
+                                <span
+                                  className="mr-1 animate-pulse font-bold text-[var(--vp-wine)]"
+                                  title="Cliente ligando agora"
+                                >
+                                  <CrmIcon name="call" className="mr-0.5 inline-block align-middle text-sm" />
+                                  Ligando
+                                </span>
+                              ) : c.callStatus ? (
+                                <span
+                                  className="mr-1 font-semibold text-[var(--vp-wine)]"
+                                  title={c.callStatus === "missed_video" ? "Videochamada perdida" : "Ligação perdida"}
+                                >
+                                  <CrmIcon
+                                    name={c.callStatus === "missed_video" ? "videocam" : "call"}
+                                    className="mr-0.5 inline-block align-middle text-sm"
+                                  />
+                                  Perdida
+                                </span>
+                              ) : null}
+                              {c.preview}
+                            </p>
+                            {showUnread ? (
+                              <span
+                                className="size-2.5 shrink-0 rounded-full bg-[var(--vp-wine)]"
+                                role="img"
+                                aria-label="Não lida"
+                              />
+                            ) : null}
+                          </div>
+                        </div>
+                      </div>
+                    </a>
+                    <div className="absolute right-1.5 top-1.5">
+                      <button
+                        type="button"
+                        aria-label="Mais ações da conversa"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setOpenMenuId((prev) => (prev === c.id ? null : c.id));
+                        }}
+                        className="flex h-6 w-6 items-center justify-center rounded-md text-xs text-[var(--muted)] hover:bg-[rgba(35,0,4,0.08)] hover:text-[var(--foreground)]"
+                      >
+                        ▾
+                      </button>
+                      {openMenuId === c.id ? (
+                        <div className="absolute right-0 z-10 mt-1 min-w-[10rem] rounded-md border border-[var(--border)] bg-[var(--vp-paper-pure)] p-1 shadow-[var(--sh-md)]">
+                          <button
+                            type="button"
+                            disabled={savingId === c.id || showUnread}
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              void markUnread(c);
+                            }}
+                            className="w-full rounded px-2 py-1.5 text-left text-xs text-[var(--foreground)] hover:bg-[rgba(35,0,4,0.07)] disabled:opacity-50"
+                          >
+                            {showUnread ? "Já não lida" : "Marcar como não lida"}
+                          </button>
+                          {c.kind === "lead" ? (
+                            <button
+                              type="button"
+                              disabled={savingId === c.id}
+                              onClick={async (e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                const next = window.prompt("Editar nome do contato", c.displayName);
+                                if (next == null) {
+                                  setOpenMenuId(null);
+                                  return;
+                                }
+                                const name = next.trim();
+                                if (!name) {
+                                  setErrorById((prev) => ({ ...prev, [c.id]: "Nome não pode ficar vazio." }));
+                                  return;
+                                }
+                                setSavingId(c.id);
+                                setErrorById((prev) => ({ ...prev, [c.id]: null }));
+                                const res = await updateConversationContactName({
+                                  conversationId: c.id,
+                                  contactName: name,
+                                });
+                                setSavingId(null);
+                                if (!res.ok) {
+                                  setErrorById((prev) => ({ ...prev, [c.id]: res.error ?? "Erro ao salvar nome." }));
+                                  return;
+                                }
+                                setOpenMenuId(null);
+                                setLiveConversations((rows) =>
+                                  rows.map((row) =>
+                                    row.id === c.id
+                                      ? { ...row, displayName: name, identityName: name }
+                                      : row,
+                                  ),
+                                );
+                              }}
+                              className="w-full rounded px-2 py-1.5 text-left text-xs text-[var(--foreground)] hover:bg-[rgba(35,0,4,0.07)] disabled:opacity-50"
+                            >
+                              {savingId === c.id ? "Salvando..." : "Editar nome"}
+                            </button>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </div>
+                    {errorById[c.id] ? (
+                      <p className="px-4 pb-2 text-[11px] text-[var(--vp-error)]">{errorById[c.id]}</p>
+                    ) : null}
+                  </li>
+                );
+              })}
+          {!listPending && liveConversations.length === 0 ? (
+            <li className="px-4 py-8 text-center text-sm text-[var(--muted)]">
+              {searchActive
+                ? "Nenhum resultado."
+                : liveUnreadOnly
+                  ? "Nenhuma conversa não lida."
+                  : "Nenhuma conversa ainda."}
+            </li>
+          ) : null}
+        </ul>
+        <div className="shrink-0">
+          <PaginationNav
+            pathname="/inbox"
+            page={livePage}
+            pageSize={PAGE_SIZE}
+            totalCount={paginationTotal}
+            searchParams={{
+              tab: liveTab,
+              cid: optimisticSelectedId ?? undefined,
+              ...(liveUnreadOnly ? { unread: "1" } : {}),
+              ...(searchActive ? { q: q.trim() } : {}),
+            }}
+            showBoundaryLinks
+            onNavigate={(href) => {
+              const nextPage = Number.parseInt(new URL(href, "http://local.invalid").searchParams.get("page") ?? "1", 10) || 1;
+              loadList(liveTab, nextPage);
             }}
           />
         </div>
-        <label htmlFor="inbox-search" className="flex min-h-10 items-center gap-2 rounded-full border border-[var(--vp-ink-line)] bg-[var(--vp-paper)] px-3">
-          <CrmIcon name="search" className="text-[17px] text-[var(--vp-ink-soft)]" />
-          <span className="sr-only">Buscar conversas</span>
-          <input
-            id="inbox-search"
-            type="search"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Buscar conversa"
-            className="w-full border-0 bg-transparent text-[13px] outline-none placeholder:text-[var(--vp-ink-soft)]"
-            autoComplete="off"
-            spellCheck={false}
-          />
-        </label>
-        {searchActive ? (
-          <p className="mt-1.5 px-2 text-[10px] text-[var(--vp-ink-muted)]">
-            {liveTab === "all"
-              ? "Buscando em todas as listas."
-              : "Resultados filtrados pela lista selecionada."}
-          </p>
-        ) : null}
-        {searchError ? (
-          <p role="alert" className="mt-1.5 px-2 text-[10px] font-semibold text-[var(--vp-error)]">
-            {searchError} A conversa atual foi preservada.
-          </p>
-        ) : null}
-      </div>
-      <ul className="min-h-0 flex-1 divide-y divide-[var(--vp-surface-high)] overflow-y-auto overscroll-contain">
-        {listPending
-          ? Array.from({ length: 8 }, (_, index) => (
-              <li key={`inbox-skeleton-${index}`} className="px-3.5 py-3">
-                <div className="flex items-start gap-2.5">
-                  <span className="size-10 shrink-0 animate-pulse rounded-full bg-[var(--vp-surface-high)]" />
-                  <div className="min-w-0 flex-1 space-y-2">
-                    <span className="block h-3 w-2/3 animate-pulse rounded bg-[var(--vp-surface-high)]" />
-                    <span className="block h-3 w-full animate-pulse rounded bg-[var(--vp-surface)]" />
-                  </div>
-                </div>
-              </li>
-            ))
-          : liveConversations.map((c) => (
-          <li
-            key={c.id}
-            className={`relative transition-colors hover:bg-[rgba(35,0,4,0.05)] ${
-                c.id === optimisticSelectedId
-                  ? "border-l-[3px] border-l-[var(--vp-wine)] bg-[rgba(35,0,4,0.09)]"
-                  : "border-l-[3px] border-l-transparent"
-              }`}
-          >
-            <a
-              href={conversationHref(c.id)}
-              onClick={(event) => {
-                if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
-                event.preventDefault();
-                const href = inboxClientHref({ tab: liveTab, page: livePage, cid: c.id });
-                setOptimisticSelectedId(c.id);
-                window.dispatchEvent(new CustomEvent(INBOX_SELECT_CONVERSATION_EVENT, {
-                  detail: {
-                    conversationId: c.id,
-                    href,
-                    preview: {
-                      name: c.identityName,
-                      phone: c.phone_e164,
-                      company: c.companyName,
-                      avatarUrl: c.avatarUrl ?? null,
-                    },
-                  },
-                }));
-              }}
-              className="block px-3.5 py-3 pr-10"
-            >
-              <div className="flex items-start gap-2.5">
-                <div className="relative shrink-0">
-                  <ContactAvatar
-                    name={c.identityName}
-                    src={validAvatarUrl(c.avatarUrl)}
-                    phone={c.phone_e164}
-                    className="size-10"
-                    textClassName="text-[13px]"
-                    allowRemoteFallback={false}
-                    allowRefresh={false}
-                  />
-                  {c.unread && !readIds.has(c.id) ? <span className="absolute -right-0.5 -top-0.5 size-2.5 rounded-full border-2 border-[var(--vp-paper-pure)] bg-[var(--vp-wine)]" aria-label="Conversa com mensagens não lidas" /> : null}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="truncate text-sm font-bold text-[var(--vp-ink-body)]">{c.identityName}</span>
-                    <CategoryBadge category={c.clientCategory} size="sm" />
-                    <ConversationElapsed lastAt={c.lastAt} awaiting={c.awaiting} nowMs={nowMs} />
-                  </div>
-                  <p className="truncate text-xs text-[var(--vp-ink-muted)]">{c.companyName ?? c.phone_e164}</p>
-                </div>
-                <span className="flex shrink-0 items-center gap-1">
-                  {c.callStatus === "ringing" ? (
-                    <span
-                      className="animate-pulse rounded-full bg-[var(--vp-whatsapp)] px-2 py-0.5 text-[9px] font-bold uppercase text-[var(--vp-paper-pure)]"
-                      title="Cliente ligando agora"
-                    >
-                      Ligando
-                    </span>
-                  ) : null}
-                </span>
-              </div>
-              <p className="mt-2 line-clamp-2 text-xs leading-relaxed text-[var(--vp-ink-muted)]">{c.preview}</p>
-              <div className="mt-2 flex flex-wrap items-center gap-1 text-[10px] font-bold text-[var(--vp-ink-muted)]">
-                <span className="rounded-full bg-[var(--vp-surface)] px-2 py-0.5">{c.stageName ?? c.leadLine}</span>
-                <span className="rounded-full bg-[var(--vp-surface)] px-2 py-0.5">{c.weeklyBreadCount == null ? "volume não informado" : `${formatIntegerPt(c.weeklyBreadCount)} pães/sem`}</span>
-                {c.callStatus && c.callStatus !== "ringing" ? (
-                  <span className="font-semibold text-[var(--vp-wine)]">
-                    <CrmIcon
-                      name={c.callStatus === "missed_video" ? "videocam" : "call"}
-                      className="mr-1 inline-block align-middle text-sm"
-                    />
-                    {c.callStatus === "missed_video" ? "Videochamada perdida" : "Ligação perdida"}
-                  </span>
-                ) : null}
-              </div>
-            </a>
-            <div className="absolute right-2 top-2">
-              <button
-                type="button"
-                aria-label="Mais ações da conversa"
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  setOpenMenuId((prev) => (prev === c.id ? null : c.id));
-                }}
-                className="flex h-6 w-6 items-center justify-center rounded-md text-xs text-[var(--muted)] hover:bg-[rgba(35,0,4,0.08)] hover:text-[var(--foreground)]"
-              >
-                ▾
-              </button>
-              {openMenuId === c.id ? (
-                <div className="absolute right-0 z-10 mt-1 min-w-[9rem] rounded-md border border-[var(--border)] bg-[var(--vp-paper-pure)] p-1 shadow-[var(--sh-md)]">
-                  {c.kind === "lead" ? (
-                    <button
-                      type="button"
-                      disabled={savingId === c.id}
-                      onClick={async (e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        const next = window.prompt("Editar nome do contato", c.displayName);
-                        if (next == null) {
-                          setOpenMenuId(null);
-                          return;
-                        }
-                        const name = next.trim();
-                        if (!name) {
-                          setErrorById((prev) => ({ ...prev, [c.id]: "Nome não pode ficar vazio." }));
-                          return;
-                        }
-                        setSavingId(c.id);
-                        setErrorById((prev) => ({ ...prev, [c.id]: null }));
-                        const res = await updateConversationContactName({
-                          conversationId: c.id,
-                          contactName: name,
-                        });
-                        setSavingId(null);
-                        if (!res.ok) {
-                          setErrorById((prev) => ({ ...prev, [c.id]: res.error ?? "Erro ao salvar nome." }));
-                          return;
-                        }
-                        setOpenMenuId(null);
-                        setLiveConversations((rows) =>
-                          rows.map((row) =>
-                            row.id === c.id
-                              ? { ...row, displayName: name, identityName: name }
-                              : row,
-                          ),
-                        );
-                      }}
-                      className="w-full rounded px-2 py-1.5 text-left text-xs text-[var(--foreground)] hover:bg-[rgba(35,0,4,0.07)] disabled:opacity-50"
-                    >
-                      {savingId === c.id ? "Salvando..." : "Editar nome"}
-                    </button>
-                  ) : (
-                    <span className="block px-2 py-1.5 text-xs text-[var(--muted)]">
-                      Sem ações disponíveis
-                    </span>
-                  )}
-                </div>
-              ) : null}
-            </div>
-            {errorById[c.id] ? (
-              <p className="px-4 pb-2 text-[11px] text-[var(--vp-error)]">{errorById[c.id]}</p>
-            ) : null}
-          </li>
-        ))}
-        {!listPending && liveConversations.length === 0 ? (
-          <li className="px-4 py-8 text-center text-sm text-[var(--muted)]">
-            {searchActive ? "Nenhum resultado." : "Nenhuma conversa ainda."}
-          </li>
-        ) : null}
-      </ul>
-      <div className="shrink-0">
-        <PaginationNav
-          pathname="/inbox"
-          page={livePage}
-          pageSize={PAGE_SIZE}
-          totalCount={paginationTotal}
-          searchParams={{
-            tab: liveTab,
-            cid: optimisticSelectedId ?? undefined,
-            ...(searchActive ? { q: q.trim() } : {}),
-          }}
-          showBoundaryLinks
-          onNavigate={(href) => {
-            const nextPage = Number.parseInt(new URL(href, "http://local.invalid").searchParams.get("page") ?? "1", 10) || 1;
-            loadList(liveTab, nextPage);
-          }}
-        />
       </div>
       {searchPending || listPending ? (
         <div className="pointer-events-none absolute bottom-2 left-1/2 z-20 -translate-x-1/2 rounded-full bg-[var(--vp-wine)] px-3 py-1 text-[10px] font-medium text-[var(--vp-gold)] shadow-[var(--sh-md)]">

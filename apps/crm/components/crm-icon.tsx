@@ -18,6 +18,7 @@ export type CrmIconName =
   | "event_busy"
   | "expand_more"
   | "flag"
+  | "groups"
   | "history"
   | "hourglass_bottom"
   | "inventory_2"
@@ -68,6 +69,8 @@ function IconDrawing({ name }: { name: CrmIconName }) {
       return <path d="m6 9 6 6 6-6" />;
     case "flag":
       return <path d="M5 21V4m0 1h11l-1.5 3L16 11H5" />;
+    case "groups":
+      return <><circle cx="12" cy="8" r="3.2" /><path d="M5.5 20a6.5 6.5 0 0 1 13 0" /><circle cx="4.8" cy="10" r="2" /><circle cx="19.2" cy="10" r="2" /><path d="M1.5 18a3.5 3.5 0 0 1 3.3-3M22.5 18a3.5 3.5 0 0 0-3.3-3" /></>;
     case "history":
       return <><path d="M4 5v5h5M4.8 9A8 8 0 1 1 6 17" /><path d="M12 8v4l3 2" /></>;
     case "hourglass_bottom":
