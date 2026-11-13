@@ -676,6 +676,7 @@ export interface Database {
           p_offset?: number;
           p_limit?: number;
           p_query?: string | null;
+          p_unread?: boolean;
         };
         Returns: {
           conversation_id: string | null;
@@ -706,9 +707,13 @@ export interface Database {
           tab_total: number;
           novos_count: number;
           leads_count: number;
+          leads_unread_count: number;
           groups_count: number;
+          groups_unread_count: number;
           clientes_count: number;
+          clientes_unread_count: number;
           perdidos_count: number;
+          perdidos_unread_count: number;
         }[];
       };
       register_public_lead: {

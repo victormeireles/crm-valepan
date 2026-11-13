@@ -33,6 +33,7 @@ beforeAll(async () => {
     alter table crm.leads add column if not exists excluded_from_pipeline_at timestamptz;
     alter table crm.leads add column if not exists excluded_reason text;
     alter table crm.leads add column if not exists excluded_by uuid;
+    alter table crm.leads add column if not exists cliente_distribuidor_id uuid;
     alter table crm.messages add column if not exists event_kind text;
     alter table crm.messages add column if not exists event_status text;
     create or replace function crm.phone_search_digits(p_value text)
@@ -44,10 +45,15 @@ beforeAll(async () => {
     update crm.pipeline_stages set name = 'NEGOCIAÇÃO' where name = 'Negociação';
     update crm.pipeline_stages set name = 'CONVERTIDO' where name = 'Convertido';
     update crm.pipeline_stages set name = 'PERDIDO' where name = 'Perdido';
+    create or replace function crm.cliente_distribuidor_nome(p_id uuid)
+    returns text language sql stable security definer
+    set search_path = crm, public
+    as $$ select null::text; $$;
   `);
   await db.exec(sql("20260919190000_inbox_sidebar_snapshot_page_first.sql"));
   await db.exec(sql("20260922180000_inbox_lists_by_stage.sql"));
   await db.exec(sql("20261112140000_inbox_sidebar_search_all.sql"));
+  await db.exec(sql("20261113120000_inbox_sidebar_leads_merge_unread.sql"));
 
   await db.exec(`
     insert into crm.contacts(full_name, phone_e164) values ('Ana Qualificar', '+5511111111111');
@@ -127,12 +133,14 @@ describe("inbox_sidebar_snapshot", () => {
       groups_count: number;
       novos_count: number;
       leads_count: number;
+      leads_unread_count: number;
       clientes_count: number;
       perdidos_count: number;
       tab_total: number;
     }>(
-      `select group_display_name, last_body_preview, groups_count, novos_count, leads_count, clientes_count, perdidos_count, tab_total
-       from crm.inbox_sidebar_snapshot('2026-08-01T03:00:00Z', 'groups', 0, 20, null)`,
+      `select group_display_name, last_body_preview, groups_count, novos_count, leads_count, leads_unread_count,
+              clientes_count, perdidos_count, tab_total
+       from crm.inbox_sidebar_snapshot('2026-08-01T03:00:00Z', 'groups', 0, 20, null, false)`,
     );
 
     expect(groups.rows.filter((row) => row.group_display_name).map((row) => ({
@@ -145,23 +153,51 @@ describe("inbox_sidebar_snapshot", () => {
     expect(groups.rows[0]).toMatchObject({
       groups_count: 2,
       novos_count: 1,
-      leads_count: 1,
+      leads_count: 2,
       clientes_count: 2,
       perdidos_count: 1,
       tab_total: 2,
     });
 
-    const novos = await db.query<{ last_body_preview: string | null }>(
-      `select last_body_preview from crm.inbox_sidebar_snapshot('2026-08-01T03:00:00Z', 'novos', 0, 20, null)
-       where conversation_id is not null`,
-    );
-    expect(novos.rows).toEqual([{ last_body_preview: "ultima qualify" }]);
-
     const leads = await db.query<{ last_body_preview: string | null }>(
-      `select last_body_preview from crm.inbox_sidebar_snapshot('2026-08-01T03:00:00Z', 'leads', 0, 20, null)
+      `select last_body_preview from crm.inbox_sidebar_snapshot('2026-08-01T03:00:00Z', 'leads', 0, 20, null, false)
        where conversation_id is not null`,
     );
-    expect(leads.rows).toEqual([{ last_body_preview: "ultima pipeline" }]);
+    expect(leads.rows.map((row) => row.last_body_preview).sort()).toEqual(
+      ["ultima pipeline", "ultima qualify"].sort(),
+    );
+
+    const novosAlias = await db.query<{ tab_total: number }>(
+      `select tab_total
+       from crm.inbox_sidebar_snapshot('2026-08-01T03:00:00Z', 'novos', 0, 20, null, false)
+       limit 1`,
+    );
+    expect(novosAlias.rows[0]?.tab_total).toBe(2);
+
+    await db.exec(`
+      update crm.conversations c set last_read_at = null
+      from crm.leads l where c.lead_id = l.id and l.phone_e164 = '+5511111111111';
+      update crm.conversations c set last_read_at = '2026-09-20T00:00:00Z'
+      from crm.leads l where c.lead_id = l.id and l.phone_e164 = '+5511111111113';
+    `);
+
+    const meta = await db.query<{
+      leads_count: number;
+      leads_unread_count: number;
+    }>(
+      `select leads_count, leads_unread_count
+       from crm.inbox_sidebar_snapshot('2026-08-01T03:00:00Z', 'leads', 0, 20, null, false)
+       limit 1`,
+    );
+    expect(meta.rows[0]?.leads_count).toBe(2);
+    expect(meta.rows[0]?.leads_unread_count).toBeGreaterThanOrEqual(1);
+
+    const unreadOnly = await db.query<{ last_body_preview: string | null }>(
+      `select last_body_preview
+       from crm.inbox_sidebar_snapshot('2026-08-01T03:00:00Z', 'leads', 0, 20, null, true)
+       where conversation_id is not null`,
+    );
+    expect(unreadOnly.rows.every((row) => row.last_body_preview === "ultima qualify")).toBe(true);
 
     const clientes = await db.query<{ last_body_preview: string | null }>(
       `select last_body_preview from crm.inbox_sidebar_snapshot('2026-08-01T03:00:00Z', 'clientes', 0, 20, null)
@@ -180,6 +216,7 @@ describe("inbox_sidebar_snapshot", () => {
 
     await db.exec(sql("20260922180000_inbox_lists_by_stage.sql"));
     await db.exec(sql("20261112140000_inbox_sidebar_search_all.sql"));
+    await db.exec(sql("20261113120000_inbox_sidebar_leads_merge_unread.sql"));
     const reclassified = await db.query<{
       status: string;
       excluded_from_pipeline_at: string | null;
@@ -220,7 +257,7 @@ describe("inbox_sidebar_snapshot", () => {
     expect(byName.rows[0]).toMatchObject({
       tab_total: 1,
       novos_count: 1,
-      leads_count: 0,
+      leads_count: 1,
       groups_count: 0,
       clientes_count: 0,
       perdidos_count: 0,
@@ -231,7 +268,7 @@ describe("inbox_sidebar_snapshot", () => {
        from crm.inbox_sidebar_snapshot('2026-08-01T03:00:00Z', 'leads', 0, 20, 'Ana')
        where conversation_id is not null`,
     );
-    expect(narrowed.rows).toEqual([]);
+    expect(narrowed.rows).toEqual([{ contact_name: "Ana Qualificar", tab_total: 1 }]);
 
     const inNovos = await db.query<{ contact_name: string | null; tab_total: number }>(
       `select contact_name, tab_total
