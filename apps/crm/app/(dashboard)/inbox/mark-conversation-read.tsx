@@ -15,22 +15,33 @@ export function MarkConversationRead({
   fingerprint: string;
 }) {
   const suppressedRef = useRef<string | null>(null);
+  const generationRef = useRef(0);
 
   useEffect(() => {
     const onUnread = (event: Event) => {
       const id = (event as CustomEvent<{ conversationId?: string }>).detail?.conversationId;
-      if (id) suppressedRef.current = id;
+      if (id === conversationId) {
+        suppressedRef.current = id;
+        generationRef.current += 1;
+      }
     };
     window.addEventListener("crm:conversation-unread", onUnread);
-    return () => window.removeEventListener("crm:conversation-unread", onUnread);
-  }, []);
+    return () => {
+      window.removeEventListener("crm:conversation-unread", onUnread);
+      generationRef.current += 1;
+    };
+  }, [conversationId]);
 
   useEffect(() => {
     if (!conversationId) return;
     if (suppressedRef.current === conversationId) return;
-    let cancelled = false;
+    const generation = ++generationRef.current;
     void markConversationRead(conversationId).then((res) => {
-      if (!cancelled && res.ok) {
+      if (
+        generationRef.current === generation &&
+        suppressedRef.current !== conversationId &&
+        res.ok
+      ) {
         window.dispatchEvent(
           new CustomEvent("crm:conversation-read", {
             detail: { conversationId },
@@ -39,7 +50,7 @@ export function MarkConversationRead({
       }
     });
     return () => {
-      cancelled = true;
+      generationRef.current += 1;
     };
   }, [conversationId, fingerprint]);
 
