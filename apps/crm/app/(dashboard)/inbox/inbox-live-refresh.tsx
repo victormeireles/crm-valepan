@@ -74,6 +74,9 @@ export function InboxLiveRefresh() {
 
     document.addEventListener("visibilitychange", onVis);
 
+    // Só mensagens disparam refresh da lista. Updates em leads/opportunities
+    // (responsável, ficha, etapa) já são aplicados no painel local; recarregar
+    // a sidebar derruba o filtro sticky «Não lidas» e interrompe a edição.
     const channel = supabase
       .channel("crm-inbox-live")
       .on(
@@ -89,31 +92,6 @@ export function InboxLiveRefresh() {
             signalCall(changedRow.event_status);
           }
           scheduleIncrementalUpdate();
-        },
-      )
-      .on(
-        "postgres_changes",
-        { event: "UPDATE", schema: "crm", table: "leads" },
-        (payload) => {
-          const changedLeadId =
-            (payload.new as { id?: string } | null)?.id ??
-            (payload.old as { id?: string } | null)?.id ??
-            null;
-          // A ficha selecionada já aplica essas mudanças localmente. Recarregar
-          // todo o Inbox no meio da digitação interrompe o formulário e soma uma
-          // renderização pesada à Server Action.
-          if (changedLeadId) scheduleIncrementalUpdate();
-        },
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "crm", table: "opportunities" },
-        (payload) => {
-          const changedLeadId =
-            (payload.new as { lead_id?: string } | null)?.lead_id ??
-            (payload.old as { lead_id?: string } | null)?.lead_id ??
-            null;
-          if (changedLeadId) scheduleIncrementalUpdate();
         },
       )
       .subscribe();

@@ -273,14 +273,28 @@ export function InboxSidebar({
   }, [initialQuery]);
 
   useEffect(() => {
-    setLiveConversations(conversations);
     setLiveUnreadCounts(unreadCounts);
     setLiveUnreadOnly(unreadOnly);
+    setLiveTab(activeTab);
+    setLivePage(page);
+    // Em «Não lidas», preserva conversas já lidas nesta sessão se o RSC
+    // revalidar a página (ex.: troca de etapa com router.refresh).
+    if (unreadOnly) {
+      const merged = mergeStickyUnreadConversations(
+        conversations,
+        liveConversationsRef.current,
+        readIdsRef.current,
+        true,
+      );
+      setLiveConversations(merged);
+      const baseTotal = tabTotal ?? conversations.length;
+      setLiveTabTotal(baseTotal + Math.max(0, merged.length - conversations.length));
+      return;
+    }
+    setLiveConversations(conversations);
     setLiveTabTotal(
       tabTotal ?? (activeTab === "all" ? sumInboxTabCounts(tabCounts) : isInboxTab(activeTab) ? tabCounts[activeTab] : sumInboxTabCounts(tabCounts)),
     );
-    setLiveTab(activeTab);
-    setLivePage(page);
   }, [conversations, tabCounts, unreadCounts, unreadOnly, tabTotal, activeTab, page]);
 
   useEffect(() => {
