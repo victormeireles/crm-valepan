@@ -244,7 +244,7 @@ export function InboxLeadPanel(props: InboxLeadPanelProps) {
   const controlClass = "min-w-0 flex-1 border-0 bg-transparent text-right text-[13px] font-bold text-[var(--vp-ink-body)] outline-none";
 
   return (
-    <aside className="flex h-full min-h-0 flex-col overflow-hidden rounded-[14px] border border-l-[3px] border-[var(--vp-ink-line)] border-l-[var(--vp-gold-classic)] bg-[var(--vp-paper-pure)] shadow-[var(--sh-sm)]">
+    <aside className="flex h-full min-h-0 flex-col overflow-hidden border-l-[3px] border-l-[var(--vp-gold-classic)] bg-[var(--vp-paper-pure)]">
       <header className="shrink-0 border-b border-[var(--vp-ink-line)] px-4 py-3.5">
         <p className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-[var(--vp-gold-classic)]">Ficha do lead</p>
         <p className="mt-1 truncate text-[15px] font-bold text-[var(--vp-wine)]">{props.companyName ?? props.contactName}</p>

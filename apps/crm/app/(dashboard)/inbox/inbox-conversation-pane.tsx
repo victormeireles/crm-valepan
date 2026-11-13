@@ -264,7 +264,7 @@ export function InboxConversationPane({
 
   return (
     <>
-      <section aria-busy={showLoading} className="relative flex h-full min-h-0 flex-col overflow-hidden rounded-[14px] border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] shadow-[var(--sh-sm)]">
+      <section aria-busy={showLoading} className="relative flex h-full min-h-0 flex-col overflow-hidden border-r border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] xl:border-r-0">
         {showLoading ? (
           <div className="pointer-events-none absolute inset-x-0 top-0 z-30 h-0.5 overflow-hidden bg-[var(--vp-surface-high)]">
             <span className="block h-full w-1/2 motion-safe:animate-pulse bg-[var(--vp-gold-classic)]" />
@@ -352,7 +352,7 @@ export function InboxConversationPane({
         ) : <div className="flex flex-1 items-center justify-center px-4 py-12"><p className="text-center text-sm text-[var(--muted)]">Nenhuma conversa para mostrar.</p></div>}
       </section>
       {showLoading ? (
-        <aside className="hidden h-full min-h-0 flex-col overflow-hidden rounded-[14px] border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] px-5 py-5 xl:flex">
+        <aside className="hidden h-full min-h-0 flex-col overflow-hidden border-l border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] px-5 py-5 xl:flex">
           <span className="mb-4 block h-4 w-28 motion-safe:animate-pulse rounded bg-[var(--vp-surface-high)]" />
           <span className="mb-3 block h-10 w-full motion-safe:animate-pulse rounded-xl bg-[var(--vp-surface)]" />
           <span className="mb-3 block h-10 w-full motion-safe:animate-pulse rounded-xl bg-[var(--vp-surface)]" />
@@ -374,7 +374,7 @@ export function InboxConversationPane({
           />
         </div>
       ) : (
-        <aside className="hidden h-full min-h-0 flex-col items-center justify-center gap-3 overflow-y-auto rounded-[14px] border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] px-5 text-center text-xs text-[var(--vp-ink-muted)] xl:flex">
+        <aside className="hidden h-full min-h-0 flex-col items-center justify-center gap-3 overflow-y-auto border-l border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] px-5 text-center text-xs text-[var(--vp-ink-muted)] xl:flex">
           <span>{conversation?.leadId ? "A ficha será carregada somente quando necessária." : "Esta conversa não possui uma ficha de lead."}</span>
           {conversation?.leadId ? (
             <button type="button" disabled={panelLoading} onClick={() => void loadLeadPanel()} className="min-h-9 rounded-full bg-[var(--vp-wine)] px-4 font-bold text-[var(--vp-gold)] disabled:opacity-60">
