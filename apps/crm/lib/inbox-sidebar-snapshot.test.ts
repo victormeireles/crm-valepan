@@ -184,19 +184,23 @@ describe("inbox_sidebar_snapshot", () => {
     const meta = await db.query<{
       leads_count: number;
       leads_unread_count: number;
+      groups_unread_count: number;
     }>(
-      `select leads_count, leads_unread_count
+      `select leads_count, leads_unread_count, groups_unread_count
        from crm.inbox_sidebar_snapshot('2026-08-01T03:00:00Z', 'leads', 0, 20, null, false)
        limit 1`,
     );
     expect(meta.rows[0]?.leads_count).toBe(2);
-    expect(meta.rows[0]?.leads_unread_count).toBeGreaterThanOrEqual(1);
+    expect(meta.rows[0]?.leads_unread_count).toBe(1);
+    expect(meta.rows[0]?.groups_unread_count).toEqual(expect.any(Number));
 
-    const unreadOnly = await db.query<{ last_body_preview: string | null }>(
-      `select last_body_preview
+    const unreadOnly = await db.query<{ last_body_preview: string | null; tab_total: number }>(
+      `select last_body_preview, tab_total
        from crm.inbox_sidebar_snapshot('2026-08-01T03:00:00Z', 'leads', 0, 20, null, true)
        where conversation_id is not null`,
     );
+    expect(unreadOnly.rows).toHaveLength(1);
+    expect(unreadOnly.rows[0]?.tab_total).toBe(1);
     expect(unreadOnly.rows.every((row) => row.last_body_preview === "ultima qualify")).toBe(true);
 
     const clientes = await db.query<{ last_body_preview: string | null }>(

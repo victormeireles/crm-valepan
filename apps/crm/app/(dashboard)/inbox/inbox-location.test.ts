@@ -4,6 +4,7 @@ import {
   inboxShareHref,
   inboxTabFromParam,
   inboxUnreadFromParam,
+  readInboxLocation,
   removeReadConversation,
   resolveInboxTabTotal,
   sumInboxTabCounts,
@@ -21,6 +22,10 @@ describe("inbox-location", () => {
     expect(inboxUnreadFromParam("1")).toBe(true);
     expect(inboxUnreadFromParam("true")).toBe(true);
     expect(inboxUnreadFromParam(null)).toBe(false);
+  });
+
+  it("treats a hash tab as a complete unread snapshot", () => {
+    expect(readInboxLocation("https://crm.test/inbox?unread=1#tab=leads").unread).toBe(false);
   });
 
   it("includes unread in share href when set", () => {

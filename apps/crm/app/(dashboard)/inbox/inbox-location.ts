@@ -116,10 +116,13 @@ export function replaceInboxClientUrl(state: object, href: string) {
 export function readInboxLocation(href = window.location.href) {
   const url = new URL(href);
   const hash = new URLSearchParams(url.hash.replace(/^#/, ""));
+  const hasHashTab = hash.has("tab");
   return {
     tab: inboxSearchScopeFromParam(hash.get("tab") ?? url.searchParams.get("tab")),
     page: Math.max(1, Number.parseInt(hash.get("page") ?? url.searchParams.get("page") ?? "1", 10) || 1),
     cid: hash.get("cid") ?? url.searchParams.get("cid"),
-    unread: inboxUnreadFromParam(hash.get("unread") ?? url.searchParams.get("unread")),
+    unread: inboxUnreadFromParam(
+      hasHashTab ? hash.get("unread") : url.searchParams.get("unread"),
+    ),
   };
 }

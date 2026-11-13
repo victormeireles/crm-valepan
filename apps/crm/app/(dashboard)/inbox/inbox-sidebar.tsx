@@ -189,6 +189,13 @@ export function InboxSidebar({
     if (!result.ok) return;
     setLiveTab(tab);
     setLivePage(nextPage);
+    setReadIds((previous) => {
+      const next = new Set(previous);
+      result.conversations.forEach((conversation) => {
+        if (conversation.unread) next.delete(conversation.id);
+      });
+      return next;
+    });
     setLiveConversations(result.conversations);
     setLiveUnreadCounts(result.unreadCounts);
     setLiveTabTotal(resolveInboxTabTotal({

@@ -176,7 +176,7 @@ export function RestoreLeadButton({ leadId }: { leadId: string }) {
           return;
         }
         setOpen(false);
-        router.push("/inbox?tab=novos");
+        router.push("/inbox?tab=leads");
       }}
     >
       <p className="text-xs font-medium text-[var(--foreground)]">Restaurar para Novos</p>
