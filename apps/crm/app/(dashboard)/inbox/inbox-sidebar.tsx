@@ -20,7 +20,9 @@ import {
 } from "./inbox-live-refresh";
 import {
   formatUnreadBadge,
+  inboxClientHashOwnsNavigation,
   inboxClientHref,
+  inboxServerSnapshotMatchesClient,
   inboxShareHref,
   isInboxTab,
   mergeStickyUnreadConversations,
@@ -36,21 +38,13 @@ import {
 } from "./inbox-location";
 import { recordInboxBrowserMetric } from "@/lib/inbox-browser-performance";
 import { ownerChipColor, ownerInitial } from "@/lib/owner-chip";
-
-function sidebarPreview(body: string | null | undefined): string {
-  const text = (body ?? "").trim().replace(/\s+/g, " ");
-  if (!text) return "Sem mensagem ainda";
-  return text.length > 80 ? `${text.slice(0, 79)}…` : text;
-}
-
-function callStatusFromEvent(
-  kind: string | null | undefined,
-  status: string | null | undefined,
-): InboxSidebarRow["callStatus"] {
-  if (kind !== "whatsapp_call") return null;
-  if (status === "ringing" || status === "missed_voice" || status === "missed_video") return status;
-  return null;
-}
+import {
+  callStatusFromEvent,
+  conversationActivityChanged,
+  moveConversationToFront as moveConversationToFrontOrdered,
+  patchConversationInPlace,
+  sidebarPreview,
+} from "./inbox-sidebar-order";
 
 function isUnreadFromTimestamps(
   lastInboundSentAt: string | null | undefined,
@@ -68,11 +62,6 @@ function bumpUnreadCount(
 ): InboxUnreadCounts {
   if (!delta) return counts;
   return { ...counts, [tab]: Math.max(0, counts[tab] + delta) };
-}
-
-function moveConversationToFront(rows: InboxSidebarRow[], next: InboxSidebarRow): InboxSidebarRow[] {
-  const without = rows.filter((row) => row.id !== next.id);
-  return [next, ...without].slice(0, PAGE_SIZE);
 }
 
 export type InboxSidebarRow = {
@@ -97,6 +86,10 @@ export type InboxSidebarRow = {
   ownerId: string | null;
   ownerName: string | null;
 };
+
+function moveConversationToFront(rows: InboxSidebarRow[], next: InboxSidebarRow): InboxSidebarRow[] {
+  return moveConversationToFrontOrdered(rows, next, PAGE_SIZE);
+}
 
 function OwnerInitialChip({
   ownerId,
@@ -207,6 +200,11 @@ export function InboxSidebar({
   const [optimisticSelectedId, setOptimisticSelectedId] = useState(selectedId);
   const [readIds, setReadIds] = useState<Set<string>>(() => new Set());
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [openMenuPos, setOpenMenuPos] = useState<{
+    top?: number;
+    bottom?: number;
+    right: number;
+  } | null>(null);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [errorById, setErrorById] = useState<Record<string, string | null>>({});
   const requestVersion = useRef(0);
@@ -343,7 +341,34 @@ export function InboxSidebar({
   }, [initialQuery]);
 
   useEffect(() => {
+    // Contagens podem atualizar após server action; filtro/página vivem no hash.
     setLiveUnreadCounts(unreadCounts);
+
+    // Após salvar responsável/etapa etc., o Next pode re-renderizar o RSC com
+    // searchParams (sem hash) → props «Tudo» p.1. Não clobber a navegação client.
+    if (inboxClientHashOwnsNavigation()) {
+      const client = readInboxLocation();
+      const serverMatches = inboxServerSnapshotMatchesClient(
+        { tab: activeTab, page, unread: unreadOnly },
+        { tab: client.tab, page: client.page, unread: client.unread },
+      );
+      if (!serverMatches) {
+        const liveMatches = inboxServerSnapshotMatchesClient(
+          {
+            tab: liveTabRef.current,
+            page: livePageRef.current,
+            unread: liveUnreadOnlyRef.current,
+          },
+          { tab: client.tab, page: client.page, unread: client.unread },
+        );
+        // Remount com state inicial errado: recupera a lista do hash sem skeleton.
+        if (!liveMatches) {
+          loadList(client.tab, client.page, "silent", undefined, client.unread);
+        }
+        return;
+      }
+    }
+
     setLiveUnreadOnly(unreadOnly);
     setLiveTab(activeTab);
     setLivePage(page);
@@ -365,7 +390,31 @@ export function InboxSidebar({
     setLiveTabTotal(
       tabTotal ?? (activeTab === "all" ? sumInboxTabCounts(tabCounts) : isInboxTab(activeTab) ? tabCounts[activeTab] : sumInboxTabCounts(tabCounts)),
     );
-  }, [conversations, tabCounts, unreadCounts, unreadOnly, tabTotal, activeTab, page]);
+  }, [conversations, tabCounts, unreadCounts, unreadOnly, tabTotal, activeTab, page, loadList]);
+
+  useEffect(() => {
+    const onOwnerChanged = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        conversationId?: string;
+        ownerId?: string | null;
+        ownerName?: string | null;
+      }>).detail;
+      if (!detail?.conversationId) return;
+      setLiveConversations((rows) =>
+        rows.map((row) =>
+          row.id === detail.conversationId
+            ? {
+                ...row,
+                ownerId: detail.ownerId ?? null,
+                ownerName: detail.ownerName ?? null,
+              }
+            : row,
+        ),
+      );
+    };
+    window.addEventListener("crm:inbox-lead-owner-changed", onOwnerChanged);
+    return () => window.removeEventListener("crm:inbox-lead-owner-changed", onOwnerChanged);
+  }, []);
 
   useEffect(() => {
     const refresh = () => loadList(liveTabRef.current, livePageRef.current, "silent");
@@ -437,12 +486,22 @@ export function InboxSidebar({
         };
 
         const unreadOnly = liveUnreadOnlyRef.current;
-        if (unreadOnly && !nextUnread && !readIdsRef.current.has(existing.id)) {
+        const stickyRead =
+          readIdsRef.current.has(existing.id) || selectedIdRef.current === existing.id;
+        if (unreadOnly && !nextUnread && !stickyRead) {
           // Someu do filtro no servidor; sticky só se o usuário leu nesta sessão.
           setLiveConversations((rows) => rows.filter((row) => row.id !== existing.id));
           setLiveTabTotal((total) => Math.max(0, total - 1));
         } else {
-          setLiveConversations((rows) => moveConversationToFront(rows, patched));
+          // Abrir/marcar lida não deve puxar o card pro topo (página 3 ficava “pulando”).
+          if (selectedIdRef.current === existing.id && !readIdsRef.current.has(existing.id)) {
+            setReadIds((previous) => new Set(previous).add(existing.id));
+          }
+          const bump =
+            conversationActivityChanged(existing, detail) && livePageRef.current === 1;
+          setLiveConversations((rows) =>
+            bump ? moveConversationToFront(rows, patched) : patchConversationInPlace(rows, patched),
+          );
         }
 
         if (nextUnread !== wasUnread && isInboxTab(liveTabRef.current)) {
@@ -549,6 +608,14 @@ export function InboxSidebar({
   }, [q, loadList]);
 
   useEffect(() => {
+    // cid também fica no hash; RSC sem cid na query não deve apagar a seleção.
+    if (inboxClientHashOwnsNavigation()) {
+      const cid = readInboxLocation().cid;
+      if (cid) {
+        setOptimisticSelectedId(cid);
+        return;
+      }
+    }
     setOptimisticSelectedId(selectedId);
   }, [selectedId]);
 
@@ -596,6 +663,7 @@ export function InboxSidebar({
     });
     setLiveConversations((rows) => rows.map((r) => (r.id === c.id ? { ...r, unread: true } : r)));
     setOpenMenuId(null);
+    setOpenMenuPos(null);
     if (wasUnread) return;
     if (isInboxTab(tab)) {
       setLiveUnreadCounts((counts) => ({ ...counts, [tab]: counts[tab] + 1 }));
@@ -603,6 +671,27 @@ export function InboxSidebar({
       loadList(tab, livePageRef.current, "silent");
     }
   }, [loadList]);
+
+  useEffect(() => {
+    if (!openMenuId) return;
+    const close = () => {
+      setOpenMenuId(null);
+      setOpenMenuPos(null);
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Element | null;
+      if (target?.closest?.('[role="menu"], [aria-label="Mais ações da conversa"]')) return;
+      close();
+    };
+    window.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("resize", close);
+    window.addEventListener("scroll", close, true);
+    return () => {
+      window.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("resize", close);
+      window.removeEventListener("scroll", close, true);
+    };
+  }, [openMenuId]);
 
   const setUnreadFilter = (next: boolean) => {
     if (next === liveUnreadOnly) return;
@@ -814,19 +903,45 @@ export function InboxSidebar({
                       <button
                         type="button"
                         aria-label="Mais ações da conversa"
+                        aria-expanded={openMenuId === c.id}
                         onClick={(e) => {
                           e.preventDefault();
                           e.stopPropagation();
-                          setOpenMenuId((prev) => (prev === c.id ? null : c.id));
+                          if (openMenuId === c.id) {
+                            setOpenMenuId(null);
+                            setOpenMenuPos(null);
+                            return;
+                          }
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          // ~2 itens + padding; reserva a barra de paginação (~52px).
+                          const menuHeight = c.kind === "lead" ? 84 : 48;
+                          const spaceBelow = window.innerHeight - rect.bottom - 56;
+                          const openUp = spaceBelow < menuHeight;
+                          setOpenMenuPos({
+                            right: Math.max(8, window.innerWidth - rect.right),
+                            ...(openUp
+                              ? { bottom: Math.max(8, window.innerHeight - rect.top + 4) }
+                              : { top: rect.bottom + 4 }),
+                          });
+                          setOpenMenuId(c.id);
                         }}
                         className="flex h-6 w-6 items-center justify-center rounded-md text-xs text-[var(--muted)] hover:bg-[rgba(35,0,4,0.08)] hover:text-[var(--foreground)]"
                       >
                         ▾
                       </button>
-                      {openMenuId === c.id ? (
-                        <div className="absolute right-0 z-10 mt-1 min-w-[10rem] rounded-md border border-[var(--border)] bg-[var(--vp-paper-pure)] p-1 shadow-[var(--sh-md)]">
+                      {openMenuId === c.id && openMenuPos ? (
+                        <div
+                          role="menu"
+                          className="fixed z-[80] min-w-[10rem] rounded-md border border-[var(--border)] bg-[var(--vp-paper-pure)] p-1 shadow-[var(--sh-md)]"
+                          style={{
+                            top: openMenuPos.top,
+                            bottom: openMenuPos.bottom,
+                            right: openMenuPos.right,
+                          }}
+                        >
                           <button
                             type="button"
+                            role="menuitem"
                             disabled={savingId === c.id || showUnread}
                             onClick={(e) => {
                               e.preventDefault();
@@ -840,6 +955,7 @@ export function InboxSidebar({
                           {c.kind === "lead" ? (
                             <button
                               type="button"
+                              role="menuitem"
                               disabled={savingId === c.id}
                               onClick={async (e) => {
                                 e.preventDefault();
@@ -847,6 +963,7 @@ export function InboxSidebar({
                                 const next = window.prompt("Editar nome do contato", c.displayName);
                                 if (next == null) {
                                   setOpenMenuId(null);
+                                  setOpenMenuPos(null);
                                   return;
                                 }
                                 const name = next.trim();
@@ -866,6 +983,7 @@ export function InboxSidebar({
                                   return;
                                 }
                                 setOpenMenuId(null);
+                                setOpenMenuPos(null);
                                 setLiveConversations((rows) =>
                                   rows.map((row) =>
                                     row.id === c.id

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   formatUnreadBadge,
+  inboxClientHashOwnsNavigation,
+  inboxServerSnapshotMatchesClient,
   inboxShareHref,
   inboxTabFromParam,
   inboxUnreadFromParam,
@@ -26,6 +28,28 @@ describe("inbox-location", () => {
 
   it("treats a hash tab as a complete unread snapshot", () => {
     expect(readInboxLocation("https://crm.test/inbox?unread=1#tab=leads").unread).toBe(false);
+  });
+
+  it("detects client hash ownership of inbox navigation", () => {
+    expect(inboxClientHashOwnsNavigation("https://crm.test/inbox?tab=leads")).toBe(false);
+    expect(
+      inboxClientHashOwnsNavigation("https://crm.test/inbox?tab=leads#tab=leads&page=3&unread=1"),
+    ).toBe(true);
+  });
+
+  it("rejects RSC snapshots that do not match the client hash filter", () => {
+    expect(
+      inboxServerSnapshotMatchesClient(
+        { tab: "leads", page: 1, unread: false },
+        { tab: "leads", page: 3, unread: true },
+      ),
+    ).toBe(false);
+    expect(
+      inboxServerSnapshotMatchesClient(
+        { tab: "leads", page: 3, unread: true },
+        { tab: "leads", page: 3, unread: true },
+      ),
+    ).toBe(true);
   });
 
   it("includes unread in share href when set", () => {

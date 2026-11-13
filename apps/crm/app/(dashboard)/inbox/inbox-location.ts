@@ -154,3 +154,21 @@ export function readInboxLocation(href = window.location.href) {
     ),
   };
 }
+
+/** Hash com `tab` = navegação client-side; searchParams do RSC não são a fonte da verdade. */
+export function inboxClientHashOwnsNavigation(href = window.location.href): boolean {
+  const url = new URL(href, "http://local.invalid");
+  return new URLSearchParams(url.hash.replace(/^#/, "")).has("tab");
+}
+
+/** RSC refresh após server action traz searchParams sem hash — não aplicar se divergir. */
+export function inboxServerSnapshotMatchesClient(
+  server: { tab: InboxSearchScope; page: number; unread: boolean },
+  client: { tab: InboxSearchScope; page: number; unread: boolean },
+): boolean {
+  return (
+    server.tab === client.tab
+    && server.page === client.page
+    && server.unread === client.unread
+  );
+}

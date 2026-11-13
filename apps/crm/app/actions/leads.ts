@@ -401,11 +401,10 @@ export async function updateLeadOwner(input: { leadId: string; ownerId: string |
     },
   });
 
-  revalidatePath(`/leads/${input.leadId}`);
-  revalidatePath("/leads");
-  revalidatePath("/pipeline");
-  revalidatePath("/dashboard");
-  return { ok: true as const };
+  // Sem revalidatePath: no App Router qualquer revalidatePath re-renderiza a rota
+  // atual. No /inbox isso dispara loading.tsx (~3s) e remonta a lista em «Tudo» p.1
+  // (filtro vive no hash). A página do lead já faz router.refresh() após salvar.
+  return { ok: true as const, ownerId: input.ownerId, ownerName };
 }
 
 function firstOrNull<T>(value: T | T[] | null | undefined): T | null {

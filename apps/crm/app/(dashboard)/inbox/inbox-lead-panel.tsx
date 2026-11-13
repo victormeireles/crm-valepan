@@ -181,13 +181,28 @@ export function InboxLeadPanel(props: InboxLeadPanelProps) {
   }
 
   async function saveOwner(nextOwnerId: string) {
+    const previousOwnerId = ownerId;
     setOwnerId(nextOwnerId);
     setSavingField("owner");
     setError(null);
     try {
       const result = await updateLeadOwner({ leadId: props.leadId, ownerId: nextOwnerId || null });
-      if (!result.ok) setError(result.error ?? "Não foi possível salvar o responsável.");
+      if (!result.ok) {
+        setOwnerId(previousOwnerId);
+        setError(result.error ?? "Não foi possível salvar o responsável.");
+        return;
+      }
+      window.dispatchEvent(
+        new CustomEvent("crm:inbox-lead-owner-changed", {
+          detail: {
+            conversationId: props.conversationId,
+            ownerId: result.ownerId,
+            ownerName: result.ownerName,
+          },
+        }),
+      );
     } catch {
+      setOwnerId(previousOwnerId);
       setError("Não foi possível salvar o responsável. Tente novamente.");
     } finally {
       setSavingField(null);
