@@ -196,11 +196,10 @@ export default async function InboxPage({
       return tb.localeCompare(ta);
     });
 
-  // Sem `cid`, a primeira conversa já veio na RPC compacta. Reconsultá-la
-  // atrasava o início da busca das mensagens sem acrescentar dados essenciais;
-  // a ficha completa permanece disponível pela ação sob demanda.
+  // Sem `cid`, não abre conversa (empty state como no WhatsApp Web).
+  // Deep link com `?cid=` continua carregando a conversa pedida.
   const selectedResult = requestedConversationResult ?? {
-    data: conversationsSorted[0] ?? null,
+    data: null,
     error: null,
   };
   const selected = (selectedResult.data as unknown as ConversationRow | null) ?? null;

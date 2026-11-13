@@ -17,9 +17,9 @@ import {
   inboxClientHref,
   inboxShareHref,
   isInboxTab,
+  mergeStickyUnreadConversations,
   pushInboxClientUrl,
   readInboxLocation,
-  removeReadConversation,
   replaceInboxClientUrl,
   resolveInboxTabTotal,
   sumInboxTabCounts,
@@ -181,6 +181,7 @@ export function InboxSidebar({
     result: Awaited<ReturnType<typeof refreshInboxSidebar>>,
     startedAt: number,
     unreadActive: boolean,
+    mode: "push" | "replace" | "silent",
   ) => {
     recordInboxBrowserMetric("sidebar_refresh", startedAt, {
       success: result.ok,
@@ -189,6 +190,7 @@ export function InboxSidebar({
     if (!result.ok) return;
     setLiveTab(tab);
     setLivePage(nextPage);
+    setLiveUnreadCounts(result.unreadCounts);
     setReadIds((previous) => {
       const next = new Set(previous);
       result.conversations.forEach((conversation) => {
@@ -196,14 +198,27 @@ export function InboxSidebar({
       });
       return next;
     });
-    setLiveConversations(result.conversations);
-    setLiveUnreadCounts(result.unreadCounts);
-    setLiveTabTotal(resolveInboxTabTotal({
-      unreadActive,
-      tab,
-      tabTotal: result.tabTotal,
-      tabCounts: result.tabCounts,
-    }));
+
+    // Sticky só no refresh em tempo real enquanto o filtro «Não lidas» já está ativo.
+    // Troca de filtro/rail/página usa o snapshot puro do servidor.
+    const merged = mergeStickyUnreadConversations(
+      result.conversations,
+      liveConversationsRef.current,
+      readIdsRef.current,
+      unreadActive && mode === "silent",
+    );
+    setLiveConversations(merged);
+    const stickyExtra = Math.max(0, merged.length - result.conversations.length);
+    setLiveTabTotal(
+      unreadActive
+        ? result.tabTotal + stickyExtra
+        : resolveInboxTabTotal({
+            unreadActive,
+            tab,
+            tabTotal: result.tabTotal,
+            tabCounts: result.tabCounts,
+          }),
+    );
   }, []);
 
   const loadList = useCallback((
@@ -236,7 +251,7 @@ export function InboxSidebar({
     }
     void refreshInboxSidebar({ tab, page: nextPage, query: activeQuery, unread: unreadFilter }).then((result) => {
       if (version !== requestVersion.current) return;
-      applySidebarResult(tab, nextPage, result, startedAt, unreadFilter);
+      applySidebarResult(tab, nextPage, result, startedAt, unreadFilter, mode);
       setListPending(false);
       setSearchPending(false);
       if (!result.ok) {
@@ -354,10 +369,8 @@ export function InboxSidebar({
       if (wasUnread && isInboxTab(tab)) {
         setLiveUnreadCounts((counts) => ({ ...counts, [tab]: Math.max(0, counts[tab] - 1) }));
       }
-      if (wasUnread && liveUnreadOnlyRef.current) {
-        setLiveConversations((rows) => removeReadConversation(rows, conversationId, true));
-        setLiveTabTotal((total) => Math.max(0, total - 1));
-      }
+      // No filtro «Não lidas», mantém a linha na lista (sticky) até trocar
+      // filtro, rail ou recarregar — só some o ponto e cai o contador.
     };
     window.addEventListener("crm:conversation-read", onRead);
     return () => window.removeEventListener("crm:conversation-read", onRead);

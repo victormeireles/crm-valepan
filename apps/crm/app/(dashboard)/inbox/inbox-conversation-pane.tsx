@@ -353,7 +353,22 @@ export function InboxConversationPane({
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--vp-paper)] px-[18px]"><ChatThread key={conversation.id} conversationId={conversation.id} initialMessages={view.messages} hasMoreOlder={view.hasMoreOlder} messagesLoadError={view.messagesLoadError} lastReadAtIso={conversation.lastReadAt} /></div>
             <div className="shrink-0 border-t border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] px-[18px] pb-4 pt-3"><SendMessageForm key={conversation.id} conversationId={conversation.id} phone={conversation.phone} firstName={conversation.firstName} comercialFirstName={view.comercialFirstName} /></div>
           </>
-        ) : <div className="flex flex-1 items-center justify-center px-4 py-12"><p className="text-center text-sm text-[var(--muted)]">Nenhuma conversa para mostrar.</p></div>}
+        ) : (
+          <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-12">
+            <span
+              className="grid size-16 place-items-center rounded-full bg-[var(--vp-surface)] text-[var(--vp-wine)]"
+              aria-hidden
+            >
+              <CrmIcon name="chat" className="text-3xl" />
+            </span>
+            <div className="max-w-sm space-y-1.5 text-center">
+              <p className="text-base font-bold text-[var(--vp-ink-body)]">Selecione uma conversa</p>
+              <p className="text-sm text-[var(--vp-ink-muted)]">
+                As mensagens aparecem aqui quando você escolher um contato na lista.
+              </p>
+            </div>
+          </div>
+        )}
       </section>
       {showLoading ? (
         <aside

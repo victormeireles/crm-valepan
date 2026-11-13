@@ -4,8 +4,8 @@ import {
   inboxShareHref,
   inboxTabFromParam,
   inboxUnreadFromParam,
+  mergeStickyUnreadConversations,
   readInboxLocation,
-  removeReadConversation,
   resolveInboxTabTotal,
   sumInboxTabCounts,
 } from "./inbox-location";
@@ -69,9 +69,31 @@ describe("inbox-location", () => {
     ).toBe(14);
   });
 
-  it("removes a read conversation only from an unread-filtered list", () => {
-    const rows = [{ id: "a" }, { id: "b" }];
-    expect(removeReadConversation(rows, "a", true)).toEqual([{ id: "b" }]);
-    expect(removeReadConversation(rows, "a", false)).toBe(rows);
+  it("keeps sticky read rows when merging an unread-filtered refresh", () => {
+    const previous = [{ id: "a" }, { id: "b" }, { id: "c" }];
+    const server = [{ id: "c" }];
+    const readIds = new Set(["a", "b"]);
+    expect(mergeStickyUnreadConversations(server, previous, readIds, true)).toEqual([
+      { id: "a" },
+      { id: "b" },
+      { id: "c" },
+    ]);
+  });
+
+  it("does not keep sticky rows outside the unread filter", () => {
+    const previous = [{ id: "a" }, { id: "b" }];
+    const server = [{ id: "c" }];
+    expect(mergeStickyUnreadConversations(server, previous, new Set(["a"]), false)).toBe(server);
+  });
+
+  it("appends new server unread rows after sticky previous order", () => {
+    const previous = [{ id: "a" }, { id: "b" }];
+    const server = [{ id: "b" }, { id: "d" }];
+    const readIds = new Set(["a"]);
+    expect(mergeStickyUnreadConversations(server, previous, readIds, true)).toEqual([
+      { id: "a" },
+      { id: "b" },
+      { id: "d" },
+    ]);
   });
 });

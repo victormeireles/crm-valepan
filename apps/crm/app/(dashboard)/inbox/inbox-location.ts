@@ -57,12 +57,40 @@ export function resolveInboxTabTotal(input: {
     : input.tabCounts[input.tab];
 }
 
-export function removeReadConversation<T extends { id: string }>(
-  rows: T[],
-  conversationId: string,
+/**
+ * No filtro «Não lidas», mantém na lista conversas já lidas nesta sessão
+ * (estilo WhatsApp) ao refrescar o snapshot do servidor.
+ */
+export function mergeStickyUnreadConversations<T extends { id: string }>(
+  serverRows: T[],
+  previousRows: T[],
+  readIds: ReadonlySet<string>,
   unreadActive: boolean,
 ): T[] {
-  return unreadActive ? rows.filter((row) => row.id !== conversationId) : rows;
+  if (!unreadActive || readIds.size === 0) return serverRows;
+
+  const serverById = new Map(serverRows.map((row) => [row.id, row] as const));
+  const merged: T[] = [];
+  const seen = new Set<string>();
+
+  for (const prev of previousRows) {
+    const fromServer = serverById.get(prev.id);
+    if (fromServer) {
+      merged.push(fromServer);
+      seen.add(prev.id);
+      continue;
+    }
+    if (readIds.has(prev.id)) {
+      merged.push(prev);
+      seen.add(prev.id);
+    }
+  }
+
+  for (const row of serverRows) {
+    if (!seen.has(row.id)) merged.push(row);
+  }
+
+  return merged;
 }
 
 export function inboxShareHref(input: {
