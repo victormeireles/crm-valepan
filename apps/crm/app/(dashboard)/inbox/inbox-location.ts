@@ -223,3 +223,30 @@ export function inboxServerSnapshotMatchesClient(
     && (server.owner ?? null) === (client.owner ?? null)
   );
 }
+
+/**
+ * Flyout da rail: troca tab/responsável sem derrubar o chip «Não lidas».
+ * Opção já ativa → só fecha o menu (sem reload).
+ */
+export function resolveInboxOwnerFilterSelection(input: {
+  currentTab: InboxSearchScope;
+  currentOwner: InboxOwnerFilter;
+  nextTab: InboxTab;
+  nextOwner: InboxOwnerFilter;
+  unreadOnly: boolean;
+}): { reload: false } | {
+  reload: true;
+  tab: InboxTab;
+  owner: InboxOwnerFilter;
+  unread: boolean;
+} {
+  const sameTab = input.currentTab === input.nextTab;
+  const sameOwner = (input.currentOwner ?? null) === (input.nextOwner ?? null);
+  if (sameTab && sameOwner) return { reload: false };
+  return {
+    reload: true,
+    tab: input.nextTab,
+    owner: input.nextOwner,
+    unread: input.unreadOnly,
+  };
+}

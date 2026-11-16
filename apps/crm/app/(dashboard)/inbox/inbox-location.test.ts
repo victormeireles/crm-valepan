@@ -11,6 +11,7 @@ import {
   inboxUnreadFromParam,
   mergeStickyUnreadConversations,
   readInboxLocation,
+  resolveInboxOwnerFilterSelection,
   resolveInboxTabTotal,
   sumInboxTabCounts,
 } from "./inbox-location";
@@ -27,6 +28,52 @@ describe("inbox-location", () => {
     expect(inboxUnreadFromParam("1")).toBe(true);
     expect(inboxUnreadFromParam("true")).toBe(true);
     expect(inboxUnreadFromParam(null)).toBe(false);
+  });
+
+  it("preserves Não lidas when picking an owner on the rail", () => {
+    expect(
+      resolveInboxOwnerFilterSelection({
+        currentTab: "leads",
+        currentOwner: null,
+        nextTab: "leads",
+        nextOwner: "11111111-1111-4111-8111-111111111111",
+        unreadOnly: true,
+      }),
+    ).toEqual({
+      reload: true,
+      tab: "leads",
+      owner: "11111111-1111-4111-8111-111111111111",
+      unread: true,
+    });
+  });
+
+  it("skips reload when the rail owner option is already selected", () => {
+    expect(
+      resolveInboxOwnerFilterSelection({
+        currentTab: "leads",
+        currentOwner: null,
+        nextTab: "leads",
+        nextOwner: null,
+        unreadOnly: true,
+      }),
+    ).toEqual({ reload: false });
+  });
+
+  it("keeps Não lidas when switching rail tab via owner flyout", () => {
+    expect(
+      resolveInboxOwnerFilterSelection({
+        currentTab: "leads",
+        currentOwner: null,
+        nextTab: "groups",
+        nextOwner: null,
+        unreadOnly: true,
+      }),
+    ).toEqual({
+      reload: true,
+      tab: "groups",
+      owner: null,
+      unread: true,
+    });
   });
 
   it("parses owner filter", () => {

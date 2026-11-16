@@ -31,6 +31,7 @@ import {
   pushInboxClientUrl,
   readInboxLocation,
   replaceInboxClientUrl,
+  resolveInboxOwnerFilterSelection,
   resolveInboxTabTotal,
   sumInboxTabCounts,
   type InboxOwnerFilter,
@@ -810,7 +811,15 @@ export function InboxSidebar({
 
   const selectOwnerFilter = (tab: InboxTab, owner: InboxOwnerFilter) => {
     setOwnerFlyoutTab(null);
-    loadList(tab, 1, "push", undefined, false, owner);
+    const next = resolveInboxOwnerFilterSelection({
+      currentTab: liveTab,
+      currentOwner: liveOwnerFilter,
+      nextTab: tab,
+      nextOwner: owner,
+      unreadOnly: liveUnreadOnly,
+    });
+    if (!next.reload) return;
+    loadList(next.tab, 1, "push", undefined, next.unread, next.owner);
   };
 
   const selectRailTab = (tab: InboxTab) => {
