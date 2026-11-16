@@ -20,30 +20,6 @@ export interface Database {
   };
   crm: {
     Tables: {
-      lead_registrations: {
-        Row: {
-          id: string;
-          lead_id: string;
-          source: string;
-          full_name: string;
-          phone_e164: string;
-          client_category: string;
-          zip_code: string;
-          notice_version: string;
-          cpf_cnpj: string | null;
-          created_at: string;
-        };
-        Insert: {
-          lead_id: string;
-          source: string;
-          full_name: string;
-          phone_e164: string;
-          client_category: string;
-          zip_code: string;
-          notice_version: string;
-          cpf_cnpj?: string | null;
-        };
-      };
       profiles: {
         Row: {
           id: string;
@@ -743,19 +719,6 @@ export interface Database {
           unread_count: number;
           is_all: boolean;
         }[];
-      };
-      register_public_lead: {
-        Args: {
-          p_source: string;
-          p_name: string;
-          p_phone: string;
-          p_client_category: string;
-          p_zip_code: string;
-          p_request_key: string;
-          p_notice_version: string;
-          p_document?: string | null;
-        };
-        Returns: Json;
       };
       pipeline_board_snapshot: {
         Args: {

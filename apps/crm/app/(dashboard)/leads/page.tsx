@@ -10,7 +10,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { LeadCategoryRowEdit } from "./lead-category-row-edit";
 import { LeadsFilters } from "./leads-filters";
-import { formatLeadSource, IFOOD_CAMPAIGN } from "@/lib/lead-capture";
+import { formatLeadSource } from "@/lib/lead-capture";
 
 /** Evita cache da lista após salvar (router.refresh + dados atualizados do Supabase). */
 export const dynamic = "force-dynamic";
@@ -76,7 +76,6 @@ export default async function LeadsPage({
   const clientCategory =
     typeof rawCat === "string" && isClientCategoryValue(rawCat) ? rawCat : null;
   const query = typeof sp.q === "string" ? sp.q : "";
-  const campaign = sp.campaign === IFOOD_CAMPAIGN.source ? IFOOD_CAMPAIGN.source : null;
   const requestedPage = typeof sp.page === "string" ? Number.parseInt(sp.page, 10) : 1;
   const page = Number.isFinite(requestedPage) && requestedPage > 0 ? requestedPage : 1;
 
@@ -87,7 +86,7 @@ export default async function LeadsPage({
     rows: leadRows,
     error: leadsError,
     totalCount: databaseTotalCount,
-  } = await fetchLeadListRows(crm, clientCategory, page, PAGE_SIZE, campaign);
+  } = await fetchLeadListRows(crm, clientCategory, page, PAGE_SIZE);
 
   const matchesQuery = (l: LeadListRow) =>
     query.trim().length === 0 || leadListRowMatchesQuery(leadRowSearchFields(l), query);
@@ -114,10 +113,6 @@ export default async function LeadsPage({
       <div>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h1 className="text-lg font-semibold">{pageTitle}</h1>
-          <Link href={IFOOD_CAMPAIGN.path} target="_blank" rel="noopener noreferrer"
-            className="rounded-lg border border-[var(--border)] px-3 py-2 text-xs font-semibold text-[var(--vp-wine)] hover:bg-[var(--vp-surface)]">
-            Página do evento iFood ↗
-          </Link>
         </div>
         <p className="mt-1 text-sm text-[var(--muted)]">
           {clientCategory

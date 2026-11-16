@@ -19,7 +19,6 @@ import { LeadFollowUp } from "@/components/lead-follow-up";
 import { toFollowUpDTO } from "@/lib/follow-ups";
 import { formatLeadSource } from "@/lib/lead-capture";
 import { LeadAddressForm } from "./lead-address-form";
-import { formatCpfCnpj } from "@/lib/cpf-cnpj";
 import { selectCanonicalPipelineStages } from "@/lib/pipeline-canonical-stages";
 
 const TEAM_ROLE_LABEL: Record<string, string> = {
@@ -51,7 +50,6 @@ export default async function LeadDetailPage({
     { data: timeline },
     { data: leadTasksRaw },
     { data: teamProfiles },
-    { data: registrations },
     { data: lostReasonRows },
     distributorCatalogResult,
   ] = await Promise.all([
@@ -81,8 +79,6 @@ export default async function LeadDetailPage({
       .order("done", { ascending: true })
       .order("due_at", { ascending: true, nullsFirst: false }),
     crm.from("profiles").select("id, full_name, role").order("full_name", { ascending: true }),
-    crm.from("lead_registrations").select("id, source, cpf_cnpj")
-      .eq("lead_id", id).not("cpf_cnpj", "is", null).order("created_at", { ascending: false }).limit(5),
     crm.from("lost_reasons").select("id, name, stage_key, sort_order, active").order("sort_order", { ascending: true }),
     fetchDistributorCatalog(crm),
   ]);
@@ -164,11 +160,6 @@ export default async function LeadDetailPage({
           <p className="text-sm text-[var(--muted)]">
             Status: {lead.status} · Origem: {formatLeadSource(lead.source)}
           </p>
-          {registrations?.map((registration) => registration.cpf_cnpj ? (
-            <p key={registration.id} className="text-sm text-[var(--muted)]">
-              CPF/CNPJ: {formatCpfCnpj(registration.cpf_cnpj)} · Informado no {formatLeadSource(registration.source)}
-            </p>
-          ) : null)}
           <div className="mt-3 max-w-md">
             <LeadOwnerForm leadId={id} ownerId={leadOwnerId} teamOptions={teamOptions} />
           </div>

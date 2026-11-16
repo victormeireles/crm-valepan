@@ -45,11 +45,8 @@ export async function fetchLeadListRows(
   clientCategory: string | null,
   page: number,
   pageSize: number,
-  campaign: string | null = null,
 ): Promise<{ rows: LeadListRow[]; error: string | null; totalCount: number }> {
-  const campaignJoin = campaign ? ", lead_registrations!inner(source)" : "";
-  let query = crm.from("leads").select(LEAD_LIST_SELECT_WITH_NETWORK + campaignJoin, { count: "exact" });
-  if (campaign) query = query.eq("lead_registrations.source", campaign);
+  let query = crm.from("leads").select(LEAD_LIST_SELECT_WITH_NETWORK, { count: "exact" });
   if (clientCategory === "distribuidor") {
     query = query
       .or("client_category.eq.distribuidor,network_type.eq.distribuidor")
@@ -67,8 +64,7 @@ export async function fetchLeadListRows(
   if (error && isMissingNetworkTypeColumnError(error)) {
     let fallbackQuery = crm
       .from("leads")
-      .select(LEAD_LIST_SELECT_BASE + campaignJoin, { count: "exact" });
-    if (campaign) fallbackQuery = fallbackQuery.eq("lead_registrations.source", campaign);
+      .select(LEAD_LIST_SELECT_BASE, { count: "exact" });
     if (clientCategory === "distribuidor") {
       fallbackQuery = fallbackQuery
         .or("client_category.eq.distribuidor")

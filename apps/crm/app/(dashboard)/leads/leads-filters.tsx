@@ -1,7 +1,8 @@
 "use client";
 
 import { isClientCategoryValue, type ClientCategoryValue } from "@/lib/client-categories";
-import { IFOOD_CAMPAIGN } from "@/lib/lead-capture";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useState, useTransition } from "react";
 
 const CLIENT_CATEGORY_LABELS: Record<ClientCategoryValue, string> = {
   hamburgueria: "Hamburguerias",
@@ -9,8 +10,6 @@ const CLIENT_CATEGORY_LABELS: Record<ClientCategoryValue, string> = {
   parceiros: "Parceiros",
   outros: "Outros",
 };
-import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useState, useTransition } from "react";
 
 const SEARCH_DEBOUNCE_MS = 300;
 
@@ -28,7 +27,6 @@ export function LeadsFilters({
   const q = searchParams.get("q") ?? "";
   const rawCat = searchParams.get("client_category")?.trim() ?? "";
   const clientCategory = isClientCategoryValue(rawCat) ? rawCat : null;
-  const campaign = searchParams.get("campaign") === IFOOD_CAMPAIGN.source ? IFOOD_CAMPAIGN.source : "";
   const filtering = q.trim().length > 0;
 
   const [draftQ, setDraftQ] = useState(q);
@@ -65,7 +63,6 @@ export function LeadsFilters({
 
   const clearParams = new URLSearchParams();
   if (clientCategory) clearParams.set("client_category", clientCategory);
-  if (campaign) clearParams.set("campaign", campaign);
   const clearHref = clearParams.size ? `/leads?${clearParams}` : "/leads";
 
   return (
@@ -86,15 +83,6 @@ export function LeadsFilters({
             if (trimmed !== q.trim()) pushParams({ q: trimmed || null });
           }}
         />
-      </label>
-
-      <label className="flex items-center gap-2 text-xs font-medium text-[var(--muted)]">
-        Campanha
-        <select value={campaign} onChange={(event) => pushParams({ campaign: event.target.value || null })}
-          className="rounded-md border border-[var(--border)] bg-[var(--vp-paper-pure)] px-2.5 py-1.5 text-sm text-[var(--foreground)]">
-          <option value="">Todas</option>
-          <option value={IFOOD_CAMPAIGN.source}>{IFOOD_CAMPAIGN.label}</option>
-        </select>
       </label>
 
       <div className="flex flex-wrap items-center gap-2 text-xs">
