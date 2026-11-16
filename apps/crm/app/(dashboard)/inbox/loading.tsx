@@ -1,7 +1,7 @@
 export default function InboxLoading() {
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col gap-2 overflow-hidden">
-      <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,40vh)_minmax(0,1fr)] gap-0 overflow-hidden min-[900px]:grid-cols-[474px_minmax(0,1fr)] min-[900px]:grid-rows-[minmax(0,1fr)] xl:grid-cols-[474px_minmax(0,1fr)_348px]">
+      <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,40vh)_minmax(0,1fr)] gap-0 overflow-hidden min-[900px]:grid-cols-[474px_minmax(0,1fr)] min-[900px]:grid-rows-[minmax(0,1fr)]">
         <div
           data-inbox-panel
           className="flex h-full min-h-0 flex-col overflow-hidden rounded-none border-r border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)]"

@@ -40,6 +40,7 @@ export function CrmMenuSelect({
   searchable = false,
   portalRoot = null,
   wide = false,
+  compact = false,
 }: {
   label?: string;
   value: string;
@@ -53,6 +54,8 @@ export function CrmMenuSelect({
   /** Mantém o menu dentro de um dialog modal. O top layer do dialog esconde portais no body. */
   portalRoot?: HTMLElement | null;
   wide?: boolean;
+  /** Toolbar densa: sem label visual, largura menor (label vira aria-label). */
+  compact?: boolean;
 }) {
   const reactId = useId().replace(/:/g, "");
   const listId = `${reactId}-lista`;
@@ -220,10 +223,14 @@ export function CrmMenuSelect({
     ? "truncate font-semibold text-[var(--vp-ink-muted)]"
     : "truncate font-bold text-[var(--vp-wine)]";
 
-  const toolbarWidth = wide ? "min-w-[8.5rem] max-w-[18rem]" : "max-w-[11.5rem] min-w-[8.25rem]";
+  const toolbarWidth = compact
+    ? "min-w-[5.75rem] max-w-[9.5rem]"
+    : wide
+      ? "min-w-[8.5rem] max-w-[18rem]"
+      : "max-w-[11.5rem] min-w-[8.25rem]";
   const buttonClass =
     variant === "toolbar"
-      ? `inline-flex min-h-11 ${toolbarWidth} items-center gap-2 rounded-xl border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] px-3 py-1.5 text-left shadow-[0_1px_0_rgba(35,0,4,0.04)] transition-[border-color,background-color,box-shadow] duration-200 hover:border-[var(--vp-gold-classic)] hover:bg-[var(--vp-gold-cream)] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-[var(--vp-ink-line)] disabled:hover:bg-[var(--vp-paper-pure)] data-[open=true]:border-[var(--vp-gold-classic)] data-[open=true]:bg-[var(--vp-gold-cream)] data-[open=true]:shadow-[var(--sh-sm)]`
+      ? `inline-flex ${compact ? "min-h-9" : "min-h-11"} ${toolbarWidth} items-center gap-1.5 rounded-xl border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] ${compact ? "px-2.5 py-1" : "px-3 py-1.5"} text-left shadow-[0_1px_0_rgba(35,0,4,0.04)] transition-[border-color,background-color,box-shadow] duration-200 hover:border-[var(--vp-gold-classic)] hover:bg-[var(--vp-gold-cream)] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-[var(--vp-ink-line)] disabled:hover:bg-[var(--vp-paper-pure)] data-[open=true]:border-[var(--vp-gold-classic)] data-[open=true]:bg-[var(--vp-gold-cream)] data-[open=true]:shadow-[var(--sh-sm)]`
       : variant === "row"
         ? "flex min-h-11 w-full items-center justify-between gap-2.5 rounded-[10px] border border-[var(--vp-ink-line)] bg-[var(--vp-paper)] px-3 text-left transition-[border-color,background-color,box-shadow] duration-200 hover:border-[var(--vp-gold-classic)] hover:bg-[var(--vp-paper-pure)] hover:shadow-[var(--sh-sm)] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-[var(--vp-ink-line)] disabled:hover:bg-[var(--vp-paper)] disabled:hover:shadow-none data-[open=true]:border-[var(--vp-gold-classic)] data-[open=true]:bg-[var(--vp-paper-pure)] data-[open=true]:shadow-[var(--sh-sm)]"
         : "flex min-h-11 w-full items-center justify-between gap-2 rounded-xl border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] px-3 text-left transition-[border-color,background-color] duration-200 hover:border-[var(--vp-gold-classic)] hover:bg-[var(--vp-gold-cream)] disabled:cursor-not-allowed disabled:opacity-50 data-[open=true]:border-[var(--vp-gold-classic)] data-[open=true]:bg-[var(--vp-gold-cream)]";
@@ -240,17 +247,18 @@ export function CrmMenuSelect({
         aria-expanded={open}
         aria-controls={open ? listId : undefined}
         aria-labelledby={labelledBy}
+        aria-label={!labelledBy && label ? label : undefined}
         onClick={() => (open ? close(false) : openMenu())}
         onKeyDown={onButtonKeyDown}
       >
         {variant === "toolbar" ? (
           <span className="flex min-w-0 flex-1 flex-col items-start">
-            {label ? (
+            {label && !compact ? (
               <span className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-[var(--vp-ink-muted)]">
                 {label}
               </span>
             ) : null}
-            <span className={`max-w-full text-[13px] leading-tight ${valueClass}`} title={display}>
+            <span className={`max-w-full text-[13px] leading-tight ${valueClass}`} title={label ? `${label}: ${display}` : display}>
               {display}
             </span>
           </span>

@@ -9,8 +9,9 @@ import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { ChatThread } from "./chat-thread";
 import { ConversationPipelineSelect } from "./conversation-classification-select";
 import { ExcludeLeadButton, RestoreLeadButton } from "./exclude-lead-actions";
+import { ForwardDistributorByCepButton } from "./forward-distributor-by-cep";
 import { pushInboxClientUrl, readInboxLocation } from "./inbox-location";
-import { InboxLeadPanel, InboxLeadPanelDrawer } from "./inbox-lead-panel";
+import { InboxLeadPanelDrawer } from "./inbox-lead-panel";
 import { MarkConversationRead } from "./mark-conversation-read";
 import { SendMessageForm } from "./send-message-form";
 import type { DistributorOption } from "@/lib/distributors";
@@ -127,7 +128,7 @@ export function InboxConversationPane({
 }) {
   const [view, setView] = useState(initialView);
   const [panelLoading, setPanelLoading] = useState(false);
-  const [mobilePanelOpen, setMobilePanelOpen] = useState(false);
+  const [panelOpen, setPanelOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [, startTransition] = useTransition();
   const [pendingPreview, setPendingPreview] = useState<InboxConversationPreview | null>(null);
@@ -150,7 +151,7 @@ export function InboxConversationPane({
     const version = ++requestVersion.current;
     setError(null);
     setPanelLoading(false);
-    setMobilePanelOpen(false);
+    setPanelOpen(false);
     setPendingPreview(preview ?? null);
     setLoadingConversationId(conversationId);
     setView((current) =>
@@ -215,10 +216,10 @@ export function InboxConversationPane({
   useEffect(() => {
     setDistributorId(conversation?.distributorId ?? "");
   }, [conversation?.id, conversation?.distributorId]);
-  const loadLeadPanel = async (openOnMobile = false) => {
+  const openLeadPanel = async () => {
     if (!conversation?.leadId) return;
     if (view?.leadPanel) {
-      if (openOnMobile) setMobilePanelOpen(true);
+      setPanelOpen(true);
       return;
     }
     const conversationId = conversation.id;
@@ -231,7 +232,7 @@ export function InboxConversationPane({
       if (version !== requestVersion.current) return;
       recordInboxBrowserMetric("lead_panel", startedAt, {
         success: result.ok,
-        mobile: openOnMobile,
+        drawer: true,
       });
       if (!result.ok) {
         setError(result.error);
@@ -240,11 +241,11 @@ export function InboxConversationPane({
       setView((current) => current?.conversation.id === conversationId
         ? { ...current, leadPanel: result.panel }
         : current);
-      if (openOnMobile && result.panel) setMobilePanelOpen(true);
+      if (result.panel) setPanelOpen(true);
     } catch {
       recordInboxBrowserMetric("lead_panel", startedAt, {
         success: false,
-        mobile: openOnMobile,
+        drawer: true,
       });
       if (version === requestVersion.current) {
         setError("Não foi possível carregar a ficha. Tente novamente.");
@@ -263,7 +264,6 @@ export function InboxConversationPane({
   const showLoading = loadingConversationId != null;
 
   return (
-    <>
       <section
         data-inbox-panel
         aria-busy={showLoading}
@@ -291,33 +291,32 @@ export function InboxConversationPane({
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   {conversation.lastDirection === "in" && wait ? <span className="hidden items-center gap-1.5 rounded-full bg-[rgba(186,26,26,0.1)] px-3 py-1.5 text-[11px] font-extrabold tracking-[0.04em] text-[var(--vp-error)] sm:inline-flex"><span className="size-[7px] rounded-full bg-[var(--vp-error)]" />{wait.label.replace("Cliente esperando ", "Esperando ")}</span> : null}
+                  <a href={`tel:${conversation.phone}`} className="grid size-[34px] place-items-center rounded-full border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] text-[var(--vp-wine)]" aria-label={`Ligar para ${conversation.headerName}`}><CrmIcon name="call" className="text-lg" /></a>
                   {conversation.leadId ? (
-                    <button
-                      type="button"
-                      disabled={panelLoading}
-                      onClick={() => void loadLeadPanel(true)}
-                      className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] px-3 text-xs font-bold text-[var(--vp-wine)] disabled:opacity-60 xl:hidden"
-                    >
-                      <CrmIcon name="contact_page" className="text-base" />
-                      {panelLoading ? "Carregando…" : "Ficha"}
-                    </button>
-                  ) : null}
-                  {view.leadPanel ? (
-                    <InboxLeadPanelDrawer
-                      key={conversation.id}
-                      {...view.leadPanel}
-                      stages={stages}
-                      substages={substages}
-                      distributors={distributors}
-                      initialDistributorId={distributorId || null}
-                      distributorName={conversation.distributorName}
-                      onDistributorChange={saveDistributor}
-                      hideTrigger
-                      open={mobilePanelOpen}
-                      onOpenChange={setMobilePanelOpen}
+                    <ForwardDistributorByCepButton
+                      conversationId={conversation.id}
+                      leadId={conversation.leadId}
+                      initialZipCode={conversation.zipCode}
+                      onAssigned={(next) => {
+                        setDistributorId(next.distributorId);
+                        setView((current) =>
+                          current
+                            ? {
+                                ...current,
+                                conversation: {
+                                  ...current.conversation,
+                                  stageId: next.stageId,
+                                  substage: next.substage,
+                                  distributorId: next.distributorId,
+                                  distributorName: next.distributorName,
+                                  zipCode: next.zipCode,
+                                },
+                              }
+                            : current,
+                        );
+                      }}
                     />
                   ) : null}
-                  <a href={`tel:${conversation.phone}`} className="grid size-[34px] place-items-center rounded-full border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] text-[var(--vp-wine)]" aria-label={`Ligar para ${conversation.headerName}`}><CrmIcon name="call" className="text-lg" /></a>
                   {conversation.leadId ? (
                     <ConversationPipelineSelect
                       conversationId={conversation.id}
@@ -346,6 +345,35 @@ export function InboxConversationPane({
                       }}
                     />
                   ) : null}
+                  {conversation.leadId ? (
+                    <button
+                      type="button"
+                      disabled={panelLoading}
+                      onClick={() => void openLeadPanel()}
+                      aria-expanded={panelOpen}
+                      className="inline-flex min-h-9 cursor-pointer items-center gap-1.5 rounded-full border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] px-3 text-xs font-bold text-[var(--vp-wine)] transition-[border-color,background-color] duration-200 hover:border-[var(--vp-gold-classic)] hover:bg-[var(--vp-gold-cream)] disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      <CrmIcon name="contact_page" className="text-base" />
+                      {panelLoading ? "Carregando…" : "Ficha"}
+                    </button>
+                  ) : null}
+                  {view.leadPanel ? (
+                    <InboxLeadPanelDrawer
+                      key={conversation.id}
+                      {...view.leadPanel}
+                      stages={stages}
+                      substages={substages}
+                      distributors={distributors}
+                      initialDistributorId={distributorId || null}
+                      distributorName={conversation.distributorName}
+                      onDistributorChange={saveDistributor}
+                      initialStageId={conversation.stageId ?? view.leadPanel.initialStageId}
+                      initialSubstage={conversation.substage ?? view.leadPanel.initialSubstage}
+                      hideTrigger
+                      open={panelOpen}
+                      onOpenChange={setPanelOpen}
+                    />
+                  ) : null}
                   {conversation.leadExcluded && conversation.leadId ? <RestoreLeadButton leadId={conversation.leadId} /> : conversation.leadId ? <ExcludeLeadButton leadId={conversation.leadId} iconOnly /> : null}
                 </div>
               </div>
@@ -370,44 +398,5 @@ export function InboxConversationPane({
           </div>
         )}
       </section>
-      {showLoading ? (
-        <aside
-          data-inbox-panel
-          className="hidden h-full min-h-0 flex-col overflow-hidden rounded-none bg-[var(--vp-paper-pure)] px-5 py-5 xl:flex"
-        >
-          <span className="mb-4 block h-4 w-28 motion-safe:animate-pulse rounded bg-[var(--vp-surface-high)]" />
-          <span className="mb-3 block h-10 w-full motion-safe:animate-pulse rounded-xl bg-[var(--vp-surface)]" />
-          <span className="mb-3 block h-10 w-full motion-safe:animate-pulse rounded-xl bg-[var(--vp-surface)]" />
-          <span className="mt-auto block h-11 w-full motion-safe:animate-pulse rounded-full bg-[var(--vp-surface-high)]" />
-        </aside>
-      ) : view?.leadPanel ? (
-        <div data-inbox-panel className="hidden h-full min-h-0 overflow-hidden rounded-none xl:flex xl:flex-col">
-          <InboxLeadPanel
-            key={view.conversation.id}
-            {...view.leadPanel}
-            stages={stages}
-            substages={substages}
-            distributors={distributors}
-            initialDistributorId={distributorId || null}
-            distributorName={view.conversation.distributorName}
-            onDistributorChange={saveDistributor}
-            initialStageId={view.conversation.stageId ?? view.leadPanel.initialStageId}
-            initialSubstage={view.conversation.substage ?? view.leadPanel.initialSubstage}
-          />
-        </div>
-      ) : (
-        <aside
-          data-inbox-panel
-          className="hidden h-full min-h-0 flex-col items-center justify-center gap-3 overflow-y-auto rounded-none bg-[var(--vp-paper-pure)] px-5 text-center text-xs text-[var(--vp-ink-muted)] xl:flex"
-        >
-          <span>{conversation?.leadId ? "A ficha será carregada somente quando necessária." : "Esta conversa não possui uma ficha de lead."}</span>
-          {conversation?.leadId ? (
-            <button type="button" disabled={panelLoading} onClick={() => void loadLeadPanel()} className="min-h-9 rounded-full bg-[var(--vp-wine)] px-4 font-bold text-[var(--vp-gold)] disabled:opacity-60">
-              {panelLoading ? "Carregando ficha…" : "Carregar ficha"}
-            </button>
-          ) : null}
-        </aside>
-      )}
-    </>
   );
 }

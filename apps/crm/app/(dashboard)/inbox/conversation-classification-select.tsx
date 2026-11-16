@@ -108,13 +108,15 @@ export function ConversationPipelineSelect({
   }
 
   const menuVariant = layout === "stack" ? "row" : "toolbar";
+  const compactToolbar = layout === "inline";
 
   return (
-    <div className={layout === "stack" ? "grid gap-2" : "flex flex-wrap items-center justify-end gap-2"}>
+    <div className={layout === "stack" ? "grid gap-2" : "flex flex-wrap items-center justify-end gap-1.5"}>
       <CrmMenuSelect
         label="Etapa"
         portalRoot={portalRoot}
         variant={menuVariant}
+        compact={compactToolbar}
         value={stageValue}
         disabled={loading}
         options={[
@@ -137,6 +139,7 @@ export function ConversationPipelineSelect({
         label="Status"
         portalRoot={portalRoot}
         variant={menuVariant}
+        compact={compactToolbar}
         value={statusValue}
         disabled={loading || !stageValue || statusOptions.length === 0}
         options={[
@@ -148,7 +151,7 @@ export function ConversationPipelineSelect({
           void persist(stageValue, next);
         }}
       />
-      {leadId && isForwardedToDistributorSubstage(statusValue) ? (
+      {layout === "stack" && leadId && isForwardedToDistributorSubstage(statusValue) ? (
         <LeadDistributorSelect
           leadId={leadId}
           options={distributorOptionsForSelect(

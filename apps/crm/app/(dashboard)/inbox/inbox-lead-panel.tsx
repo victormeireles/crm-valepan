@@ -10,7 +10,7 @@ import { distributorOptionsForSelect, type DistributorOption } from "@/lib/distr
 import { CrmIcon, type CrmIconName } from "@/components/crm-icon";
 import { LeadFollowUp } from "@/components/lead-follow-up";
 import type { LeadFollowUpDTO } from "@/lib/follow-ups";
-import { useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   displayPipelineStageName,
   isLostPipelineStage,
@@ -263,7 +263,7 @@ export function InboxLeadPanel(props: InboxLeadPanelProps) {
       data-inbox-panel
       className="flex h-full min-h-0 flex-col overflow-hidden rounded-none bg-[var(--vp-paper-pure)]"
     >
-      <header className="shrink-0 border-b border-[var(--vp-ink-line)] px-4 py-3.5">
+      <header className="shrink-0 border-b border-[var(--vp-ink-line)] px-4 py-3.5 pr-14">
         <p className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-[var(--vp-gold-classic)]">Ficha do lead</p>
         <p className="mt-1 truncate text-[15px] font-bold text-[var(--vp-wine)]">{props.companyName ?? props.contactName}</p>
       </header>
@@ -507,18 +507,45 @@ export function InboxLeadPanelDrawer({
     if (controlledOpen === undefined) setInternalOpen(next);
     onOpenChange?.(next);
   };
+
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [open]);
+
   return (
     <>
       {!hideTrigger ? (
-        <button type="button" className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] px-3 text-xs font-bold text-[var(--vp-wine)] xl:hidden" onClick={() => setOpen(true)}>
+        <button
+          type="button"
+          className="inline-flex min-h-9 cursor-pointer items-center gap-1.5 rounded-full border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] px-3 text-xs font-bold text-[var(--vp-wine)] transition-[border-color,background-color] duration-200 hover:border-[var(--vp-gold-classic)] hover:bg-[var(--vp-gold-cream)]"
+          onClick={() => setOpen(true)}
+        >
           <CrmIcon name="contact_page" className="text-base" />
           Ficha
         </button>
       ) : null}
       {open ? (
-        <div className="fixed inset-0 z-50 bg-[rgba(35,0,4,0.35)] xl:hidden" role="dialog" aria-modal="true" aria-label="Ficha do lead">
-          <div className="absolute inset-y-0 right-0 w-[min(92vw,348px)] overflow-hidden rounded-none bg-[var(--vp-paper-pure)] shadow-[var(--sh-lg)]">
-            <button type="button" className="absolute right-5 top-5 z-10 grid size-9 place-items-center rounded-full bg-[var(--vp-surface)] text-[var(--vp-wine)]" onClick={() => setOpen(false)} aria-label="Fechar ficha">
+        <div
+          className="fixed inset-0 z-50 bg-[rgba(35,0,4,0.35)] motion-safe:animate-[crm-menu-in_160ms_var(--ease-out-quint,ease-out)]"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Ficha do lead"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setOpen(false);
+          }}
+        >
+          <div className="absolute inset-y-0 right-0 flex w-[min(92vw,360px)] flex-col overflow-hidden rounded-none bg-[var(--vp-paper-pure)] shadow-[var(--sh-lg)] motion-safe:animate-[pipeline-peek-in_220ms_var(--ease-out-quint,ease-out)]">
+            <button
+              type="button"
+              className="absolute right-4 top-3.5 z-10 grid size-9 cursor-pointer place-items-center rounded-full bg-[var(--vp-surface)] text-[var(--vp-wine)] transition-colors duration-200 hover:bg-[var(--vp-surface-high)]"
+              onClick={() => setOpen(false)}
+              aria-label="Fechar ficha"
+            >
               <CrmIcon name="close" className="text-xl" />
             </button>
             <InboxLeadPanel key={props.conversationId} {...props} />

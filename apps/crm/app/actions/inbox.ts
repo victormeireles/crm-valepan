@@ -8,7 +8,11 @@ import {
   loadOlderMessagesPage,
 } from "@/lib/inbox/load-messages";
 import { displayCompanyName, displayPersonName } from "@/lib/lead-identity";
-import { fetchDistributorCatalog } from "@/lib/distributor-catalog";
+import {
+  fetchDistributorCatalog,
+  fetchDistributorsByCep,
+  type DistributorByCepOption,
+} from "@/lib/distributor-catalog";
 import { isLeadExcludedFromPipeline } from "@/lib/lead-pipeline-exclusion";
 import type {
   InboxOwnerFilter,
@@ -40,11 +44,13 @@ import {
 import {
   canonicalPipelineStageKey,
   displayPipelineStageName,
+  findCanonicalPipelineStage,
   isLostPipelineStage,
   selectCanonicalPipelineStages,
 } from "@/lib/pipeline-canonical-stages";
 import {
   conversationClassificationForStageAndSubstage,
+  isForwardedToDistributorSubstage,
 } from "@/lib/pipeline-substages";
 import { templateFirstName } from "@/lib/inbox/quick-replies";
 import { WHATSAPP_MEDIA_BUCKET } from "@/lib/media-storage";
@@ -100,6 +106,7 @@ export type InboxConversationView = {
     substage: string | null;
     distributorId: string | null;
     distributorName: string | null;
+    zipCode: string | null;
   };
   /** Primeiro nome do usuário logado para {{comercial_nome}} nas respostas rápidas. */
   comercialFirstName: string;
@@ -518,7 +525,7 @@ export async function loadInboxConversationView(conversationId: string) {
   const [conversationTimed, tailTimed, profileTimed] = await Promise.all([
     timeInboxOperation("selected_conversation", crm.from("conversations").select(`
       id, phone_e164, conversation_kind, group_display_name, last_read_at,
-      leads(id, client_category, cliente_distribuidor_id, excluded_from_pipeline_at, city, state,
+      leads(id, client_category, cliente_distribuidor_id, excluded_from_pipeline_at, zip_code, city, state,
         contacts(full_name, avatar_url),
         companies(name, city, state),
         opportunities(id, stage_id, lost_reason, updated_at)
@@ -588,6 +595,7 @@ export async function loadInboxConversationView(conversationId: string) {
       substage: opportunity?.lost_reason ?? null,
       distributorId,
       distributorName,
+      zipCode: lead?.zip_code ?? null,
     },
     comercialFirstName,
     messages: messagesResult.messages,
@@ -1603,6 +1611,149 @@ export async function updateConversationPipelineClassification(input: {
   revalidatePath("/inbox");
   revalidatePath("/pipeline");
   return { ok: true, stageId: stage.id, substage: nextSubstage };
+}
+
+function normalizeCepDigits(value: string | null | undefined): string | null {
+  const digits = String(value ?? "").replace(/\D/g, "");
+  return /^\d{8}$/.test(digits) ? digits : null;
+}
+
+export async function listDistributorsByCep(input: { cep: string }): Promise<
+  | { ok: true; cep: string; options: DistributorByCepOption[] }
+  | { ok: false; error: string }
+> {
+  const cep = normalizeCepDigits(input.cep);
+  if (!cep) return { ok: false, error: "Informe um CEP válido com 8 números." };
+
+  const supabase = await createServerSupabaseClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Não autenticado" };
+
+  const crm = crmTables(supabase);
+  const result = await fetchDistributorsByCep(crm, cep);
+  if (result.error) return { ok: false, error: result.error };
+  return { ok: true, cep, options: result.options };
+}
+
+/**
+ * Marca Negociação → Encaminhado para o distribuidor e vincula o distribuidor do CEP.
+ */
+export async function forwardConversationToDistributorByCep(input: {
+  conversationId: string;
+  distributorId: string;
+  cep: string;
+}): Promise<
+  | {
+      ok: true;
+      stageId: string;
+      substage: string;
+      distributorId: string;
+      distributorName: string;
+      zipCode: string;
+    }
+  | { ok: false; error: string }
+> {
+  const conversationId = input.conversationId.trim();
+  const distributorId = input.distributorId.trim();
+  const cep = normalizeCepDigits(input.cep);
+  if (!conversationId) return { ok: false, error: "Conversa inválida." };
+  if (!distributorId) return { ok: false, error: "Selecione um distribuidor." };
+  if (!cep) return { ok: false, error: "Informe um CEP válido com 8 números." };
+
+  const supabase = await createServerSupabaseClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Não autenticado" };
+  const crm = crmTables(supabase);
+
+  const { data: conversation, error: conversationError } = await crm
+    .from("conversations")
+    .select("id, lead_id")
+    .eq("id", conversationId)
+    .maybeSingle();
+  if (conversationError) return { ok: false, error: conversationError.message };
+  if (!conversation?.lead_id) return { ok: false, error: "Conversa sem lead vinculado." };
+
+  const covered = await fetchDistributorsByCep(crm, cep);
+  if (covered.error) return { ok: false, error: covered.error };
+  const selected = covered.options.find((option) => option.id === distributorId);
+  if (!selected) {
+    return { ok: false, error: "Distribuidor não atende este CEP ou está inativo." };
+  }
+
+  const { data: stagesRows, error: stagesError } = await crm
+    .from("pipeline_stages")
+    .select("id, name, sort_order, is_final");
+  if (stagesError) return { ok: false, error: stagesError.message };
+  const negotiation = findCanonicalPipelineStage(
+    selectCanonicalPipelineStages(stagesRows ?? []),
+    "NEGOCIAÇÃO",
+  );
+  if (!negotiation?.id) return { ok: false, error: "Etapa Negociação não encontrada." };
+
+  const { data: substages, error: substagesError } = await crm
+    .from("lost_reasons")
+    .select("name, active, stage_key");
+  if (substagesError) return { ok: false, error: substagesError.message };
+  const forwardSubstage =
+    (substages ?? []).find(
+      (row) =>
+        row.active &&
+        canonicalPipelineStageKey(row.stage_key) === "NEGOCIAÇÃO" &&
+        isForwardedToDistributorSubstage(row.name),
+    )?.name ?? null;
+  if (!forwardSubstage) {
+    return { ok: false, error: "Status Encaminhado para o distribuidor não encontrado." };
+  }
+
+  const { data: leadRow, error: leadError } = await crm
+    .from("leads")
+    .select("id, zip_code")
+    .eq("id", conversation.lead_id)
+    .maybeSingle();
+  if (leadError) return { ok: false, error: leadError.message };
+  if (!leadRow) return { ok: false, error: "Lead não encontrado." };
+
+  const leadPatch: {
+    cliente_distribuidor_id: string;
+    updated_at: string;
+    zip_code?: string;
+  } = {
+    cliente_distribuidor_id: selected.id,
+    updated_at: new Date().toISOString(),
+  };
+  if (!normalizeCepDigits(leadRow.zip_code)) {
+    leadPatch.zip_code = cep;
+  }
+
+  const { error: leadUpdateError } = await crm
+    .from("leads")
+    .update(leadPatch)
+    .eq("id", conversation.lead_id);
+  if (leadUpdateError) return { ok: false, error: leadUpdateError.message };
+
+  const classified = await updateConversationPipelineClassification({
+    conversationId,
+    stageId: negotiation.id,
+    substage: forwardSubstage,
+  });
+  if (!classified.ok) return classified;
+  if (!classified.stageId) return { ok: false, error: "Não foi possível atualizar a etapa." };
+
+  revalidatePath("/inbox");
+  revalidatePath("/pipeline");
+  revalidatePath("/leads");
+  return {
+    ok: true,
+    stageId: classified.stageId,
+    substage: classified.substage ?? forwardSubstage,
+    distributorId: selected.id,
+    distributorName: selected.name,
+    zipCode: normalizeCepDigits(leadRow.zip_code) ?? cep,
+  };
 }
 
 export async function updateConversationContactName(input: {

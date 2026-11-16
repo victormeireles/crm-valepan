@@ -648,6 +648,18 @@ export interface Database {
           ativo: boolean;
         }[];
       };
+      list_distribuidores_por_cep: {
+        Args: {
+          p_cep: string;
+        };
+        Returns: {
+          id: string;
+          name: string;
+          cep_prioridade: number | null;
+          cep_de: string;
+          cep_ate: string;
+        }[];
+      };
       merge_zapi_lid_identity: {
         Args: {
           p_lid_key: string;
