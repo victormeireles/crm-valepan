@@ -15,6 +15,7 @@ export function LeadDistributorSelect({
   emptyLabel = "Selecione o distribuidor",
   portalRoot = null,
   wide = false,
+  compact = false,
 }: {
   leadId: string;
   options: DistributorOption[];
@@ -24,6 +25,7 @@ export function LeadDistributorSelect({
   emptyLabel?: string;
   portalRoot?: HTMLElement | null;
   wide?: boolean;
+  compact?: boolean;
 }) {
   const router = useRouter();
   const [value, setValue] = useState(distributorId ?? "");
@@ -43,6 +45,7 @@ export function LeadDistributorSelect({
         searchable
         portalRoot={portalRoot}
         wide={wide}
+        compact={compact}
         variant={appearance}
         value={known ? value : ""}
         disabled={loading || options.length === 0}

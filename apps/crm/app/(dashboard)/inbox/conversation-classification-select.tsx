@@ -1,7 +1,7 @@
 "use client";
 
 import { updateConversationPipelineClassification } from "@/app/actions/inbox";
-import { CrmMenuSelect } from "@/components/crm-menu-select";
+import { CrmMenuSelect, type CrmMenuOption } from "@/components/crm-menu-select";
 import { LeadDistributorSelect } from "@/components/lead-distributor-select";
 import type { DistributorOption } from "@/lib/distributors";
 import { distributorOptionsForSelect } from "@/lib/distributors";
@@ -11,6 +11,7 @@ import {
   isLostPipelineStage,
 } from "@/lib/pipeline-canonical-stages";
 import {
+  compactSubstageLabel,
   isForwardedToDistributorSubstage,
   substagesForStageKey,
   type PipelineSubstageDTO,
@@ -19,6 +20,32 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 type StageOption = { id: string; name: string; sortOrder: number; isFinal?: boolean };
+
+const PIPELINE_VALUE_SEP = "::";
+
+function encodePipelineValue(stageId: string, status: string) {
+  if (!stageId) return "";
+  return `${stageId}${PIPELINE_VALUE_SEP}${status}`;
+}
+
+function decodePipelineValue(value: string): { stageId: string; status: string } {
+  if (!value) return { stageId: "", status: "" };
+  const sep = value.indexOf(PIPELINE_VALUE_SEP);
+  if (sep < 0) return { stageId: value, status: "" };
+  return { stageId: value.slice(0, sep), status: value.slice(sep + PIPELINE_VALUE_SEP.length) };
+}
+
+function pipelineTriggerLabel(
+  stageName: string | null | undefined,
+  status: string,
+  compact: boolean,
+) {
+  if (!stageName) return "Não definida";
+  const stageLabel = displayPipelineStageName(stageName);
+  if (!status) return stageLabel;
+  const statusLabel = compact ? compactSubstageLabel(status) || status : status;
+  return `${stageLabel} · ${statusLabel}`;
+}
 
 export function ConversationPipelineSelect({
   conversationId,
@@ -69,8 +96,38 @@ export function ConversationPipelineSelect({
   }, [substage]);
 
   const selectedStage = orderedStages.find((stage) => stage.id === stageValue) ?? null;
-  const statusOptions = substagesForStageKey(substages, selectedStage?.name ?? null, statusValue);
-  const statusRequired = isLostPipelineStage(selectedStage?.name);
+  const pipelineValue = encodePipelineValue(stageValue, statusValue);
+  const compactToolbar = layout === "inline";
+
+  const pipelineOptions = useMemo(() => {
+    const options: CrmMenuOption[] = [{ value: "", label: "Não definida" }];
+    for (const stage of orderedStages) {
+      const group = displayPipelineStageName(stage.name);
+      const statusOptions = substagesForStageKey(substages, stage.name, stage.id === stageValue ? statusValue : null);
+      const statusRequired = isLostPipelineStage(stage.name);
+      if (!statusRequired) {
+        options.push({
+          value: encodePipelineValue(stage.id, ""),
+          label: "Sem status",
+          group,
+        });
+      } else if (statusOptions.length === 0) {
+        options.push({
+          value: encodePipelineValue(stage.id, ""),
+          label: "Selecione o status",
+          group,
+        });
+      }
+      for (const name of statusOptions) {
+        options.push({
+          value: encodePipelineValue(stage.id, name),
+          label: name,
+          group,
+        });
+      }
+    }
+    return options;
+  }, [orderedStages, substages, stageValue, statusValue]);
 
   async function persist(nextStageId: string, nextStatus: string) {
     const stage = orderedStages.find((item) => item.id === nextStageId) ?? null;
@@ -108,52 +165,33 @@ export function ConversationPipelineSelect({
   }
 
   const menuVariant = layout === "stack" ? "row" : "toolbar";
-  const compactToolbar = layout === "inline";
+  const showDistributor = Boolean(leadId && isForwardedToDistributorSubstage(statusValue));
+  const triggerDisplay = pipelineTriggerLabel(selectedStage?.name, statusValue, compactToolbar);
+  const triggerTitle = pipelineTriggerLabel(selectedStage?.name, statusValue, false);
 
   return (
     <div className={layout === "stack" ? "grid gap-2" : "flex flex-wrap items-center justify-end gap-1.5"}>
       <CrmMenuSelect
-        label="Etapa"
+        label="Funil"
         portalRoot={portalRoot}
         variant={menuVariant}
         compact={compactToolbar}
-        value={stageValue}
+        compactWide={compactToolbar}
+        displayLabel={triggerDisplay}
+        displayTitle={triggerTitle}
+        value={pipelineValue}
         disabled={loading}
-        options={[
-          { value: "", label: "Não definida" },
-          ...orderedStages.map((stage) => ({
-            value: stage.id,
-            label: displayPipelineStageName(stage.name),
-          })),
-        ]}
+        options={pipelineOptions}
         onChange={(next) => {
-          const stage = orderedStages.find((item) => item.id === next) ?? null;
-          const nextOptions = substagesForStageKey(substages, stage?.name ?? null, "");
-          const nextStatus = nextOptions.includes(statusValue) ? statusValue : "";
-          setStageValue(next);
-          setStatusValue(nextStatus);
-          void persist(next, nextStatus);
+          const decoded = decodePipelineValue(next);
+          setStageValue(decoded.stageId);
+          setStatusValue(decoded.status);
+          void persist(decoded.stageId, decoded.status);
         }}
       />
-      <CrmMenuSelect
-        label="Status"
-        portalRoot={portalRoot}
-        variant={menuVariant}
-        compact={compactToolbar}
-        value={statusValue}
-        disabled={loading || !stageValue || statusOptions.length === 0}
-        options={[
-          { value: "", label: statusRequired ? "Selecione o status" : "Sem status" },
-          ...statusOptions.map((name) => ({ value: name, label: name })),
-        ]}
-        onChange={(next) => {
-          setStatusValue(next);
-          void persist(stageValue, next);
-        }}
-      />
-      {layout === "stack" && leadId && isForwardedToDistributorSubstage(statusValue) ? (
+      {showDistributor ? (
         <LeadDistributorSelect
-          leadId={leadId}
+          leadId={leadId!}
           options={distributorOptionsForSelect(
             distributors,
             distributorId ? { id: distributorId, name: distributorName?.trim() || "Distribuidor atual" } : null,
@@ -162,6 +200,8 @@ export function ConversationPipelineSelect({
           onSaved={onDistributorSaved}
           appearance={menuVariant}
           portalRoot={portalRoot}
+          wide={compactToolbar}
+          compact={compactToolbar}
         />
       ) : null}
       {err ? (

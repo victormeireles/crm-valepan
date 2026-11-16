@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  compactSubstageLabel,
   conversationClassificationForStageAndSubstage,
   isForwardedToDistributorSubstage,
   substageLabelOnCard,
@@ -31,6 +32,12 @@ describe("pipeline substages", () => {
     expect(isForwardedToDistributorSubstage("Encaminhado para o distribuidor")).toBe(true);
     expect(isForwardedToDistributorSubstage("ENCAMINHADO PARA O DISTRIBUIDOR")).toBe(true);
     expect(isForwardedToDistributorSubstage("Pediu amostra")).toBe(false);
+  });
+
+  it("encurta o status de encaminhamento no trigger compacto", () => {
+    expect(compactSubstageLabel("Encaminhado para o distribuidor")).toBe("Encaminhado");
+    expect(compactSubstageLabel("Pediu amostra")).toBe("Pediu amostra");
+    expect(compactSubstageLabel("")).toBe("");
   });
 
   it("troca a flag do card pelo distribuidor alocado", () => {

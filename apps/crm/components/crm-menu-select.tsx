@@ -11,7 +11,13 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 
-export type CrmMenuOption = { value: string; label: string; meta?: string };
+export type CrmMenuOption = {
+  value: string;
+  label: string;
+  meta?: string;
+  /** Quando presente, a opção entra numa seção expansível no menu. */
+  group?: string;
+};
 
 type Variant = "toolbar" | "row" | "field";
 
@@ -24,8 +30,28 @@ type MenuCoords = {
   side: "up" | "down";
 };
 
+type MenuGroup = { key: string; label: string; options: CrmMenuOption[] };
+
 function foldSearch(value: string) {
   return value.normalize("NFD").replace(/\p{M}/gu, "").toLocaleLowerCase("pt-BR");
+}
+
+function buildMenuGroups(options: CrmMenuOption[]): MenuGroup[] | null {
+  if (!options.some((option) => option.group)) return null;
+  const groups: MenuGroup[] = [];
+  const indexByKey = new Map<string, number>();
+  for (const option of options) {
+    const label = option.group?.trim() || "";
+    const key = label || "__ungrouped__";
+    const existing = indexByKey.get(key);
+    if (existing === undefined) {
+      indexByKey.set(key, groups.length);
+      groups.push({ key, label, options: [option] });
+    } else {
+      groups[existing]?.options.push(option);
+    }
+  }
+  return groups;
 }
 
 export function CrmMenuSelect({
@@ -41,6 +67,9 @@ export function CrmMenuSelect({
   portalRoot = null,
   wide = false,
   compact = false,
+  compactWide = false,
+  displayLabel,
+  displayTitle,
 }: {
   label?: string;
   value: string;
@@ -56,6 +85,12 @@ export function CrmMenuSelect({
   wide?: boolean;
   /** Toolbar densa: sem label visual, largura menor (label vira aria-label). */
   compact?: boolean;
+  /** Compacto um pouco mais largo (ex.: etapa · status no header). */
+  compactWide?: boolean;
+  /** Texto do trigger; se omitido, usa o label da opção selecionada. */
+  displayLabel?: string;
+  /** Tooltip/title do trigger; se omitido, deriva do label da opção. */
+  displayTitle?: string;
 }) {
   const reactId = useId().replace(/:/g, "");
   const listId = `${reactId}-lista`;
@@ -69,16 +104,28 @@ export function CrmMenuSelect({
   const [query, setQuery] = useState("");
   const [coords, setCoords] = useState<MenuCoords | null>(null);
   const [mounted, setMounted] = useState(false);
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => new Set());
   const foldedQuery = foldSearch(query.trim());
-  const visibleOptions =
+  const menuGroups = buildMenuGroups(options);
+  const filteredOptions =
     searchable && foldedQuery
       ? options.filter((option) => option.value !== "" && foldSearch(option.label).includes(foldedQuery))
       : options;
+  const searching = Boolean(searchable && foldedQuery);
+  const visibleOptions = searching
+    ? filteredOptions
+    : menuGroups
+      ? menuGroups.flatMap((group) =>
+          group.key === "__ungrouped__" || expandedGroups.has(group.key) ? group.options : [],
+        )
+      : filteredOptions;
 
   const selected = options.find((option) => option.value === value) ?? null;
-  const display = selected?.label ?? "Selecionar";
+  const display = displayLabel ?? selected?.label ?? "Selecionar";
   const muted = value === "";
-
+  const titleText =
+    displayTitle ??
+    (selected?.label ? (label ? `${label}: ${selected.label}` : selected.label) : display);
   useEffect(() => {
     setMounted(true);
   }, []);
@@ -150,10 +197,36 @@ export function CrmMenuSelect({
 
   function openMenu() {
     if (disabled || options.length === 0) return;
-    const index = options.findIndex((option) => option.value === value);
     setQuery("");
-    setActive(index >= 0 ? index : 0);
+    const groups = buildMenuGroups(options);
+    if (groups) {
+      const selectedGroup = options.find((option) => option.value === value)?.group?.trim() || "";
+      const nextExpanded = new Set<string>();
+      if (selectedGroup) nextExpanded.add(selectedGroup);
+      else {
+        const firstGrouped = groups.find((group) => group.key !== "__ungrouped__");
+        if (firstGrouped) nextExpanded.add(firstGrouped.key);
+      }
+      setExpandedGroups(nextExpanded);
+      const visible = groups.flatMap((group) =>
+        group.key === "__ungrouped__" || nextExpanded.has(group.key) ? group.options : [],
+      );
+      const index = visible.findIndex((option) => option.value === value);
+      setActive(index >= 0 ? index : 0);
+    } else {
+      const index = options.findIndex((option) => option.value === value);
+      setActive(index >= 0 ? index : 0);
+    }
     setOpen(true);
+  }
+
+  function toggleGroup(groupKey: string) {
+    setExpandedGroups((current) => {
+      const next = new Set(current);
+      if (next.has(groupKey)) next.delete(groupKey);
+      else next.add(groupKey);
+      return next;
+    });
   }
 
   function choose(next: string) {
@@ -224,7 +297,9 @@ export function CrmMenuSelect({
     : "truncate font-bold text-[var(--vp-wine)]";
 
   const toolbarWidth = compact
-    ? "min-w-[5.75rem] max-w-[9.5rem]"
+    ? compactWide || wide
+      ? "min-w-[8.5rem] max-w-[15.5rem]"
+      : "min-w-[5.75rem] max-w-[9.5rem]"
     : wide
       ? "min-w-[8.5rem] max-w-[18rem]"
       : "max-w-[11.5rem] min-w-[8.25rem]";
@@ -258,7 +333,7 @@ export function CrmMenuSelect({
                 {label}
               </span>
             ) : null}
-            <span className={`max-w-full text-[13px] leading-tight ${valueClass}`} title={label ? `${label}: ${display}` : display}>
+            <span className={`max-w-full text-[13px] leading-tight ${valueClass}`} title={titleText}>
               {display}
             </span>
           </span>
@@ -268,7 +343,7 @@ export function CrmMenuSelect({
               {label}
             </span>
             <span className="flex min-w-0 flex-1 items-center justify-end gap-1">
-              <span className={`min-w-0 text-[13px] leading-tight ${valueClass}`} title={display}>
+              <span className={`min-w-0 text-[13px] leading-tight ${valueClass}`} title={titleText}>
                 {display}
               </span>
               {chevron}
@@ -333,50 +408,160 @@ export function CrmMenuSelect({
                 aria-label={label}
                 className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-1.5"
               >
-                {visibleOptions.length === 0 ? (
+                {visibleOptions.length === 0 && (searching || !menuGroups) ? (
                   <p className="px-2.5 py-3 text-[13px] text-[var(--vp-ink-muted)]">Nenhum resultado</p>
                 ) : null}
-                {visibleOptions.map((option, index) => {
-                  const isSelected = option.value === value;
-                  const isActive = index === active;
-                  return (
-                    <button
-                      key={`${option.value}-${index}`}
-                      id={`${reactId}-opcao-${index}`}
-                      type="button"
-                      role="option"
-                      tabIndex={-1}
-                      aria-selected={isSelected}
-                      data-index={index}
-                      data-active={isActive ? "true" : "false"}
-                      title={option.label}
-                      className={`flex min-h-11 w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 text-left text-[13px] transition-colors duration-150 ${
-                        isSelected
-                          ? `bg-[var(--vp-wine)] font-bold text-[var(--vp-gold)] ${isActive ? "ring-2 ring-inset ring-[var(--vp-gold)]" : ""}`
-                          : isActive
-                            ? "bg-[var(--vp-gold-cream)] font-semibold text-[var(--vp-ink-body)]"
-                            : option.value === ""
-                              ? "font-medium text-[var(--vp-ink-muted)] hover:bg-[var(--vp-surface)]"
-                              : "font-semibold text-[var(--vp-ink-body)] hover:bg-[var(--vp-surface)]"
-                      }`}
-                      onMouseDown={(event) => event.preventDefault()}
-                      onMouseEnter={() => setActive(index)}
-                      onClick={() => choose(option.value)}
-                    >
-                      <span className="min-w-0 flex-1 truncate">{option.label}</span>
-                      {option.meta ? (
-                        <span
-                          className={`shrink-0 font-bold tabular-nums ${
-                            isSelected ? "text-[var(--vp-gold)]" : "text-[var(--vp-ink-body)]"
+                {searching || !menuGroups
+                  ? visibleOptions.map((option, index) => {
+                      const isSelected = option.value === value;
+                      const isActive = index === active;
+                      return (
+                        <button
+                          key={`${option.value}-${index}`}
+                          id={`${reactId}-opcao-${index}`}
+                          type="button"
+                          role="option"
+                          tabIndex={-1}
+                          aria-selected={isSelected}
+                          data-index={index}
+                          data-active={isActive ? "true" : "false"}
+                          title={option.label}
+                          className={`flex min-h-11 w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 text-left text-[13px] transition-colors duration-150 ${
+                            isSelected
+                              ? `bg-[var(--vp-wine)] font-bold text-[var(--vp-gold)] ${isActive ? "ring-2 ring-inset ring-[var(--vp-gold)]" : ""}`
+                              : isActive
+                                ? "bg-[var(--vp-gold-cream)] font-semibold text-[var(--vp-ink-body)]"
+                                : option.value === ""
+                                  ? "font-medium text-[var(--vp-ink-muted)] hover:bg-[var(--vp-surface)]"
+                                  : "font-semibold text-[var(--vp-ink-body)] hover:bg-[var(--vp-surface)]"
                           }`}
+                          onMouseDown={(event) => event.preventDefault()}
+                          onMouseEnter={() => setActive(index)}
+                          onClick={() => choose(option.value)}
                         >
-                          {option.meta}
-                        </span>
-                      ) : null}
-                      {isSelected ? <CrmIcon name="check" className="shrink-0 text-base" /> : null}
-                    </button>
-                  );
-                })}
+                          <span className="min-w-0 flex-1 truncate">{option.label}</span>
+                          {option.meta ? (
+                            <span
+                              className={`shrink-0 font-bold tabular-nums ${
+                                isSelected ? "text-[var(--vp-gold)]" : "text-[var(--vp-ink-body)]"
+                              }`}
+                            >
+                              {option.meta}
+                            </span>
+                          ) : null}
+                          {isSelected ? <CrmIcon name="check" className="shrink-0 text-base" /> : null}
+                        </button>
+                      );
+                    })
+                  : (() => {
+                      let optionIndex = 0;
+                      return menuGroups.map((group) => {
+                        if (group.key === "__ungrouped__") {
+                          return (
+                            <div key={group.key} className="mb-1">
+                              {group.options.map((option) => {
+                                const index = optionIndex++;
+                                const isSelected = option.value === value;
+                                const isActive = index === active;
+                                return (
+                                  <button
+                                    key={`${option.value}-${index}`}
+                                    id={`${reactId}-opcao-${index}`}
+                                    type="button"
+                                    role="option"
+                                    tabIndex={-1}
+                                    aria-selected={isSelected}
+                                    data-index={index}
+                                    data-active={isActive ? "true" : "false"}
+                                    title={option.label}
+                                    className={`flex min-h-11 w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 text-left text-[13px] transition-colors duration-150 ${
+                                      isSelected
+                                        ? `bg-[var(--vp-wine)] font-bold text-[var(--vp-gold)] ${isActive ? "ring-2 ring-inset ring-[var(--vp-gold)]" : ""}`
+                                        : isActive
+                                          ? "bg-[var(--vp-gold-cream)] font-semibold text-[var(--vp-ink-body)]"
+                                          : option.value === ""
+                                            ? "font-medium text-[var(--vp-ink-muted)] hover:bg-[var(--vp-surface)]"
+                                            : "font-semibold text-[var(--vp-ink-body)] hover:bg-[var(--vp-surface)]"
+                                    }`}
+                                    onMouseDown={(event) => event.preventDefault()}
+                                    onMouseEnter={() => setActive(index)}
+                                    onClick={() => choose(option.value)}
+                                  >
+                                    <span className="min-w-0 flex-1 truncate">{option.label}</span>
+                                    {isSelected ? <CrmIcon name="check" className="shrink-0 text-base" /> : null}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          );
+                        }
+                        const expanded = expandedGroups.has(group.key);
+                        return (
+                          <div key={group.key} className="mb-1">
+                            <button
+                              type="button"
+                              tabIndex={-1}
+                              aria-expanded={expanded}
+                              className="flex min-h-10 w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 text-left transition-colors duration-150 hover:bg-[var(--vp-surface)]"
+                              onMouseDown={(event) => event.preventDefault()}
+                              onClick={() => toggleGroup(group.key)}
+                            >
+                              <CrmIcon
+                                name="expand_more"
+                                className={`shrink-0 text-base text-[var(--vp-gold-deep)] transition-transform duration-200 ${expanded ? "rotate-180" : ""}`}
+                              />
+                              <span className="min-w-0 flex-1 text-[11px] font-extrabold uppercase tracking-[0.08em] text-[var(--vp-ink-muted)]">
+                                {group.label}
+                              </span>
+                            </button>
+                            {expanded
+                              ? group.options.map((option) => {
+                                  const index = optionIndex++;
+                                  const isSelected = option.value === value;
+                                  const isActive = index === active;
+                                  return (
+                                    <button
+                                      key={`${option.value}-${index}`}
+                                      id={`${reactId}-opcao-${index}`}
+                                      type="button"
+                                      role="option"
+                                      tabIndex={-1}
+                                      aria-selected={isSelected}
+                                      data-index={index}
+                                      data-active={isActive ? "true" : "false"}
+                                      title={option.label}
+                                      className={`flex min-h-11 w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 pl-8 text-left text-[13px] transition-colors duration-150 ${
+                                        isSelected
+                                          ? `bg-[var(--vp-wine)] font-bold text-[var(--vp-gold)] ${isActive ? "ring-2 ring-inset ring-[var(--vp-gold)]" : ""}`
+                                          : isActive
+                                            ? "bg-[var(--vp-gold-cream)] font-semibold text-[var(--vp-ink-body)]"
+                                            : option.value === ""
+                                              ? "font-medium text-[var(--vp-ink-muted)] hover:bg-[var(--vp-surface)]"
+                                              : "font-semibold text-[var(--vp-ink-body)] hover:bg-[var(--vp-surface)]"
+                                      }`}
+                                      onMouseDown={(event) => event.preventDefault()}
+                                      onMouseEnter={() => setActive(index)}
+                                      onClick={() => choose(option.value)}
+                                    >
+                                      <span className="min-w-0 flex-1 truncate">{option.label}</span>
+                                      {option.meta ? (
+                                        <span
+                                          className={`shrink-0 font-bold tabular-nums ${
+                                            isSelected ? "text-[var(--vp-gold)]" : "text-[var(--vp-ink-body)]"
+                                          }`}
+                                        >
+                                          {option.meta}
+                                        </span>
+                                      ) : null}
+                                      {isSelected ? <CrmIcon name="check" className="shrink-0 text-base" /> : null}
+                                    </button>
+                                  );
+                                })
+                              : null}
+                          </div>
+                        );
+                      });
+                    })()}
               </div>
             </div>,
             portalRoot ?? document.body,

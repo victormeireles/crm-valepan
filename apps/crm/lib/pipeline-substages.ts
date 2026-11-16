@@ -73,6 +73,14 @@ export function isForwardedToDistributorSubstage(name: string | null | undefined
   return foldSubstageName(name) === "encaminhado para o distribuidor";
 }
 
+/** Rótulo curto para trigger compacto do header (texto completo fica no title). */
+export function compactSubstageLabel(name: string | null | undefined): string {
+  const flag = (name ?? "").trim();
+  if (!flag) return "";
+  if (isForwardedToDistributorSubstage(flag)) return "Encaminhado";
+  return flag;
+}
+
 /** No card, a flag de encaminhamento vira o nome do distribuidor quando já houver um alocado. */
 export function substageLabelOnCard(
   substage: string | null | undefined,
