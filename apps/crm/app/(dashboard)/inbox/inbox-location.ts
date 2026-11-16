@@ -6,6 +6,12 @@ export type InboxSearchScope = InboxTab | "all";
 export type InboxTabCounts = Record<InboxTab, number>;
 export type InboxUnreadCounts = Record<InboxTab, number>;
 
+/** Filtro de responsável: todos | sem responsável | uuid do perfil. */
+export type InboxOwnerFilter = null | "unassigned" | string;
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 export function inboxTabFromParam(value: string | null | undefined): InboxTab {
   if (value === "groups" || value === "clientes" || value === "perdidos" || value === "leads") {
     return value;
@@ -19,6 +25,38 @@ export function inboxTabFromParam(value: string | null | undefined): InboxTab {
 
 export function inboxUnreadFromParam(value: string | null | undefined): boolean {
   return value === "1" || value === "true";
+}
+
+export function inboxOwnerFromParam(value: string | null | undefined): InboxOwnerFilter {
+  const raw = (value ?? "").trim();
+  if (!raw) return null;
+  if (raw === "unassigned" || raw === "none") return "unassigned";
+  if (UUID_RE.test(raw)) return raw.toLowerCase();
+  return null;
+}
+
+export function inboxOwnerRpcArgs(owner: InboxOwnerFilter | undefined): {
+  p_owner_user_id: string | null;
+  p_unassigned: boolean;
+} {
+  if (owner === "unassigned") {
+    return { p_owner_user_id: null, p_unassigned: true };
+  }
+  if (typeof owner === "string" && owner) {
+    return { p_owner_user_id: owner, p_unassigned: false };
+  }
+  return { p_owner_user_id: null, p_unassigned: false };
+}
+
+/** Admin vê qualquer owner; demais só todos / sem responsável / próprio usuário. */
+export function constrainInboxOwnerFilter(
+  owner: InboxOwnerFilter,
+  input: { userId: string | null; canViewTeam: boolean },
+): InboxOwnerFilter {
+  if (owner == null || owner === "unassigned") return owner;
+  if (input.canViewTeam) return owner;
+  if (input.userId && owner === input.userId) return owner;
+  return null;
 }
 
 export function formatUnreadBadge(n: number): string {
@@ -93,6 +131,11 @@ export function mergeStickyUnreadConversations<T extends { id: string }>(
   return merged;
 }
 
+function appendOwnerParam(params: URLSearchParams, owner?: InboxOwnerFilter) {
+  if (owner === "unassigned") params.set("owner", "unassigned");
+  else if (typeof owner === "string" && owner) params.set("owner", owner);
+}
+
 export function inboxShareHref(input: {
   tab: InboxSearchScope;
   page: number;
@@ -100,6 +143,7 @@ export function inboxShareHref(input: {
   lookup?: boolean;
   q?: string | null;
   unread?: boolean;
+  owner?: InboxOwnerFilter;
 }) {
   const params = new URLSearchParams({ tab: input.tab });
   if (input.page > 1) params.set("page", String(input.page));
@@ -107,6 +151,7 @@ export function inboxShareHref(input: {
   if (input.lookup) params.set("lookup", "1");
   if (input.q?.trim()) params.set("q", input.q.trim());
   if (input.unread) params.set("unread", "1");
+  appendOwnerParam(params, input.owner);
   return `/inbox?${params.toString()}`;
 }
 
@@ -116,12 +161,14 @@ export function inboxClientHref(input: {
   page: number;
   cid?: string | null;
   unread?: boolean;
+  owner?: InboxOwnerFilter;
 }) {
   const url = new URL(window.location.href);
   const hash = new URLSearchParams({ tab: input.tab });
   if (input.page > 1) hash.set("page", String(input.page));
   if (input.cid) hash.set("cid", input.cid);
   if (input.unread) hash.set("unread", "1");
+  appendOwnerParam(hash, input.owner);
   return `${url.pathname}${url.search}#${hash.toString()}`;
 }
 
@@ -152,6 +199,9 @@ export function readInboxLocation(href = window.location.href) {
     unread: inboxUnreadFromParam(
       hasHashTab ? hash.get("unread") : url.searchParams.get("unread"),
     ),
+    owner: inboxOwnerFromParam(
+      hasHashTab ? hash.get("owner") : url.searchParams.get("owner"),
+    ),
   };
 }
 
@@ -163,12 +213,13 @@ export function inboxClientHashOwnsNavigation(href = window.location.href): bool
 
 /** RSC refresh após server action traz searchParams sem hash — não aplicar se divergir. */
 export function inboxServerSnapshotMatchesClient(
-  server: { tab: InboxSearchScope; page: number; unread: boolean },
-  client: { tab: InboxSearchScope; page: number; unread: boolean },
+  server: { tab: InboxSearchScope; page: number; unread: boolean; owner?: InboxOwnerFilter },
+  client: { tab: InboxSearchScope; page: number; unread: boolean; owner?: InboxOwnerFilter },
 ): boolean {
   return (
     server.tab === client.tab
     && server.page === client.page
     && server.unread === client.unread
+    && (server.owner ?? null) === (client.owner ?? null)
   );
 }

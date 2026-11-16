@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  constrainInboxOwnerFilter,
   formatUnreadBadge,
   inboxClientHashOwnsNavigation,
+  inboxOwnerFromParam,
+  inboxOwnerRpcArgs,
   inboxServerSnapshotMatchesClient,
   inboxShareHref,
   inboxTabFromParam,
@@ -26,8 +29,43 @@ describe("inbox-location", () => {
     expect(inboxUnreadFromParam(null)).toBe(false);
   });
 
+  it("parses owner filter", () => {
+    expect(inboxOwnerFromParam(null)).toBeNull();
+    expect(inboxOwnerFromParam("unassigned")).toBe("unassigned");
+    expect(inboxOwnerFromParam("none")).toBe("unassigned");
+    expect(inboxOwnerFromParam("not-a-uuid")).toBeNull();
+    expect(inboxOwnerFromParam("11111111-1111-4111-8111-111111111111")).toBe(
+      "11111111-1111-4111-8111-111111111111",
+    );
+    expect(inboxOwnerRpcArgs("unassigned")).toEqual({
+      p_owner_user_id: null,
+      p_unassigned: true,
+    });
+    expect(inboxOwnerRpcArgs("11111111-1111-4111-8111-111111111111")).toEqual({
+      p_owner_user_id: "11111111-1111-4111-8111-111111111111",
+      p_unassigned: false,
+    });
+    expect(
+      constrainInboxOwnerFilter("22222222-2222-4222-8222-222222222222", {
+        userId: "11111111-1111-4111-8111-111111111111",
+        canViewTeam: false,
+      }),
+    ).toBeNull();
+    expect(
+      constrainInboxOwnerFilter("11111111-1111-4111-8111-111111111111", {
+        userId: "11111111-1111-4111-8111-111111111111",
+        canViewTeam: false,
+      }),
+    ).toBe("11111111-1111-4111-8111-111111111111");
+  });
+
   it("treats a hash tab as a complete unread snapshot", () => {
     expect(readInboxLocation("https://crm.test/inbox?unread=1#tab=leads").unread).toBe(false);
+    expect(
+      readInboxLocation(
+        "https://crm.test/inbox?owner=unassigned#tab=leads&owner=11111111-1111-4111-8111-111111111111",
+      ).owner,
+    ).toBe("11111111-1111-4111-8111-111111111111");
   });
 
   it("detects client hash ownership of inbox navigation", () => {
@@ -50,6 +88,12 @@ describe("inbox-location", () => {
         { tab: "leads", page: 3, unread: true },
       ),
     ).toBe(true);
+    expect(
+      inboxServerSnapshotMatchesClient(
+        { tab: "leads", page: 1, unread: false, owner: null },
+        { tab: "leads", page: 1, unread: false, owner: "unassigned" },
+      ),
+    ).toBe(false);
   });
 
   it("includes unread in share href when set", () => {
@@ -57,6 +101,9 @@ describe("inbox-location", () => {
       "/inbox?tab=leads&unread=1",
     );
     expect(inboxShareHref({ tab: "leads", page: 1 })).toBe("/inbox?tab=leads");
+    expect(inboxShareHref({ tab: "leads", page: 1, owner: "unassigned" })).toBe(
+      "/inbox?tab=leads&owner=unassigned",
+    );
   });
 
   it("sums tab counts without novos", () => {

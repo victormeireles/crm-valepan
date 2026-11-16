@@ -11,10 +11,15 @@ import { displayCompanyName, displayPersonName } from "@/lib/lead-identity";
 import { fetchDistributorCatalog } from "@/lib/distributor-catalog";
 import { isLeadExcludedFromPipeline } from "@/lib/lead-pipeline-exclusion";
 import type {
+  InboxOwnerFilter,
   InboxSearchScope,
   InboxTab,
   InboxTabCounts,
   InboxUnreadCounts,
+} from "@/app/(dashboard)/inbox/inbox-location";
+import {
+  constrainInboxOwnerFilter,
+  inboxOwnerRpcArgs,
 } from "@/app/(dashboard)/inbox/inbox-location";
 import { getWeeklyBreadCount } from "@/lib/lead-signals";
 import { logInboxPerformance, timeInboxOperation } from "@/lib/inbox-performance";
@@ -199,11 +204,19 @@ function sidebarRailTabFromFlags(input: {
   return "leads";
 }
 
+export type InboxOwnerUnreadRow = {
+  ownerId: string | null;
+  ownerName: string;
+  unreadCount: number;
+  isAll: boolean;
+};
+
 export async function refreshInboxSidebar(input: {
   tab: InboxSearchScope;
   page: number;
   query?: string | null;
   unread?: boolean;
+  owner?: InboxOwnerFilter;
 }) {
   const startedAt = performance.now();
   const supabase = await createServerSupabaseClient();
@@ -216,6 +229,12 @@ export async function refreshInboxSidebar(input: {
   const crm = crmTables(supabase);
   const page = Number.isFinite(input.page) && input.page > 0 ? Math.floor(input.page) : 1;
   const query = input.query?.trim() || null;
+  const { data: callerProfile } = await crm.from("profiles").select("role").eq("id", user.id).maybeSingle();
+  const owner = constrainInboxOwnerFilter(input.owner ?? null, {
+    userId: user.id,
+    canViewTeam: callerProfile?.role === "admin",
+  });
+  const ownerArgs = inboxOwnerRpcArgs(owner);
   const [snapshotTimed, stagesTimed] = await Promise.all([
     timeInboxOperation("sidebar_snapshot", crm.rpc("inbox_sidebar_snapshot", {
       p_messages_visible_since: INBOX_MESSAGES_VISIBLE_SINCE,
@@ -224,6 +243,8 @@ export async function refreshInboxSidebar(input: {
       p_limit: 20,
       p_query: query,
       p_unread: Boolean(input.unread),
+      p_owner_user_id: ownerArgs.p_owner_user_id,
+      p_unassigned: ownerArgs.p_unassigned,
     })),
     timeInboxOperation("pipeline_stages", crm.from("pipeline_stages").select("id, name")),
   ]);
@@ -262,6 +283,54 @@ export async function refreshInboxSidebar(input: {
     } satisfies InboxUnreadCounts,
     tabTotal: Number(meta?.tab_total ?? 0),
   };
+}
+
+/** Contagens de não lidas por responsável para o flyout da rail. */
+export async function loadInboxOwnerUnreadCounts(tab: InboxSearchScope) {
+  const supabase = await createServerSupabaseClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false as const, error: "Não autenticado" };
+
+  const crm = crmTables(supabase);
+  const { data: profile } = await crm
+    .from("profiles")
+    .select("role, full_name")
+    .eq("id", user.id)
+    .maybeSingle();
+  const canViewTeam = profile?.role === "admin";
+
+  const { data, error } = await crm.rpc("inbox_owner_unread_counts", {
+    p_messages_visible_since: INBOX_MESSAGES_VISIBLE_SINCE,
+    p_tab: tab,
+  });
+  if (error) return { ok: false as const, error: error.message };
+
+  type OwnerUnreadRpcRow = Database["crm"]["Functions"]["inbox_owner_unread_counts"]["Returns"][number];
+  let rows: InboxOwnerUnreadRow[] = ((data ?? []) as OwnerUnreadRpcRow[]).map((row) => ({
+    ownerId: row.owner_id ?? null,
+    ownerName: (row.owner_name ?? "").trim() || (row.is_all ? "Todos" : row.owner_id ? "Sem nome" : "Sem responsável"),
+    unreadCount: Number(row.unread_count ?? 0),
+    isAll: Boolean(row.is_all),
+  }));
+
+  if (!canViewTeam) {
+    const mineName = profile?.full_name?.trim() || "Eu";
+    rows = rows.filter((row) => row.isAll || (!row.ownerId && !row.isAll) || row.ownerId === user.id);
+    rows = rows.map((row) =>
+      row.ownerId === user.id ? { ...row, ownerName: mineName } : row,
+    );
+    // Garante a linha «Eu» mesmo com 0 não lidas (RPC já lista todos os profiles).
+    if (!rows.some((row) => row.ownerId === user.id)) {
+      rows.push({
+        ownerId: user.id,
+        ownerName: mineName,
+        unreadCount: 0,
+        isAll: false,
+      });
+    }
+  }
+
+  return { ok: true as const, rows, canViewTeam };
 }
 
 /** Busca uma única conversa no formato da sidebar (upsert incremental). */

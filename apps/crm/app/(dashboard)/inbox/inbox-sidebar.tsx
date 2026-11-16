@@ -1,10 +1,12 @@
 "use client";
 
 import {
+  loadInboxOwnerUnreadCounts,
   markConversationUnread,
   refreshInboxSidebar,
   refreshInboxSidebarConversation,
   updateConversationContactName,
+  type InboxOwnerUnreadRow,
 } from "@/app/actions/inbox";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ContactAvatar } from "@/components/contact-avatar";
@@ -31,6 +33,7 @@ import {
   replaceInboxClientUrl,
   resolveInboxTabTotal,
   sumInboxTabCounts,
+  type InboxOwnerFilter,
   type InboxSearchScope,
   type InboxTab,
   type InboxTabCounts,
@@ -127,6 +130,33 @@ function unreadCountForScope(counts: InboxUnreadCounts, scope: InboxSearchScope)
   return counts[scope];
 }
 
+function firstName(label: string): string {
+  const part = label.trim().split(/\s+/)[0];
+  return part || label;
+}
+
+function conversationMatchesOwnerFilter(
+  conversation: { ownerId: string | null },
+  owner: InboxOwnerFilter,
+): boolean {
+  if (owner == null) return true;
+  if (owner === "unassigned") return !conversation.ownerId;
+  return conversation.ownerId === owner;
+}
+
+function ownerFilterLabelFromOptions(
+  owner: InboxOwnerFilter,
+  teamOptions: { id: string; label: string }[],
+  opts?: { currentUserId?: string | null; canViewTeam?: boolean },
+): string | null {
+  if (owner === "unassigned") return "Sem responsável";
+  if (typeof owner === "string") {
+    if (opts?.currentUserId && owner === opts.currentUserId && !opts.canViewTeam) return "Eu";
+    return teamOptions.find((option) => option.id === owner)?.label ?? "Responsável";
+  }
+  return null;
+}
+
 function validAvatarUrl(v: string | null | undefined): string | null {
   const t = (v ?? "").trim();
   if (!t) return null;
@@ -171,6 +201,11 @@ export function InboxSidebar({
   unreadCounts,
   unreadOnly,
   tabTotal,
+  ownerFilter = null,
+  ownerFilterLabel = null,
+  canViewTeam = false,
+  currentUserId = null,
+  teamOptions = [],
 }: {
   conversations: InboxSidebarRow[];
   selectedId: string | null;
@@ -182,6 +217,11 @@ export function InboxSidebar({
   unreadCounts: InboxUnreadCounts;
   unreadOnly: boolean;
   tabTotal?: number;
+  ownerFilter?: InboxOwnerFilter;
+  ownerFilterLabel?: string | null;
+  canViewTeam?: boolean;
+  currentUserId?: string | null;
+  teamOptions?: { id: string; label: string }[];
 }) {
   const initialSearch = isInboxSearchQuery(initialQuery);
   const [nowMs, setNowMs] = useState(renderNowMs);
@@ -194,6 +234,11 @@ export function InboxSidebar({
   const [liveConversations, setLiveConversations] = useState(conversations);
   const [liveUnreadCounts, setLiveUnreadCounts] = useState(unreadCounts);
   const [liveUnreadOnly, setLiveUnreadOnly] = useState(unreadOnly);
+  const [liveOwnerFilter, setLiveOwnerFilter] = useState<InboxOwnerFilter>(ownerFilter);
+  const [liveOwnerFilterLabel, setLiveOwnerFilterLabel] = useState<string | null>(ownerFilterLabel);
+  const [ownerFlyoutTab, setOwnerFlyoutTab] = useState<InboxTab | null>(null);
+  const [ownerUnreadRows, setOwnerUnreadRows] = useState<InboxOwnerUnreadRow[]>([]);
+  const [ownerCountsPending, setOwnerCountsPending] = useState(false);
   const [liveTabTotal, setLiveTabTotal] = useState(
     tabTotal ?? (activeTab === "all" ? sumInboxTabCounts(tabCounts) : tabCounts[activeTab]),
   );
@@ -218,6 +263,8 @@ export function InboxSidebar({
   livePageRef.current = livePage;
   const liveUnreadOnlyRef = useRef(liveUnreadOnly);
   liveUnreadOnlyRef.current = liveUnreadOnly;
+  const liveOwnerFilterRef = useRef(liveOwnerFilter);
+  liveOwnerFilterRef.current = liveOwnerFilter;
   const liveConversationsRef = useRef(liveConversations);
   liveConversationsRef.current = liveConversations;
   const readIdsRef = useRef(readIds);
@@ -225,12 +272,19 @@ export function InboxSidebar({
   const tabBeforeSearchRef = useRef<InboxTab>(isInboxTab(activeTab) ? activeTab : "leads");
   const searchModeRef = useRef(initialSearch);
   const skipSearchBootstrapRef = useRef(initialSearch);
+  const ownerCountsRequestRef = useRef(0);
 
   const searchActive = isInboxSearchQuery(q);
   const paginationTotal = liveTabTotal;
 
   const scopeUnreadCount = unreadCountForScope(liveUnreadCounts, liveTab);
   const scopeUnreadBadge = formatUnreadBadge(scopeUnreadCount);
+  const ownerFilterActive = liveOwnerFilter != null;
+  const ownerFilterChipLabel = liveOwnerFilterLabel
+    ? firstName(liveOwnerFilterLabel)
+    : ownerFilterActive
+      ? "Responsável"
+      : null;
 
   const conversationHref = (conversationId: string) =>
     inboxShareHref({
@@ -240,6 +294,7 @@ export function InboxSidebar({
       lookup: searchActive && isPhoneSearchQuery(q),
       q: searchActive ? q.trim() : null,
       unread: liveUnreadOnly,
+      owner: liveOwnerFilter,
     });
 
   const applySidebarResult = useCallback((
@@ -294,6 +349,7 @@ export function InboxSidebar({
     mode: "push" | "replace" | "silent" = "push",
     query?: string | null,
     unread?: boolean,
+    owner?: InboxOwnerFilter,
   ) => {
     const startedAt = performance.now();
     const version = ++requestVersion.current;
@@ -301,23 +357,43 @@ export function InboxSidebar({
       ? (isInboxSearchQuery(qRef.current) ? qRef.current.trim() : null)
       : query?.trim() || null;
     const unreadFilter = unread === undefined ? liveUnreadOnlyRef.current : unread;
+    const ownerNext = owner === undefined ? liveOwnerFilterRef.current : owner;
+    const nextOwnerLabel = ownerFilterLabelFromOptions(ownerNext, teamOptions, {
+      currentUserId,
+      canViewTeam,
+    });
     // Silent = reconcile/realtime: mantém a lista visível (sem skeleton/toast).
     if (mode !== "silent") setListPending(true);
     setLiveTab(tab);
     setLivePage(nextPage);
     setLiveUnreadOnly(unreadFilter);
+    setLiveOwnerFilter(ownerNext);
+    setLiveOwnerFilterLabel(nextOwnerLabel);
     if (mode !== "silent") {
-      const href = inboxClientHref({ tab, page: nextPage, cid: selectedIdRef.current, unread: unreadFilter });
+      const href = inboxClientHref({
+        tab,
+        page: nextPage,
+        cid: selectedIdRef.current,
+        unread: unreadFilter,
+        owner: ownerNext,
+      });
       const historyState = {
         inboxTab: tab,
         inboxPage: nextPage,
         inboxConversationId: selectedIdRef.current,
         inboxUnread: unreadFilter,
+        inboxOwner: ownerNext,
       };
       if (mode === "push") pushInboxClientUrl(historyState, href);
       else replaceInboxClientUrl(historyState, href);
     }
-    void refreshInboxSidebar({ tab, page: nextPage, query: activeQuery, unread: unreadFilter }).then((result) => {
+    void refreshInboxSidebar({
+      tab,
+      page: nextPage,
+      query: activeQuery,
+      unread: unreadFilter,
+      owner: ownerNext,
+    }).then((result) => {
       if (version !== requestVersion.current) return;
       applySidebarResult(tab, nextPage, result, startedAt, unreadFilter, mode);
       if (mode !== "silent") setListPending(false);
@@ -334,7 +410,7 @@ export function InboxSidebar({
       setSearchPending(false);
       setSearchError("Não foi possível atualizar a lista. Tente novamente.");
     });
-  }, [applySidebarResult]);
+  }, [applySidebarResult, canViewTeam, currentUserId, teamOptions]);
 
   useEffect(() => {
     setQ(initialQuery);
@@ -349,8 +425,8 @@ export function InboxSidebar({
     if (inboxClientHashOwnsNavigation()) {
       const client = readInboxLocation();
       const serverMatches = inboxServerSnapshotMatchesClient(
-        { tab: activeTab, page, unread: unreadOnly },
-        { tab: client.tab, page: client.page, unread: client.unread },
+        { tab: activeTab, page, unread: unreadOnly, owner: ownerFilter },
+        { tab: client.tab, page: client.page, unread: client.unread, owner: client.owner },
       );
       if (!serverMatches) {
         const liveMatches = inboxServerSnapshotMatchesClient(
@@ -358,18 +434,21 @@ export function InboxSidebar({
             tab: liveTabRef.current,
             page: livePageRef.current,
             unread: liveUnreadOnlyRef.current,
+            owner: liveOwnerFilterRef.current,
           },
-          { tab: client.tab, page: client.page, unread: client.unread },
+          { tab: client.tab, page: client.page, unread: client.unread, owner: client.owner },
         );
         // Remount com state inicial errado: recupera a lista do hash sem skeleton.
         if (!liveMatches) {
-          loadList(client.tab, client.page, "silent", undefined, client.unread);
+          loadList(client.tab, client.page, "silent", undefined, client.unread, client.owner);
         }
         return;
       }
     }
 
     setLiveUnreadOnly(unreadOnly);
+    setLiveOwnerFilter(ownerFilter);
+    setLiveOwnerFilterLabel(ownerFilterLabel);
     setLiveTab(activeTab);
     setLivePage(page);
     // Em «Não lidas», preserva conversas já lidas nesta sessão se o RSC
@@ -390,7 +469,7 @@ export function InboxSidebar({
     setLiveTabTotal(
       tabTotal ?? (activeTab === "all" ? sumInboxTabCounts(tabCounts) : isInboxTab(activeTab) ? tabCounts[activeTab] : sumInboxTabCounts(tabCounts)),
     );
-  }, [conversations, tabCounts, unreadCounts, unreadOnly, tabTotal, activeTab, page, loadList]);
+  }, [conversations, tabCounts, unreadCounts, unreadOnly, ownerFilter, ownerFilterLabel, tabTotal, activeTab, page, loadList]);
 
   useEffect(() => {
     const onOwnerChanged = (event: Event) => {
@@ -400,8 +479,8 @@ export function InboxSidebar({
         ownerName?: string | null;
       }>).detail;
       if (!detail?.conversationId) return;
-      setLiveConversations((rows) =>
-        rows.map((row) =>
+      setLiveConversations((rows) => {
+        const nextRows = rows.map((row) =>
           row.id === detail.conversationId
             ? {
                 ...row,
@@ -409,8 +488,15 @@ export function InboxSidebar({
                 ownerName: detail.ownerName ?? null,
               }
             : row,
-        ),
-      );
+        );
+        const owner = liveOwnerFilterRef.current;
+        if (owner == null) return nextRows;
+        const filtered = nextRows.filter((row) => conversationMatchesOwnerFilter(row, owner));
+        if (filtered.length !== nextRows.length) {
+          setLiveTabTotal((total) => Math.max(0, total - (nextRows.length - filtered.length)));
+        }
+        return filtered;
+      });
     };
     window.addEventListener("crm:inbox-lead-owner-changed", onOwnerChanged);
     return () => window.removeEventListener("crm:inbox-lead-owner-changed", onOwnerChanged);
@@ -446,6 +532,7 @@ export function InboxSidebar({
       if (searching) return;
       if (unreadOnly && !nowUnread && !readIdsRef.current.has(conversation.id)) return;
       if (!belongsToTab) return;
+      if (!conversationMatchesOwnerFilter(conversation, liveOwnerFilterRef.current)) return;
       // Página > 1: só badge (já atualizado acima).
       if (livePageRef.current > 1) return;
 
@@ -552,7 +639,7 @@ export function InboxSidebar({
   useEffect(() => {
     const onPopState = () => {
       const next = readInboxLocation();
-      loadList(next.tab, next.page, "silent", undefined, next.unread);
+      loadList(next.tab, next.page, "silent", undefined, next.unread, next.owner);
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
@@ -698,12 +785,63 @@ export function InboxSidebar({
     loadList(liveTab, 1, "push", undefined, next);
   };
 
-  const selectRailTab = (tab: InboxTab) => {
-    // Em modo busca, clicar na lista já ativa volta ao escopo "Todas".
-    const nextTab: InboxSearchScope = searchActive && liveTab === tab ? "all" : tab;
-    if (nextTab === liveTab && livePage === 1 && !liveUnreadOnly) return;
-    loadList(nextTab, 1, "push", undefined, false);
+  const closeOwnerFlyout = useCallback(() => {
+    setOwnerFlyoutTab(null);
+  }, []);
+
+  const openOwnerFlyout = useCallback((tab: InboxTab) => {
+    setOwnerFlyoutTab(tab);
+    const requestId = ++ownerCountsRequestRef.current;
+    setOwnerCountsPending(true);
+    void loadInboxOwnerUnreadCounts(tab).then((result) => {
+      if (requestId !== ownerCountsRequestRef.current) return;
+      setOwnerCountsPending(false);
+      if (!result.ok) {
+        setOwnerUnreadRows([]);
+        return;
+      }
+      setOwnerUnreadRows(result.rows);
+    }).catch(() => {
+      if (requestId !== ownerCountsRequestRef.current) return;
+      setOwnerCountsPending(false);
+      setOwnerUnreadRows([]);
+    });
+  }, []);
+
+  const selectOwnerFilter = (tab: InboxTab, owner: InboxOwnerFilter) => {
+    setOwnerFlyoutTab(null);
+    loadList(tab, 1, "push", undefined, false, owner);
   };
+
+  const selectRailTab = (tab: InboxTab) => {
+    if (ownerFlyoutTab === tab) {
+      closeOwnerFlyout();
+      return;
+    }
+    openOwnerFlyout(tab);
+  };
+
+  useEffect(() => {
+    if (!ownerFlyoutTab) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeOwnerFlyout();
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Element | null;
+      if (target?.closest?.("[data-inbox-owner-flyout], [data-inbox-rail]")) return;
+      closeOwnerFlyout();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("pointerdown", onPointerDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("pointerdown", onPointerDown);
+    };
+  }, [ownerFlyoutTab, closeOwnerFlyout]);
+
+  const flyoutTabLabel = ownerFlyoutTab
+    ? INBOX_RAIL.find((item) => item.tab === ownerFlyoutTab)?.label ?? "Lista"
+    : null;
 
   return (
     <div
@@ -711,22 +849,26 @@ export function InboxSidebar({
       className="relative flex h-full min-h-0 flex-1 overflow-hidden"
     >
       <nav
+        data-inbox-rail
         aria-label="Listas do inbox"
-        className="flex w-14 shrink-0 flex-col items-center gap-1 border-r border-[var(--vp-ink-line)] bg-[var(--vp-paper)] py-2"
+        className="relative z-30 flex w-14 shrink-0 flex-col items-center gap-1 border-r border-[var(--vp-ink-line)] bg-[var(--vp-paper)] py-2"
       >
         {INBOX_RAIL.map(({ tab, label, icon }) => {
           const active = liveTab === tab;
+          const flyoutOpen = ownerFlyoutTab === tab;
           const badge = formatUnreadBadge(liveUnreadCounts[tab]);
           return (
             <button
               key={tab}
               type="button"
-              title={label}
+              title={`${label}: filtrar por responsável`}
               aria-label={badge ? `${label}, ${badge} não lidas` : label}
               aria-current={active ? "page" : undefined}
+              aria-expanded={flyoutOpen}
+              aria-haspopup="menu"
               onClick={() => selectRailTab(tab)}
-              className={`relative flex size-10 items-center justify-center rounded-xl text-[22px] transition-colors ${
-                active
+              className={`relative flex size-10 items-center justify-center rounded-xl text-[22px] transition-colors duration-200 ${
+                active || flyoutOpen
                   ? "bg-[rgba(35,0,4,0.09)] text-[var(--vp-wine)]"
                   : "text-[var(--vp-ink-soft)] hover:bg-[rgba(35,0,4,0.05)] hover:text-[var(--vp-ink-body)]"
               }`}
@@ -741,6 +883,99 @@ export function InboxSidebar({
           );
         })}
       </nav>
+      {ownerFlyoutTab ? (
+        <>
+          <button
+            type="button"
+            aria-label="Fechar filtro de responsável"
+            onClick={closeOwnerFlyout}
+            className="absolute inset-y-0 left-14 right-0 z-10 cursor-default border-0 bg-[rgba(35,0,4,0.28)] p-0 motion-safe:animate-[inbox-owner-scrim-in_180ms_ease-out]"
+          />
+          <div
+            data-inbox-owner-flyout
+            role="menu"
+            aria-label={`Responsável em ${flyoutTabLabel}`}
+            className="absolute inset-y-0 left-14 z-20 flex w-[220px] flex-col border-r border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] shadow-[var(--sh-md)] motion-safe:animate-[inbox-owner-flyout-in_200ms_ease-out]"
+          >
+            <div className="flex items-center justify-between gap-2 border-b border-[var(--vp-ink-line)] px-3 py-2.5">
+              <div className="min-w-0">
+                <p className="truncate text-[11px] font-bold uppercase tracking-[0.04em] text-[var(--vp-ink-soft)]">
+                  Responsável
+                </p>
+                <p className="truncate text-sm font-bold text-[var(--vp-ink-body)]">{flyoutTabLabel}</p>
+              </div>
+              <button
+                type="button"
+                aria-label="Fechar filtro de responsável"
+                onClick={closeOwnerFlyout}
+                className="flex size-9 shrink-0 items-center justify-center rounded-lg text-[var(--vp-ink-soft)] transition-colors duration-200 hover:bg-[rgba(35,0,4,0.06)] hover:text-[var(--vp-ink-body)]"
+              >
+                <CrmIcon name="close" className="text-[18px]" />
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain py-1">
+              {ownerCountsPending ? (
+                <div className="space-y-2 px-3 py-3" aria-busy="true">
+                  {Array.from({ length: 5 }, (_, index) => (
+                    <span
+                      key={`owner-skeleton-${index}`}
+                      className="block h-10 animate-pulse rounded-lg bg-[var(--vp-surface-high)]"
+                    />
+                  ))}
+                </div>
+              ) : (
+                ownerUnreadRows.map((row) => {
+                  const optionOwner: InboxOwnerFilter = row.isAll
+                    ? null
+                    : row.ownerId
+                      ? row.ownerId
+                      : "unassigned";
+                  const selected =
+                    liveTab === ownerFlyoutTab
+                    && (
+                      row.isAll
+                        ? liveOwnerFilter == null
+                        : row.ownerId
+                          ? liveOwnerFilter === row.ownerId
+                          : liveOwnerFilter === "unassigned"
+                    );
+                  const badge = formatUnreadBadge(row.unreadCount);
+                  return (
+                    <button
+                      key={row.isAll ? "all" : row.ownerId ?? "unassigned"}
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={selected}
+                      onClick={() => selectOwnerFilter(ownerFlyoutTab, optionOwner)}
+                      className={`flex min-h-11 w-full items-center gap-2 px-3 text-left text-[13px] transition-colors duration-150 hover:bg-[var(--vp-surface)] ${
+                        selected ? "bg-[rgba(35,0,4,0.06)] font-bold text-[var(--vp-wine)]" : "text-[var(--vp-ink-muted)]"
+                      }`}
+                    >
+                      <span className="min-w-0 flex-1 truncate">
+                        {row.isAll
+                          ? "Todos"
+                          : !row.ownerId
+                            ? "Sem responsável"
+                            : currentUserId && row.ownerId === currentUserId && !canViewTeam
+                              ? "Eu"
+                              : firstName(row.ownerName)}
+                      </span>
+                      {badge ? (
+                        <span className="shrink-0 rounded-full bg-[var(--vp-wine)] px-1.5 py-0.5 text-[10px] font-bold tabular-nums text-[var(--vp-paper-pure)]">
+                          {badge}
+                        </span>
+                      ) : (
+                        <span className="shrink-0 text-[11px] tabular-nums opacity-50">0</span>
+                      )}
+                      {selected ? <CrmIcon name="check" className="shrink-0 text-base" /> : null}
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </>
+      ) : null}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <div className="shrink-0 border-b border-[var(--vp-ink-line)] p-3">
           <label htmlFor="inbox-search" className="flex min-h-10 items-center gap-2 rounded-full border border-[var(--vp-ink-line)] bg-[var(--vp-paper)] px-3">
@@ -757,7 +992,7 @@ export function InboxSidebar({
               spellCheck={false}
             />
           </label>
-          <div role="tablist" aria-label="Filtro de leitura" className="mt-2 flex gap-1.5">
+          <div role="tablist" aria-label="Filtro de leitura" className="mt-2 flex flex-wrap gap-1.5">
             <button
               type="button"
               role="tab"
@@ -784,6 +1019,17 @@ export function InboxSidebar({
             >
               Não lidas{scopeUnreadBadge ? ` ${scopeUnreadBadge}` : ""}
             </button>
+            {ownerFilterChipLabel ? (
+              <button
+                type="button"
+                aria-label={`Limpar filtro de responsável: ${liveOwnerFilterLabel ?? ownerFilterChipLabel}`}
+                onClick={() => loadList(liveTab, 1, "push", undefined, liveUnreadOnly, null)}
+                className="inline-flex max-w-full items-center gap-1 rounded-full bg-[rgba(35,0,4,0.09)] px-3 py-1 text-xs font-bold text-[var(--vp-wine)] transition-colors duration-150 hover:bg-[rgba(35,0,4,0.14)]"
+              >
+                <span className="truncate">{ownerFilterChipLabel}</span>
+                <CrmIcon name="close" className="shrink-0 text-[14px]" />
+              </button>
+            ) : null}
           </div>
           {searchActive ? (
             <p className="mt-1.5 px-1 text-[10px] text-[var(--vp-ink-muted)]">
@@ -827,7 +1073,13 @@ export function InboxSidebar({
                       onClick={(event) => {
                         if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
                         event.preventDefault();
-                        const href = inboxClientHref({ tab: liveTab, page: livePage, cid: c.id, unread: liveUnreadOnly });
+                        const href = inboxClientHref({
+                          tab: liveTab,
+                          page: livePage,
+                          cid: c.id,
+                          unread: liveUnreadOnly,
+                          owner: liveOwnerFilter,
+                        });
                         setOptimisticSelectedId(c.id);
                         window.dispatchEvent(new CustomEvent(INBOX_SELECT_CONVERSATION_EVENT, {
                           detail: {
@@ -1012,7 +1264,9 @@ export function InboxSidebar({
                 ? "Nenhum resultado."
                 : liveUnreadOnly
                   ? "Nenhuma conversa não lida."
-                  : "Nenhuma conversa ainda."}
+                  : ownerFilterActive
+                    ? "Nenhuma conversa com este responsável."
+                    : "Nenhuma conversa ainda."}
             </li>
           ) : null}
         </ul>
@@ -1026,6 +1280,11 @@ export function InboxSidebar({
               tab: liveTab,
               cid: optimisticSelectedId ?? undefined,
               ...(liveUnreadOnly ? { unread: "1" } : {}),
+              ...(liveOwnerFilter === "unassigned"
+                ? { owner: "unassigned" }
+                : typeof liveOwnerFilter === "string"
+                  ? { owner: liveOwnerFilter }
+                  : {}),
               ...(searchActive ? { q: q.trim() } : {}),
             }}
             onNavigate={(href) => {

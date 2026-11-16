@@ -11,7 +11,16 @@ import { templateFirstName } from "@/lib/inbox/quick-replies";
 import { InboxLiveRefresh } from "./inbox-live-refresh";
 import { InboxSidebar, type InboxSidebarRow } from "./inbox-sidebar";
 import { InboxConversationPane } from "./inbox-conversation-pane";
-import { inboxSearchScopeFromParam, inboxTabFromParam, inboxUnreadFromParam, type InboxSearchScope } from "./inbox-location";
+import {
+  constrainInboxOwnerFilter,
+  inboxOwnerFromParam,
+  inboxOwnerRpcArgs,
+  inboxSearchScopeFromParam,
+  inboxTabFromParam,
+  inboxUnreadFromParam,
+  type InboxOwnerFilter,
+  type InboxSearchScope,
+} from "./inbox-location";
 import type { InboxConversationView } from "@/app/actions/inbox";
 import { isLeadExcludedFromPipeline } from "@/lib/lead-pipeline-exclusion";
 import { displayPipelineStageName, selectCanonicalPipelineStages } from "@/lib/pipeline-canonical-stages";
@@ -71,7 +80,15 @@ function validAvatarUrl(v: string | null | undefined): string | null {
 export default async function InboxPage({
   searchParams,
 }: {
-  searchParams: Promise<{ cid?: string; tab?: string; page?: string; q?: string; lookup?: string; unread?: string }>;
+  searchParams: Promise<{
+    cid?: string;
+    tab?: string;
+    page?: string;
+    q?: string;
+    lookup?: string;
+    unread?: string;
+    owner?: string;
+  }>;
 }) {
   const pageStartedAt = performance.now();
   const performanceOperations: InboxPerformanceOperation[] = [];
@@ -88,6 +105,7 @@ export default async function InboxPage({
   const requestedPage = params.page ? Number.parseInt(params.page, 10) : 1;
   const page = Number.isFinite(requestedPage) && requestedPage > 0 ? requestedPage : 1;
   const unreadOnly = inboxUnreadFromParam(params.unread);
+  const requestedOwnerFilter: InboxOwnerFilter = inboxOwnerFromParam(params.owner);
   const activeTab: InboxSearchScope = hasInboxSearch
     ? (tab ? inboxSearchScopeFromParam(tab) : "all")
     : inboxTabFromParam(tab);
@@ -105,6 +123,31 @@ export default async function InboxPage({
     .from("pipeline_stages")
     .select("id, name, sort_order, is_final")
     .order("sort_order", { ascending: true }));
+  const substagesPromise = timed("pipeline_substages", crm
+    .from("lost_reasons")
+    .select("id, name, stage_key, sort_order, active")
+    .order("sort_order", { ascending: true }));
+  const distributorsPromise = timed("distributors", fetchDistributorCatalog(crm));
+  const sessionPromise = timed("session_profile", (async () => {
+    const user = await getServerUser();
+    if (!user) return { userId: null as string | null, fullName: null as string | null, isAdmin: false };
+    const { data } = await crm.from("profiles").select("full_name, role").eq("id", user.id).maybeSingle();
+    return {
+      userId: user.id,
+      fullName: data?.full_name ?? null,
+      isAdmin: data?.role === "admin",
+    };
+  })());
+  const teamPromise = timed("team_profiles", crm
+    .from("profiles")
+    .select("id, full_name")
+    .order("full_name", { ascending: true }));
+  const [session, teamResult] = await Promise.all([sessionPromise, teamPromise]);
+  const ownerFilter = constrainInboxOwnerFilter(requestedOwnerFilter, {
+    userId: session.userId,
+    canViewTeam: session.isAdmin,
+  });
+  const ownerArgs = inboxOwnerRpcArgs(ownerFilter);
   const snapshotPromise = timed("sidebar_snapshot", crm.rpc("inbox_sidebar_snapshot", {
     p_messages_visible_since: INBOX_MESSAGES_VISIBLE_SINCE,
     p_tab: activeTab,
@@ -112,27 +155,29 @@ export default async function InboxPage({
     p_limit: PAGE_SIZE,
     p_query: hasInboxSearch ? inboxQuery : null,
     p_unread: unreadOnly,
+    p_owner_user_id: ownerArgs.p_owner_user_id,
+    p_unassigned: ownerArgs.p_unassigned,
   }));
-  const substagesPromise = timed("pipeline_substages", crm
-    .from("lost_reasons")
-    .select("id, name, stage_key, sort_order, active")
-    .order("sort_order", { ascending: true }));
-  const distributorsPromise = timed("distributors", fetchDistributorCatalog(crm));
-  const comercialProfilePromise = timed("comercial_profile", (async () => {
-    const user = await getServerUser();
-    if (!user) return null;
-    const { data } = await crm.from("profiles").select("full_name").eq("id", user.id).maybeSingle();
-    return data;
-  })());
-  const [{ data: stages }, snapshotResult, requestedConversationResult, substagesResult, distributorsResult, comercialProfile] = await Promise.all([
+  const [{ data: stages }, snapshotResult, requestedConversationResult, substagesResult, distributorsResult] = await Promise.all([
     stagesPromise,
     snapshotPromise,
     requestedConversationPromise,
     substagesPromise,
     distributorsPromise,
-    comercialProfilePromise,
   ]);
-  const comercialFirstName = templateFirstName(comercialProfile?.full_name) || "equipe";
+  const comercialFirstName = templateFirstName(session.fullName) || "equipe";
+  const teamOptions = (teamResult.data ?? []).map((profile) => ({
+    id: profile.id,
+    label: profile.full_name?.trim() || "Sem nome",
+  }));
+  const ownerFilterLabel =
+    ownerFilter === "unassigned"
+      ? "Sem responsável"
+      : typeof ownerFilter === "string"
+        ? ownerFilter === session.userId && !session.isAdmin
+          ? "Eu"
+          : (teamOptions.find((option) => option.id === ownerFilter)?.label ?? "Responsável")
+        : null;
   const snapshotRows = (snapshotResult.data ?? []) as InboxSidebarSnapshotRow[];
   const snapshotMeta = snapshotRows[0];
   const compactRows = snapshotRows.filter(
@@ -584,6 +629,11 @@ export default async function InboxPage({
               unreadCounts={unreadCounts}
               unreadOnly={unreadOnly}
               tabTotal={tabTotal}
+              ownerFilter={ownerFilter}
+              ownerFilterLabel={ownerFilterLabel}
+              canViewTeam={session.isAdmin}
+              currentUserId={session.userId}
+              teamOptions={teamOptions}
             />
           </div>
         </div>

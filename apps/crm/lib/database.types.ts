@@ -677,6 +677,8 @@ export interface Database {
           p_limit?: number;
           p_query?: string | null;
           p_unread?: boolean;
+          p_owner_user_id?: string | null;
+          p_unassigned?: boolean;
         };
         Returns: {
           conversation_id: string | null;
@@ -716,6 +718,18 @@ export interface Database {
           clientes_unread_count: number;
           perdidos_count: number;
           perdidos_unread_count: number;
+        }[];
+      };
+      inbox_owner_unread_counts: {
+        Args: {
+          p_messages_visible_since: string;
+          p_tab?: string;
+        };
+        Returns: {
+          owner_id: string | null;
+          owner_name: string | null;
+          unread_count: number;
+          is_all: boolean;
         }[];
       };
       register_public_lead: {

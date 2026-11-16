@@ -58,6 +58,16 @@ html:has([data-inbox-shell]) [data-dashboard-main] {
   to { opacity: 1; transform: translateY(0); }
 }
 
+@keyframes inbox-owner-flyout-in {
+  from { opacity: 0; transform: translateX(-8px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes inbox-owner-scrim-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
