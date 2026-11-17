@@ -225,12 +225,14 @@ export default async function InboxPage({
     leads: Number(snapshotMeta?.leads_count ?? 0),
     groups: Number(snapshotMeta?.groups_count ?? 0),
     clientes: Number(snapshotMeta?.clientes_count ?? 0),
+    arquivados: Number(snapshotMeta?.arquivados_count ?? 0),
     perdidos: Number(snapshotMeta?.perdidos_count ?? 0),
   };
   const unreadCounts = {
     leads: Number(snapshotMeta?.leads_unread_count ?? 0),
     groups: Number(snapshotMeta?.groups_unread_count ?? 0),
     clientes: Number(snapshotMeta?.clientes_unread_count ?? 0),
+    arquivados: Number(snapshotMeta?.arquivados_unread_count ?? 0),
     perdidos: Number(snapshotMeta?.perdidos_unread_count ?? 0),
   };
   const tabTotal = Number(snapshotMeta?.tab_total ?? 0);
@@ -454,7 +456,7 @@ export default async function InboxPage({
     const tail = tailById.get(c.id);
     const opportunity = nestOne(lead?.opportunities ?? null);
     const stageName = isLeadExcludedFromPipeline(lead)
-      ? "Cliente"
+      ? (lead?.excluded_reason === "cliente" ? "Cliente" : "Arquivado")
       : displayPipelineStageName(
           (stages ?? []).find((stage) => stage.id === opportunity?.stage_id)?.name ?? null,
         ) || null;

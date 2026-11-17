@@ -132,12 +132,15 @@ const PAGE_SIZE = 20;
 const INBOX_RAIL: { tab: InboxTab; label: string; icon: CrmIconName }[] = [
   { tab: "leads", label: "Leads", icon: "chat" },
   { tab: "groups", label: "Grupos", icon: "groups" },
-  { tab: "clientes", label: "Clientes", icon: "archive" },
+  { tab: "clientes", label: "Clientes", icon: "shopping_cart" },
+  { tab: "arquivados", label: "Arquivados", icon: "archive" },
   { tab: "perdidos", label: "Perdidos", icon: "flag" },
 ];
 
 function unreadCountForScope(counts: InboxUnreadCounts, scope: InboxSearchScope): number {
-  if (scope === "all") return counts.leads + counts.groups + counts.clientes + counts.perdidos;
+  if (scope === "all") {
+    return counts.leads + counts.groups + counts.clientes + counts.arquivados + counts.perdidos;
+  }
   return counts[scope];
 }
 

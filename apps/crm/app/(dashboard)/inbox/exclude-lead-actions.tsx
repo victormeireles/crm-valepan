@@ -56,7 +56,7 @@ function ActionPanel({
 
 export function ExcludeLeadButton({
   leadId,
-  redirectTo = "/inbox?tab=clientes",
+  redirectTo,
   iconOnly = false,
 }: {
   leadId: string;
@@ -104,7 +104,10 @@ export function ExcludeLeadButton({
           return;
         }
         setOpen(false);
-        router.push(redirectTo);
+        router.push(
+          redirectTo
+            ?? (reason === "cliente" ? "/inbox?tab=clientes" : "/inbox?tab=arquivados"),
+        );
       }}
     >
       <p className="text-xs font-medium text-[var(--foreground)]">Arquivar conversa</p>

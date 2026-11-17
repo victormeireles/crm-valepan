@@ -34,6 +34,7 @@ export type CrmIconName =
   | "schedule"
   | "search"
   | "send"
+  | "shopping_cart"
   | "task_alt"
   | "videocam";
 
@@ -105,6 +106,14 @@ function IconDrawing({ name }: { name: CrmIconName }) {
       return <><circle cx="10.5" cy="10.5" r="6.5" /><path d="m15.5 15.5 5 5" /></>;
     case "send":
       return <path d="m3 4 18 8-18 8 3-8zm3 8h15" />;
+    case "shopping_cart":
+      return (
+        <>
+          <path d="M3 3h2l1.6 9.2a2 2 0 0 0 2 1.6h8.8a2 2 0 0 0 2-1.5L21 7H7" />
+          <circle cx="9.5" cy="19.5" r="1.5" fill="currentColor" stroke="none" />
+          <circle cx="17.5" cy="19.5" r="1.5" fill="currentColor" stroke="none" />
+        </>
+      );
     case "task_alt":
       return <><path d="M20 11a8 8 0 1 1-4-7" /><path d="m8 11 3 3 9-9" /></>;
     case "videocam":

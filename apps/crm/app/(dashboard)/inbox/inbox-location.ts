@@ -1,4 +1,4 @@
-export type InboxTab = "leads" | "groups" | "clientes" | "perdidos";
+export type InboxTab = "leads" | "groups" | "clientes" | "arquivados" | "perdidos";
 
 /** Escopo da lista: abas fixas + "all" só no modo busca. */
 export type InboxSearchScope = InboxTab | "all";
@@ -13,11 +13,17 @@ const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export function inboxTabFromParam(value: string | null | undefined): InboxTab {
-  if (value === "groups" || value === "clientes" || value === "perdidos" || value === "leads") {
+  if (
+    value === "groups"
+    || value === "clientes"
+    || value === "arquivados"
+    || value === "perdidos"
+    || value === "leads"
+  ) {
     return value;
   }
   if (value === "novos" || value === "pipeline" || value === "archived") {
-    if (value === "archived") return "clientes";
+    if (value === "archived") return "arquivados";
     return "leads";
   }
   return "leads";
@@ -75,12 +81,13 @@ export function isInboxTab(value: string | null | undefined): value is InboxTab 
     value === "leads" ||
     value === "groups" ||
     value === "clientes" ||
+    value === "arquivados" ||
     value === "perdidos"
   );
 }
 
 export function sumInboxTabCounts(counts: InboxTabCounts): number {
-  return counts.leads + counts.groups + counts.clientes + counts.perdidos;
+  return counts.leads + counts.groups + counts.clientes + counts.arquivados + counts.perdidos;
 }
 
 export function resolveInboxTabTotal(input: {

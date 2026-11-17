@@ -183,7 +183,7 @@ function mapSidebarSnapshotRow(
     companyName,
     clientCategory: row.client_category,
     stageName: row.excluded_from_pipeline_at
-      ? "Cliente"
+      ? (row.excluded_reason === "cliente" ? "Cliente" : "Arquivado")
       : row.stage_id
         ? stageNames.get(row.stage_id) ?? null
         : null,
@@ -200,13 +200,16 @@ function sidebarRailTabFromFlags(input: {
   kind: "lead" | "group";
   stageKey: string | null;
   excludedFromPipeline: boolean;
+  excludedReason: string | null;
   classification: string | null;
 }): InboxTab {
   if (input.kind === "group") return "groups";
-  const isClient = input.excludedFromPipeline
-    || input.stageKey === "CONVERTIDO"
-    || (!input.stageKey && ["CLIENTE", "JÁ É CLIENTE"].includes((input.classification ?? "").trim().toUpperCase()));
+  const classification = (input.classification ?? "").trim().toUpperCase();
+  const isConverted = input.stageKey === "CONVERTIDO"
+    || (!input.stageKey && ["CLIENTE", "JÁ É CLIENTE"].includes(classification));
+  const isClient = (input.excludedFromPipeline && input.excludedReason === "cliente") || isConverted;
   if (isClient) return "clientes";
+  if (input.excludedFromPipeline) return "arquivados";
   if (input.stageKey === "PERDIDO") return "perdidos";
   return "leads";
 }
@@ -371,12 +374,14 @@ function buildInboxSidebarRefreshResult(
       leads: Number(meta?.leads_count ?? 0),
       groups: Number(meta?.groups_count ?? 0),
       clientes: Number(meta?.clientes_count ?? 0),
+      arquivados: Number(meta?.arquivados_count ?? 0),
       perdidos: Number(meta?.perdidos_count ?? 0),
     } satisfies InboxTabCounts,
     unreadCounts: {
       leads: Number(meta?.leads_unread_count ?? 0),
       groups: Number(meta?.groups_unread_count ?? 0),
       clientes: Number(meta?.clientes_unread_count ?? 0),
+      arquivados: Number(meta?.arquivados_unread_count ?? 0),
       perdidos: Number(meta?.perdidos_unread_count ?? 0),
     } satisfies InboxUnreadCounts,
     tabTotal: Number(meta?.tab_total ?? 0),
@@ -454,7 +459,7 @@ export async function refreshInboxSidebarConversation(conversationId: string) {
         last_message_at, created_at, updated_at, last_read_at,
         last_direction, last_body_preview, last_event_kind, last_event_status, last_inbound_sent_at,
         leads(
-          id, client_category, excluded_from_pipeline_at, weekly_bread_consumption, owner_id,
+          id, client_category, excluded_from_pipeline_at, excluded_reason, weekly_bread_consumption, owner_id,
           contacts(full_name, avatar_url),
           companies(name),
           opportunities(stage_id, updated_at)
@@ -487,6 +492,7 @@ export async function refreshInboxSidebarConversation(conversationId: string) {
     id?: string;
     client_category?: string | null;
     excluded_from_pipeline_at?: string | null;
+    excluded_reason?: string | null;
     weekly_bread_consumption?: number | null;
     owner_id?: string | null;
     contacts?: { full_name?: string | null; avatar_url?: string | null } | { full_name?: string | null; avatar_url?: string | null }[] | null;
@@ -550,7 +556,7 @@ export async function refreshInboxSidebarConversation(conversationId: string) {
     companyName: group || !leadRow?.id ? null : displayCompanyName({ companyName: company?.name }),
     clientCategory: leadRow?.client_category ?? null,
     stageName: leadRow?.excluded_from_pipeline_at
-      ? "Cliente"
+      ? (leadRow.excluded_reason === "cliente" ? "Cliente" : "Arquivado")
       : stageNameRaw
         ? displayPipelineStageName(stageNameRaw) || stageNameRaw
         : null,
@@ -566,6 +572,7 @@ export async function refreshInboxSidebarConversation(conversationId: string) {
     kind: conversation.kind,
     stageKey,
     excludedFromPipeline: Boolean(leadRow?.excluded_from_pipeline_at),
+    excludedReason: leadRow?.excluded_reason ?? null,
     classification: raw.classification,
   });
 

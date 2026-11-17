@@ -41,8 +41,8 @@ describe("inbox sidebar list cache", () => {
     writeInboxSidebarCache(key, {
       ok: true,
       conversations: [],
-      tabCounts: { leads: 1, groups: 0, clientes: 0, perdidos: 0 },
-      unreadCounts: { leads: 0, groups: 0, clientes: 0, perdidos: 0 },
+      tabCounts: { leads: 1, groups: 0, clientes: 0, arquivados: 0, perdidos: 0 },
+      unreadCounts: { leads: 0, groups: 0, clientes: 0, arquivados: 0, perdidos: 0 },
       tabTotal: 1,
     });
     expect(readInboxSidebarCache(key)?.tabTotal).toBe(1);

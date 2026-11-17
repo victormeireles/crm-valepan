@@ -22,6 +22,8 @@ describe("inbox-location", () => {
     expect(inboxTabFromParam("pipeline")).toBe("leads");
     expect(inboxTabFromParam(null)).toBe("leads");
     expect(inboxTabFromParam("groups")).toBe("groups");
+    expect(inboxTabFromParam("archived")).toBe("arquivados");
+    expect(inboxTabFromParam("arquivados")).toBe("arquivados");
   });
 
   it("parses unread flag", () => {
@@ -155,8 +157,8 @@ describe("inbox-location", () => {
 
   it("sums tab counts without novos", () => {
     expect(
-      sumInboxTabCounts({ leads: 2, groups: 1, clientes: 3, perdidos: 4 }),
-    ).toBe(10);
+      sumInboxTabCounts({ leads: 2, groups: 1, clientes: 3, arquivados: 5, perdidos: 4 }),
+    ).toBe(15);
   });
 
   it("formats unread badge", () => {
@@ -171,7 +173,7 @@ describe("inbox-location", () => {
         unreadActive: true,
         tab: "leads",
         tabTotal: 0,
-        tabCounts: { leads: 8, groups: 2, clientes: 3, perdidos: 1 },
+        tabCounts: { leads: 8, groups: 2, clientes: 3, arquivados: 0, perdidos: 1 },
       }),
     ).toBe(0);
   });
@@ -182,7 +184,7 @@ describe("inbox-location", () => {
         unreadActive: false,
         tab: "all",
         tabTotal: 0,
-        tabCounts: { leads: 8, groups: 2, clientes: 3, perdidos: 1 },
+        tabCounts: { leads: 8, groups: 2, clientes: 3, arquivados: 0, perdidos: 1 },
       }),
     ).toBe(14);
   });

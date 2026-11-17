@@ -681,6 +681,7 @@ export interface Database {
           lead_id: string | null;
           client_category: string | null;
           excluded_from_pipeline_at: string | null;
+          excluded_reason: string | null;
           contact_name: string | null;
           avatar_url: string | null;
           company_name: string | null;
@@ -704,6 +705,8 @@ export interface Database {
           groups_unread_count: number;
           clientes_count: number;
           clientes_unread_count: number;
+          arquivados_count: number;
+          arquivados_unread_count: number;
           perdidos_count: number;
           perdidos_unread_count: number;
         }[];
