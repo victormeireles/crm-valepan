@@ -61,7 +61,7 @@ import {
 } from "@/lib/inbox/attachment-upload";
 import { claimLeadOwnerOnOutbound } from "@/lib/inbox/claim-lead-owner-on-outbound";
 
-import { createServerSupabaseClient, crmTables } from "@/lib/supabase/server";
+import { createServerSupabaseClient, crmTables, getServerUser } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { registerZapiLidMapForPhoneDigits } from "@/lib/zapi/phone-exists";
 import {
@@ -218,6 +218,31 @@ export type InboxOwnerUnreadRow = {
   isAll: boolean;
 };
 
+type PipelineStageNameCache = {
+  at: number;
+  names: Map<string, string>;
+};
+
+let pipelineStageNameCache: PipelineStageNameCache | null = null;
+const PIPELINE_STAGE_CACHE_TTL_MS = 60_000;
+
+async function loadPipelineStageNames(
+  crm: ReturnType<typeof crmTables>,
+): Promise<Map<string, string>> {
+  if (
+    pipelineStageNameCache
+    && Date.now() - pipelineStageNameCache.at < PIPELINE_STAGE_CACHE_TTL_MS
+  ) {
+    return pipelineStageNameCache.names;
+  }
+  const { data } = await crm.from("pipeline_stages").select("id, name");
+  const names = new Map(
+    (data ?? []).map((stage) => [stage.id, displayPipelineStageName(stage.name) || stage.name]),
+  );
+  pipelineStageNameCache = { at: Date.now(), names };
+  return names;
+}
+
 export async function refreshInboxSidebar(input: {
   tab: InboxSearchScope;
   page: number;
@@ -227,8 +252,8 @@ export async function refreshInboxSidebar(input: {
 }) {
   const startedAt = performance.now();
   const supabase = await createServerSupabaseClient();
-  const authTimed = await timeInboxOperation("auth_user", supabase.auth.getUser());
-  const { data: { user } } = authTimed.value;
+  const authTimed = await timeInboxOperation("auth_user", getServerUser());
+  const user = authTimed.value;
   if (!user) {
     logInboxPerformance("sidebar_refresh", performance.now() - startedAt, [authTimed], { tab: input.tab, page: input.page, rows: 0, hasError: true });
     return { ok: false as const, error: "Não autenticado" };
@@ -236,13 +261,64 @@ export async function refreshInboxSidebar(input: {
   const crm = crmTables(supabase);
   const page = Number.isFinite(input.page) && input.page > 0 ? Math.floor(input.page) : 1;
   const query = input.query?.trim() || null;
-  const { data: callerProfile } = await crm.from("profiles").select("role").eq("id", user.id).maybeSingle();
-  const owner = constrainInboxOwnerFilter(input.owner ?? null, {
+  const requestedOwner = input.owner ?? null;
+  // UUID de outro usuário exige role; todos/sem responsável podem ir em paralelo.
+  const ownerNeedsRole = typeof requestedOwner === "string" && requestedOwner.length > 0;
+
+  let owner: InboxOwnerFilter = requestedOwner;
+  const profilePromise = timeInboxOperation(
+    "caller_profile",
+    crm.from("profiles").select("role").eq("id", user.id).maybeSingle(),
+  );
+
+  if (ownerNeedsRole) {
+    const profileTimed = await profilePromise;
+    owner = constrainInboxOwnerFilter(requestedOwner, {
+      userId: user.id,
+      canViewTeam: profileTimed.value.data?.role === "admin",
+    });
+    const ownerArgs = inboxOwnerRpcArgs(owner);
+    const [snapshotTimed, stagesTimed] = await Promise.all([
+      timeInboxOperation("sidebar_snapshot", crm.rpc("inbox_sidebar_snapshot", {
+        p_messages_visible_since: INBOX_MESSAGES_VISIBLE_SINCE,
+        p_tab: input.tab,
+        p_offset: (page - 1) * 20,
+        p_limit: 20,
+        p_query: query,
+        p_unread: Boolean(input.unread),
+        p_owner_user_id: ownerArgs.p_owner_user_id,
+        p_unassigned: ownerArgs.p_unassigned,
+      })),
+      timeInboxOperation("pipeline_stages", loadPipelineStageNames(crm)),
+    ]);
+    const snapshotResult = snapshotTimed.value;
+    logInboxPerformance("sidebar_refresh", performance.now() - startedAt, [
+      authTimed,
+      profileTimed,
+      snapshotTimed,
+      stagesTimed,
+    ], {
+      tab: input.tab,
+      page,
+      rows: snapshotResult.data?.length ?? 0,
+      hasError: Boolean(snapshotResult.error),
+    });
+    if (snapshotResult.error) return { ok: false as const, error: snapshotResult.error.message };
+    return buildInboxSidebarRefreshResult(snapshotResult.data, stagesTimed.value, startedAt, {
+      auth_user: authTimed.durationMs,
+      caller_profile: profileTimed.durationMs,
+      sidebar_snapshot: snapshotTimed.durationMs,
+      pipeline_stages: stagesTimed.durationMs,
+    });
+  }
+
+  owner = constrainInboxOwnerFilter(requestedOwner, {
     userId: user.id,
-    canViewTeam: callerProfile?.role === "admin",
+    canViewTeam: true,
   });
   const ownerArgs = inboxOwnerRpcArgs(owner);
-  const [snapshotTimed, stagesTimed] = await Promise.all([
+  const [profileTimed, snapshotTimed, stagesTimed] = await Promise.all([
+    profilePromise,
     timeInboxOperation("sidebar_snapshot", crm.rpc("inbox_sidebar_snapshot", {
       p_messages_visible_since: INBOX_MESSAGES_VISIBLE_SINCE,
       p_tab: input.tab,
@@ -253,23 +329,38 @@ export async function refreshInboxSidebar(input: {
       p_owner_user_id: ownerArgs.p_owner_user_id,
       p_unassigned: ownerArgs.p_unassigned,
     })),
-    timeInboxOperation("pipeline_stages", crm.from("pipeline_stages").select("id, name")),
+    timeInboxOperation("pipeline_stages", loadPipelineStageNames(crm)),
   ]);
+  void profileTimed;
   const snapshotResult = snapshotTimed.value;
-  const stagesResult = stagesTimed.value;
-  const operations = [authTimed, snapshotTimed, stagesTimed];
-  logInboxPerformance("sidebar_refresh", performance.now() - startedAt, operations, {
+  logInboxPerformance("sidebar_refresh", performance.now() - startedAt, [
+    authTimed,
+    profileTimed,
+    snapshotTimed,
+    stagesTimed,
+  ], {
     tab: input.tab,
     page,
     rows: snapshotResult.data?.length ?? 0,
     hasError: Boolean(snapshotResult.error),
   });
   if (snapshotResult.error) return { ok: false as const, error: snapshotResult.error.message };
-  const rows = (snapshotResult.data ?? []) as InboxSidebarSnapshotRow[];
+  return buildInboxSidebarRefreshResult(snapshotResult.data, stagesTimed.value, startedAt, {
+    auth_user: authTimed.durationMs,
+    caller_profile: profileTimed.durationMs,
+    sidebar_snapshot: snapshotTimed.durationMs,
+    pipeline_stages: stagesTimed.durationMs,
+  });
+}
+
+function buildInboxSidebarRefreshResult(
+  data: InboxSidebarSnapshotRow[] | null,
+  stageNames: Map<string, string>,
+  startedAt: number,
+  operationMs: Record<string, number> = {},
+) {
+  const rows = data ?? [];
   const meta = rows[0];
-  const stageNames = new Map(
-    (stagesResult.data ?? []).map((stage) => [stage.id, displayPipelineStageName(stage.name) || stage.name]),
-  );
   const conversations: InboxSidebarRefreshRow[] = rows
     .map((row) => mapSidebarSnapshotRow(row, stageNames))
     .filter((row): row is InboxSidebarRefreshRow => Boolean(row));
@@ -289,27 +380,27 @@ export async function refreshInboxSidebar(input: {
       perdidos: Number(meta?.perdidos_unread_count ?? 0),
     } satisfies InboxUnreadCounts,
     tabTotal: Number(meta?.tab_total ?? 0),
+    serverMs: Math.round(performance.now() - startedAt),
+    operationMs,
   };
 }
 
 /** Contagens de não lidas por responsável para o flyout da rail. */
 export async function loadInboxOwnerUnreadCounts(tab: InboxSearchScope) {
   const supabase = await createServerSupabaseClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getServerUser();
   if (!user) return { ok: false as const, error: "Não autenticado" };
 
   const crm = crmTables(supabase);
-  const { data: profile } = await crm
-    .from("profiles")
-    .select("role, full_name")
-    .eq("id", user.id)
-    .maybeSingle();
+  const [{ data: profile }, rpcResult] = await Promise.all([
+    crm.from("profiles").select("role, full_name").eq("id", user.id).maybeSingle(),
+    crm.rpc("inbox_owner_unread_counts", {
+      p_messages_visible_since: INBOX_MESSAGES_VISIBLE_SINCE,
+      p_tab: tab,
+    }),
+  ]);
   const canViewTeam = profile?.role === "admin";
-
-  const { data, error } = await crm.rpc("inbox_owner_unread_counts", {
-    p_messages_visible_since: INBOX_MESSAGES_VISIBLE_SINCE,
-    p_tab: tab,
-  });
+  const { data, error } = rpcResult;
   if (error) return { ok: false as const, error: error.message };
 
   type OwnerUnreadRpcRow = Database["crm"]["Functions"]["inbox_owner_unread_counts"]["Returns"][number];

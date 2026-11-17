@@ -41,6 +41,16 @@ import {
   type InboxUnreadCounts,
 } from "./inbox-location";
 import { recordInboxBrowserMetric } from "@/lib/inbox-browser-performance";
+import {
+  fetchInboxSidebarCached,
+  inboxSidebarCacheKey,
+  invalidateInboxSidebarCache,
+  readInboxSidebarCache,
+  readOwnerCountsCache,
+  writeInboxSidebarCache,
+  writeOwnerCountsCache,
+  type InboxSidebarRefreshOk,
+} from "@/lib/inbox/sidebar-list-cache";
 import { ownerChipColor, ownerInitial } from "@/lib/owner-chip";
 import {
   callStatusFromEvent,
@@ -232,6 +242,7 @@ export function InboxSidebar({
   const [liveTab, setLiveTab] = useState<InboxSearchScope>(activeTab);
   const [livePage, setLivePage] = useState(page);
   const [listPending, setListPending] = useState(false);
+  const [listRefreshing, setListRefreshing] = useState(false);
   const [liveConversations, setLiveConversations] = useState(conversations);
   const [liveUnreadCounts, setLiveUnreadCounts] = useState(unreadCounts);
   const [liveUnreadOnly, setLiveUnreadOnly] = useState(unreadOnly);
@@ -301,16 +312,22 @@ export function InboxSidebar({
   const applySidebarResult = useCallback((
     tab: InboxSearchScope,
     nextPage: number,
-    result: Awaited<ReturnType<typeof refreshInboxSidebar>>,
+    result: InboxSidebarRefreshOk,
     startedAt: number,
     unreadActive: boolean,
     mode: "push" | "replace" | "silent",
+    meta?: { cacheHit?: boolean; serverMs?: number },
   ) => {
     recordInboxBrowserMetric("sidebar_refresh", startedAt, {
-      success: result.ok,
-      rows: result.ok ? result.conversations.length : 0,
+      success: true,
+      rows: result.conversations.length,
+      cacheHit: Boolean(meta?.cacheHit),
+      serverMs: meta?.serverMs ?? result.serverMs ?? null,
+      authMs: result.operationMs?.auth_user ?? null,
+      snapshotMs: result.operationMs?.sidebar_snapshot ?? null,
+      stagesMs: result.operationMs?.pipeline_stages ?? null,
+      profileMs: result.operationMs?.caller_profile ?? null,
     });
-    if (!result.ok) return;
     setLiveTab(tab);
     setLivePage(nextPage);
     setLiveUnreadCounts(result.unreadCounts);
@@ -344,6 +361,34 @@ export function InboxSidebar({
     );
   }, []);
 
+  const prefetchSidebarList = useCallback((input: {
+    tab: InboxSearchScope;
+    page?: number;
+    query?: string | null;
+    unread?: boolean;
+    owner?: InboxOwnerFilter;
+  }) => {
+    const page = input.page ?? 1;
+    const key = inboxSidebarCacheKey({
+      tab: input.tab,
+      page,
+      query: input.query,
+      unread: input.unread,
+      owner: input.owner,
+    });
+    if (readInboxSidebarCache(key)) return;
+    void fetchInboxSidebarCached(
+      {
+        tab: input.tab,
+        page,
+        query: input.query ?? null,
+        unread: Boolean(input.unread),
+        owner: input.owner ?? null,
+      },
+      refreshInboxSidebar,
+    );
+  }, []);
+
   const loadList = useCallback((
     tab: InboxSearchScope,
     nextPage: number,
@@ -363,8 +408,16 @@ export function InboxSidebar({
       currentUserId,
       canViewTeam,
     });
-    // Silent = reconcile/realtime: mantém a lista visível (sem skeleton/toast).
-    if (mode !== "silent") setListPending(true);
+    const requestInput = {
+      tab,
+      page: nextPage,
+      query: activeQuery,
+      unread: unreadFilter,
+      owner: ownerNext,
+    };
+    const cacheKey = inboxSidebarCacheKey(requestInput);
+    const cached = mode === "silent" ? null : readInboxSidebarCache(cacheKey);
+
     setLiveTab(tab);
     setLivePage(nextPage);
     setLiveUnreadOnly(unreadFilter);
@@ -388,30 +441,69 @@ export function InboxSidebar({
       if (mode === "push") pushInboxClientUrl(historyState, href);
       else replaceInboxClientUrl(historyState, href);
     }
-    void refreshInboxSidebar({
-      tab,
-      page: nextPage,
-      query: activeQuery,
-      unread: unreadFilter,
-      owner: ownerNext,
-    }).then((result) => {
-      if (version !== requestVersion.current) return;
-      applySidebarResult(tab, nextPage, result, startedAt, unreadFilter, mode);
-      if (mode !== "silent") setListPending(false);
+
+    if (cached) {
+      applySidebarResult(tab, nextPage, cached, startedAt, unreadFilter, mode, { cacheHit: true });
+      setListPending(false);
+      setListRefreshing(true);
       setSearchPending(false);
-      if (!result.ok) {
-        setSearchError("Não foi possível atualizar a lista. Tente novamente.");
-        return;
-      }
       setSearchError(null);
-    }).catch(() => {
-      if (version !== requestVersion.current) return;
-      recordInboxBrowserMetric("sidebar_refresh", startedAt, { success: false, rows: 0 });
-      if (mode !== "silent") setListPending(false);
-      setSearchPending(false);
-      setSearchError("Não foi possível atualizar a lista. Tente novamente.");
-    });
-  }, [applySidebarResult, canViewTeam, currentUserId, teamOptions]);
+      // Prefetch do par Tudo/Não lidas para o mesmo responsável.
+      prefetchSidebarList({
+        tab,
+        page: 1,
+        query: activeQuery,
+        unread: !unreadFilter,
+        owner: ownerNext,
+      });
+    } else if (mode !== "silent") {
+      // Mantém a lista visível (só skeleton se ainda não há linhas).
+      if (liveConversationsRef.current.length === 0) setListPending(true);
+      else setListRefreshing(true);
+    }
+
+    void fetchInboxSidebarCached(requestInput, refreshInboxSidebar, { force: Boolean(cached) || mode === "silent" })
+      .then((result) => {
+        if (version !== requestVersion.current) return;
+        if (!result) {
+          recordInboxBrowserMetric("sidebar_refresh", startedAt, { success: false, rows: 0 });
+          if (mode !== "silent") {
+            setListPending(false);
+            setListRefreshing(false);
+          }
+          setSearchPending(false);
+          setSearchError("Não foi possível atualizar a lista. Tente novamente.");
+          return;
+        }
+        applySidebarResult(tab, nextPage, result, startedAt, unreadFilter, mode, {
+          cacheHit: false,
+          serverMs: result.serverMs,
+        });
+        if (mode !== "silent") {
+          setListPending(false);
+          setListRefreshing(false);
+        }
+        setSearchPending(false);
+        setSearchError(null);
+        prefetchSidebarList({
+          tab,
+          page: 1,
+          query: activeQuery,
+          unread: !unreadFilter,
+          owner: ownerNext,
+        });
+      })
+      .catch(() => {
+        if (version !== requestVersion.current) return;
+        recordInboxBrowserMetric("sidebar_refresh", startedAt, { success: false, rows: 0 });
+        if (mode !== "silent") {
+          setListPending(false);
+          setListRefreshing(false);
+        }
+        setSearchPending(false);
+        setSearchError("Não foi possível atualizar a lista. Tente novamente.");
+      });
+  }, [applySidebarResult, canViewTeam, currentUserId, prefetchSidebarList, teamOptions]);
 
   useEffect(() => {
     setQ(initialQuery);
@@ -452,6 +544,31 @@ export function InboxSidebar({
     setLiveOwnerFilterLabel(ownerFilterLabel);
     setLiveTab(activeTab);
     setLivePage(page);
+    writeInboxSidebarCache(
+      inboxSidebarCacheKey({
+        tab: activeTab,
+        page,
+        query: isInboxSearchQuery(initialQuery) ? initialQuery.trim() : null,
+        unread: unreadOnly,
+        owner: ownerFilter,
+      }),
+      {
+        ok: true,
+        conversations: conversations.map((row) => ({
+          ...row,
+          avatarUrl: row.avatarUrl ?? null,
+        })),
+        tabCounts,
+        unreadCounts,
+        tabTotal: tabTotal ?? (
+          activeTab === "all"
+            ? sumInboxTabCounts(tabCounts)
+            : isInboxTab(activeTab)
+              ? tabCounts[activeTab]
+              : sumInboxTabCounts(tabCounts)
+        ),
+      },
+    );
     // Em «Não lidas», preserva conversas já lidas nesta sessão se o RSC
     // revalidar a página (ex.: troca de etapa com router.refresh).
     if (unreadOnly) {
@@ -470,7 +587,7 @@ export function InboxSidebar({
     setLiveTabTotal(
       tabTotal ?? (activeTab === "all" ? sumInboxTabCounts(tabCounts) : isInboxTab(activeTab) ? tabCounts[activeTab] : sumInboxTabCounts(tabCounts)),
     );
-  }, [conversations, tabCounts, unreadCounts, unreadOnly, ownerFilter, ownerFilterLabel, tabTotal, activeTab, page, loadList]);
+  }, [conversations, tabCounts, unreadCounts, unreadOnly, ownerFilter, ownerFilterLabel, tabTotal, activeTab, page, loadList, initialQuery]);
 
   useEffect(() => {
     const onOwnerChanged = (event: Event) => {
@@ -504,7 +621,10 @@ export function InboxSidebar({
   }, []);
 
   useEffect(() => {
-    const refresh = () => loadList(liveTabRef.current, livePageRef.current, "silent");
+    const refresh = () => {
+      invalidateInboxSidebarCache();
+      loadList(liveTabRef.current, livePageRef.current, "silent");
+    };
     window.addEventListener(INBOX_SIDEBAR_CHANGED_EVENT, refresh);
     return () => window.removeEventListener(INBOX_SIDEBAR_CHANGED_EVENT, refresh);
   }, [loadList]);
@@ -792,20 +912,27 @@ export function InboxSidebar({
 
   const openOwnerFlyout = useCallback((tab: InboxTab) => {
     setOwnerFlyoutTab(tab);
+    const cachedRows = readOwnerCountsCache<InboxOwnerUnreadRow[]>(tab);
+    if (cachedRows) {
+      setOwnerUnreadRows(cachedRows);
+      setOwnerCountsPending(false);
+    } else {
+      setOwnerCountsPending(true);
+    }
     const requestId = ++ownerCountsRequestRef.current;
-    setOwnerCountsPending(true);
     void loadInboxOwnerUnreadCounts(tab).then((result) => {
       if (requestId !== ownerCountsRequestRef.current) return;
       setOwnerCountsPending(false);
       if (!result.ok) {
-        setOwnerUnreadRows([]);
+        if (!cachedRows) setOwnerUnreadRows([]);
         return;
       }
+      writeOwnerCountsCache(tab, result.rows);
       setOwnerUnreadRows(result.rows);
     }).catch(() => {
       if (requestId !== ownerCountsRequestRef.current) return;
       setOwnerCountsPending(false);
-      setOwnerUnreadRows([]);
+      if (!cachedRows) setOwnerUnreadRows([]);
     });
   }, []);
 
@@ -854,7 +981,7 @@ export function InboxSidebar({
 
   return (
     <div
-      aria-busy={searchPending || listPending}
+      aria-busy={searchPending || listPending || listRefreshing}
       className="relative flex h-full min-h-0 flex-1 overflow-hidden"
     >
       <nav
@@ -955,6 +1082,24 @@ export function InboxSidebar({
                       type="button"
                       role="menuitemradio"
                       aria-checked={selected}
+                      onMouseEnter={() => {
+                        if (!ownerFlyoutTab) return;
+                        prefetchSidebarList({
+                          tab: ownerFlyoutTab,
+                          page: 1,
+                          unread: liveUnreadOnly,
+                          owner: optionOwner,
+                        });
+                      }}
+                      onFocus={() => {
+                        if (!ownerFlyoutTab) return;
+                        prefetchSidebarList({
+                          tab: ownerFlyoutTab,
+                          page: 1,
+                          unread: liveUnreadOnly,
+                          owner: optionOwner,
+                        });
+                      }}
                       onClick={() => selectOwnerFilter(ownerFlyoutTab, optionOwner)}
                       className={`flex min-h-11 w-full items-center gap-2 px-3 text-left text-[13px] transition-colors duration-150 hover:bg-[var(--vp-surface)] ${
                         selected ? "bg-[rgba(35,0,4,0.06)] font-bold text-[var(--vp-wine)]" : "text-[var(--vp-ink-muted)]"
@@ -1053,7 +1198,11 @@ export function InboxSidebar({
             </p>
           ) : null}
         </div>
-        <ul className="min-h-0 flex-1 divide-y divide-[var(--vp-surface-high)] overflow-y-auto overscroll-contain">
+        <ul
+          className={`min-h-0 flex-1 divide-y divide-[var(--vp-surface-high)] overflow-y-auto overscroll-contain transition-opacity duration-150 ${
+            listRefreshing && !listPending ? "opacity-60" : "opacity-100"
+          }`}
+        >
           {listPending
             ? Array.from({ length: 10 }, (_, index) => (
                 <li key={`inbox-skeleton-${index}`} className="px-3 py-2">

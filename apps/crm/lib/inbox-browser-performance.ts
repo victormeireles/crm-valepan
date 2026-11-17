@@ -1,7 +1,7 @@
 export function recordInboxBrowserMetric(
   name: "conversation" | "lead_panel" | "sidebar_refresh",
   startedAt: number,
-  detail: Record<string, boolean | number | string | null>,
+  detail: Record<string, boolean | number | string | null | undefined>,
 ) {
   if (typeof window === "undefined") return;
   const durationMs = Math.round((performance.now() - startedAt) * 10) / 10;
