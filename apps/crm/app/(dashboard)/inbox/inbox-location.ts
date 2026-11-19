@@ -179,6 +179,49 @@ export function inboxClientHref(input: {
   return `${url.pathname}${url.search}#${hash.toString()}`;
 }
 
+/** Sai da conversa sem perder aba, página e filtros. Tira `cid` da query e do hash. */
+export function inboxHrefWithoutConversation(
+  currentHref: string,
+  input: {
+    tab: InboxSearchScope;
+    page: number;
+    unread?: boolean;
+    owner?: InboxOwnerFilter;
+  },
+) {
+  const url = new URL(currentHref);
+  url.searchParams.delete("cid");
+  url.searchParams.delete("lookup");
+  const hash = new URLSearchParams({ tab: input.tab });
+  if (input.page > 1) hash.set("page", String(input.page));
+  if (input.unread) hash.set("unread", "1");
+  appendOwnerParam(hash, input.owner);
+  const hashValue = hash.toString();
+  return `${url.pathname}${url.search}${hashValue ? `#${hashValue}` : ""}`;
+}
+
+export const INBOX_LOCATION_EVENT = "crm:inbox-location";
+
+export function closeInboxConversation() {
+  const current = readInboxLocation();
+  const href = inboxHrefWithoutConversation(window.location.href, {
+    tab: current.tab,
+    page: current.page,
+    unread: current.unread,
+    owner: current.owner,
+  });
+  replaceInboxClientUrl(
+    {
+      inboxTab: current.tab,
+      inboxPage: current.page,
+      inboxUnread: current.unread,
+      inboxOwner: current.owner,
+    },
+    href,
+  );
+  window.dispatchEvent(new Event(INBOX_LOCATION_EVENT));
+}
+
 function nativeHistory(
   method: "pushState" | "replaceState",
   state: object,

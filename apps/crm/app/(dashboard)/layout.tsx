@@ -4,6 +4,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { signOutAction } from "@/app/actions/auth";
 import { DashboardNav } from "./dashboard-nav";
+import { MobileTabBar } from "./mobile-tab-bar";
 import { SessionKeepAlive } from "@/lib/auth/session-keep-alive";
 
 const roleLabel: Record<string, string> = {
@@ -28,6 +29,8 @@ export default async function DashboardLayout({
     .select("full_name, role")
     .eq("id", user.id)
     .maybeSingle();
+  const userLabel = displayUserLabel(user, profile);
+  const userInitial = userLabel.trim().charAt(0).toUpperCase() || "A";
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-[var(--vp-paper)]">
@@ -43,12 +46,12 @@ export default async function DashboardLayout({
               <img
                 src="/brand/valepan-logo.svg"
                 alt="Valepan"
-                className="h-9 w-auto drop-shadow-sm"
+                className="h-9 w-auto drop-shadow-sm max-md:h-[30px]"
                 width={40}
                 height={37}
               />
               <span
-                className="text-xl font-bold tracking-[0.12em] text-[var(--vp-gold)]"
+                className="text-xl font-bold tracking-[0.12em] text-[var(--vp-gold)] max-md:text-[22px]"
                 style={{ fontFamily: "var(--font-display)" }}
               >
                 CRM
@@ -56,10 +59,16 @@ export default async function DashboardLayout({
             </Link>
             <DashboardNav isAdmin={profile?.role === "admin"} />
           </div>
-          <div className="flex shrink-0 items-center gap-3 border-l border-[rgba(255,248,247,0.2)] pl-3 md:pl-5">
-            <div className="flex items-center gap-3 rounded-xl bg-[rgba(255,248,247,0.08)] px-3 py-2 text-sm backdrop-blur-sm">
+          <div className="flex shrink-0 items-center gap-3 md:border-l md:border-[rgba(255,248,247,0.2)] md:pl-5">
+            <span
+              className="grid size-11 place-items-center rounded-full border border-[rgba(255,215,115,0.45)] bg-[rgba(255,248,247,0.08)] text-[15px] font-extrabold text-[var(--vp-gold)] md:hidden"
+              aria-hidden
+            >
+              {userInitial}
+            </span>
+            <div className="hidden items-center gap-3 rounded-xl bg-[rgba(255,248,247,0.08)] px-3 py-2 text-sm backdrop-blur-sm md:flex">
               <span className="max-w-[12rem] truncate whitespace-nowrap text-[rgba(255,248,247,0.88)] xl:max-w-none">
-                {displayUserLabel(user, profile)}{" "}
+                {userLabel}{" "}
                 {profile?.role
                   ? `· ${roleLabel[profile.role] ?? profile.role}`
                   : ""}
@@ -78,7 +87,7 @@ export default async function DashboardLayout({
       </header>
       <div
         data-dashboard-main
-        className="relative mx-auto flex min-h-0 w-full flex-1 flex-col overflow-y-auto px-4 py-6 lg:px-6 md:py-8"
+        className="relative mx-auto flex min-h-0 w-full flex-1 flex-col overflow-y-auto px-4 py-6 max-md:pb-28 lg:px-6 md:py-8"
       >
         {profileError ? (
           <div className="mx-auto max-w-lg rounded-xl border border-[var(--border)] bg-[var(--card)] p-6">
@@ -98,6 +107,7 @@ export default async function DashboardLayout({
           </div>
         )}
       </div>
+      <MobileTabBar isAdmin={profile?.role === "admin"} />
     </div>
   );
 }

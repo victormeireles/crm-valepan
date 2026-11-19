@@ -27,7 +27,7 @@ export function DashboardNav({ isAdmin = false }: { isAdmin?: boolean }) {
     : dashboardNavItems;
 
   return (
-    <nav className="flex min-w-0 flex-nowrap gap-0.5 text-xs font-semibold uppercase tracking-[0.08em] md:gap-1 md:text-[13px] md:tracking-[0.05em] lg:text-sm">
+    <nav className="hidden min-w-0 flex-nowrap gap-0.5 text-xs font-semibold uppercase tracking-[0.08em] md:flex md:gap-1 md:text-[13px] md:tracking-[0.05em] lg:text-sm">
       {items.map((n) => {
         if (n.kind === "link") {
           const active = linkActive(pathname, n.href, searchParams);

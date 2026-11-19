@@ -712,8 +712,8 @@ const ChatMessageItem = memo(function ChatMessageItem({
               if (event.key === "Escape") onClose();
             }}
             className={out
-              ? `relative max-w-[min(76%,460px)] cursor-pointer rounded-2xl rounded-br-[4px] bg-[var(--vp-wine)] px-3.5 py-[11px] text-sm leading-[1.45] text-[var(--vp-gold-cream)] shadow-[var(--sh-sm)]${isNewSinceRead ? " ring-2 ring-[var(--vp-gold)]/35" : ""}${selected ? " ring-2 ring-[var(--vp-gold)]/60" : ""}`
-              : `relative max-w-[min(76%,460px)] cursor-pointer rounded-2xl rounded-bl-[4px] border bg-[var(--vp-paper-pure)] px-3.5 py-[11px] text-sm leading-[1.45] text-[var(--vp-ink-body)] shadow-[var(--sh-sm)]${isNewSinceRead ? " border-[var(--vp-wine)]/45 ring-1 ring-[var(--vp-wine)]/25" : " border-[var(--vp-ink-line)]"}${selected ? " ring-2 ring-[var(--vp-wine)]/35" : ""}`}
+              ? `relative max-w-[min(76%,460px)] cursor-pointer rounded-2xl rounded-br-[4px] bg-[var(--vp-wine)] px-3.5 py-[11px] text-sm leading-[1.45] text-[var(--vp-gold-cream)] shadow-[var(--sh-sm)] max-md:max-w-[84%] max-md:text-[15px]${isNewSinceRead ? " ring-2 ring-[var(--vp-gold)]/35" : ""}${selected ? " ring-2 ring-[var(--vp-gold)]/60" : ""}`
+              : `relative max-w-[min(76%,460px)] cursor-pointer rounded-2xl rounded-bl-[4px] border bg-[var(--vp-paper-pure)] px-3.5 py-[11px] text-sm leading-[1.45] text-[var(--vp-ink-body)] shadow-[var(--sh-sm)] max-md:max-w-[84%] max-md:text-[15px]${isNewSinceRead ? " border-[var(--vp-wine)]/45 ring-1 ring-[var(--vp-wine)]/25" : " border-[var(--vp-ink-line)]"}${selected ? " ring-2 ring-[var(--vp-wine)]/35" : ""}`}
           >
             {repliedMessage ? <div className={`mb-2 rounded-lg border-l-4 px-2.5 py-2 text-xs ${out ? "border-[var(--vp-gold)] bg-black/15" : "border-[var(--vp-wine)] bg-black/5"}`}><p className="mb-0.5 font-semibold">Em resposta a</p><p className="line-clamp-2 opacity-80">{messagePreview(repliedMessage)}</p></div> : null}
             {message.deleted_at ? <p className="flex items-center gap-2 italic opacity-70"><span aria-hidden>⌫</span> Esta mensagem foi apagada</p> : contactCard ? (
@@ -943,7 +943,9 @@ export function ChatThread({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <DocumentSearch conversationId={conversationId} />
+      <div className="max-md:hidden">
+        <DocumentSearch conversationId={conversationId} />
+      </div>
       {pinnedMessage ? (
         <button
           type="button"

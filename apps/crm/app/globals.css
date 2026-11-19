@@ -31,6 +31,14 @@ html:has([data-inbox-shell]) [data-dashboard-main] {
   overflow: hidden;
 }
 
+/* Desktop: uma linha na altura toda. O grid de 40vh vale só entre 768 e 899px. */
+@media (min-width: 900px) {
+  [data-inbox-frame] {
+    grid-template-columns: 474px minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+  }
+}
+
 [data-inbox-shell] [data-inbox-panel],
 [data-inbox-shell] section,
 [data-inbox-shell] aside {
@@ -66,6 +74,17 @@ html:has([data-inbox-shell]) [data-dashboard-main] {
 @keyframes inbox-owner-scrim-in {
   from { opacity: 0; }
   to { opacity: 1; }
+}
+
+@keyframes inbox-sheet-in {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+@media (max-width: 767px) {
+  html[data-inbox-conversation="open"] [data-mobile-tabbar] {
+    display: none;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

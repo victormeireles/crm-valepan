@@ -19,10 +19,12 @@ export function ForwardDistributorByCepButton({
   leadId,
   initialZipCode,
   onAssigned,
+  appearance = "toolbar",
 }: {
   conversationId: string;
   leadId: string;
   initialZipCode: string | null;
+  appearance?: "toolbar" | "strip" | "outline";
   onAssigned?: (next: {
     stageId: string;
     substage: string;
@@ -132,11 +134,27 @@ export function ForwardDistributorByCepButton({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] px-3 text-xs font-bold text-[var(--vp-wine)] hover:bg-[var(--vp-surface)]"
+        className={
+          appearance === "strip"
+            ? "flex h-12 w-14 shrink-0 flex-col items-center justify-center gap-0.5 rounded-xl border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] text-[var(--vp-wine)]"
+            : appearance === "outline"
+              ? "inline-flex h-[52px] min-w-0 flex-1 items-center justify-center rounded-xl border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] px-3 text-sm font-bold text-[var(--vp-wine)]"
+              : "inline-flex min-h-9 items-center gap-1.5 rounded-full border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] px-3 text-xs font-bold text-[var(--vp-wine)] hover:bg-[var(--vp-surface)]"
+        }
         title="Buscar distribuidor por CEP"
       >
-        <CrmIcon name="search" className="text-base" />
-        <span className="hidden sm:inline">CEP</span>
+        {appearance === "outline" ? (
+          "Distribuidor por CEP"
+        ) : (
+          <>
+            <CrmIcon name="search" className={appearance === "strip" ? "text-[18px]" : "text-base"} />
+            {appearance === "strip" ? (
+              <span className="text-[10px] font-extrabold">CEP</span>
+            ) : (
+              <span className="hidden sm:inline">CEP</span>
+            )}
+          </>
+        )}
       </button>
 
       <dialog

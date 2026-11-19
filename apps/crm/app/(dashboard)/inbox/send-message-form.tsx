@@ -48,6 +48,7 @@ export function SendMessageForm({
   const [sendingContactPhone, setSendingContactPhone] = useState<string | null>(null);
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
   const [replyTo, setReplyTo] = useState<{ id: string; preview: string } | null>(null);
+  const [mobile, setMobile] = useState(false);
   const attachRef = useRef<HTMLDivElement>(null);
   const emojiRef = useRef<HTMLDivElement>(null);
   const messageRef = useRef<HTMLTextAreaElement>(null);
@@ -78,6 +79,14 @@ export function SendMessageForm({
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  useEffect(() => {
+    const query = window.matchMedia("(max-width: 767px)");
+    const sync = () => setMobile(query.matches);
+    sync();
+    query.addEventListener("change", sync);
+    return () => query.removeEventListener("change", sync);
   }, []);
 
   useEffect(() => {
@@ -231,13 +240,13 @@ export function SendMessageForm({
       ) : null}
 
       {quickReplies.length > 0 ? (
-        <div className={`flex items-center gap-2 overflow-x-auto pb-1 ${compact ? "[scrollbar-width:none] [&::-webkit-scrollbar]:hidden" : ""}`}>
-          <span className="shrink-0 text-[10px] font-extrabold uppercase tracking-[0.14em] text-[var(--vp-ink-soft)]">Respostas rápidas</span>
+        <div className={`flex items-center gap-2 overflow-x-auto pb-1 max-md:[scrollbar-width:none] max-md:[&::-webkit-scrollbar]:hidden ${compact ? "[scrollbar-width:none] [&::-webkit-scrollbar]:hidden" : ""}`}>
+          <span className="shrink-0 text-[10px] font-extrabold uppercase tracking-[0.14em] text-[var(--vp-ink-soft)] max-md:hidden">Respostas rápidas</span>
           {quickReplies.map((reply) => (
             <button
               key={reply.id}
               type="button"
-              className="min-h-9 shrink-0 rounded-full border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] px-3 text-xs font-semibold text-[var(--vp-wine)]"
+              className="min-h-9 shrink-0 rounded-full border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] px-3 text-xs font-semibold text-[var(--vp-wine)] max-md:min-h-10 max-md:px-3.5 max-md:text-[13px]"
               onClick={() => {
                 if (!messageRef.current) return;
                 messageRef.current.value = renderQuickReply(reply.body, {
@@ -334,12 +343,13 @@ export function SendMessageForm({
             name="message"
             required
             rows={1}
-            placeholder={compact ? `Mensagem para ${firstName}` : `Escreva para ${firstName} — Enter envia, Shift+Enter quebra linha`}
-            aria-label={compact ? `Escreva para ${firstName}. Enter envia, Shift+Enter quebra linha` : undefined}
+            placeholder={compact || mobile ? `Mensagem para ${firstName}` : `Escreva para ${firstName} — Enter envia, Shift+Enter quebra linha`}
+            aria-label={compact || mobile ? `Mensagem para ${firstName}` : undefined}
             onChange={() => {
               if (err) setErr(null);
             }}
             onKeyDown={(event) => {
+              if (window.matchMedia("(max-width: 767px)").matches) return;
               if (
                 event.key !== "Enter" ||
                 event.shiftKey ||
@@ -353,7 +363,7 @@ export function SendMessageForm({
               }
               event.currentTarget.form?.requestSubmit();
             }}
-            className="max-h-32 min-h-[42px] min-w-0 flex-1 resize-none overflow-x-hidden overflow-y-auto border-0 bg-transparent py-2.5 pr-2 text-sm leading-snug text-[var(--foreground)] placeholder:text-[var(--muted)] focus:outline-none focus:ring-0"
+            className="max-h-32 min-h-[42px] min-w-0 flex-1 resize-none overflow-x-hidden overflow-y-auto border-0 bg-transparent py-2.5 pr-2 text-sm leading-snug text-[var(--foreground)] placeholder:text-[var(--muted)] focus:outline-none focus:ring-0 max-md:text-base"
           />
         </div>
 
@@ -361,7 +371,7 @@ export function SendMessageForm({
           type="submit"
           disabled={loading || uploadingAttachment}
           aria-label={compact ? (loading ? "Enviando" : "Enviar") : undefined}
-          className={`inline-flex h-[50px] shrink-0 items-center justify-center rounded-full bg-[var(--vp-wine)] text-sm font-bold text-[var(--vp-gold)] shadow-[var(--sh-md)] transition-[transform,background-color,box-shadow] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] hover:bg-[var(--vp-wine-classic)] hover:shadow-[var(--sh-lg)] disabled:pointer-events-none disabled:opacity-50 ${
+          className={`inline-flex h-[50px] shrink-0 items-center justify-center rounded-full bg-[var(--vp-wine)] text-sm font-bold text-[var(--vp-gold)] shadow-[var(--sh-md)] transition-[transform,background-color,box-shadow] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] hover:bg-[var(--vp-wine-classic)] hover:shadow-[var(--sh-lg)] disabled:pointer-events-none disabled:opacity-50 max-md:w-[50px] max-md:px-0 ${
             compact ? "w-[50px] px-0" : "gap-2 px-5"
           }`}
         >
@@ -370,7 +380,7 @@ export function SendMessageForm({
           ) : (
             <CrmIcon name="send" className="text-xl" />
           )}
-          {compact ? null : <span>{loading ? "Enviando…" : "Enviar"}</span>}
+          {compact ? null : <span className="max-md:hidden">{loading ? "Enviando…" : "Enviar"}</span>}
         </button>
       </div>
       {contactPickerOpen ? (

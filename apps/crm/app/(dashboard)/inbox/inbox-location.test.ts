@@ -6,6 +6,7 @@ import {
   inboxOwnerFromParam,
   inboxOwnerRpcArgs,
   inboxServerSnapshotMatchesClient,
+  inboxHrefWithoutConversation,
   inboxShareHref,
   inboxTabFromParam,
   inboxUnreadFromParam,
@@ -143,6 +144,15 @@ describe("inbox-location", () => {
         { tab: "leads", page: 1, unread: false, owner: "unassigned" },
       ),
     ).toBe(false);
+  });
+
+  it("removes cid from search and hash when leaving a conversation", () => {
+    expect(
+      inboxHrefWithoutConversation(
+        "https://crm.test/inbox?tab=leads&cid=abc&lookup=1#tab=leads&cid=abc&page=2&unread=1&owner=unassigned",
+        { tab: "groups", page: 2, unread: true, owner: "unassigned" },
+      ),
+    ).toBe("/inbox?tab=leads#tab=groups&page=2&unread=1&owner=unassigned");
   });
 
   it("includes unread in share href when set", () => {

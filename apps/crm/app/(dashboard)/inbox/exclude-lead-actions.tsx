@@ -58,10 +58,12 @@ export function ExcludeLeadButton({
   leadId,
   redirectTo,
   iconOnly = false,
+  menu = false,
 }: {
   leadId: string;
   redirectTo?: string;
   iconOnly?: boolean;
+  menu?: boolean;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -74,18 +76,25 @@ export function ExcludeLeadButton({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className={iconOnly
+        className={menu
+          ? "flex min-h-[52px] w-full items-center gap-3 px-4 text-left text-sm font-semibold text-[var(--vp-wine)]"
+          : iconOnly
           ? "grid size-[34px] place-items-center rounded-full border border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] text-[var(--vp-ink-muted)] hover:text-[var(--vp-wine)]"
           : "rounded-md border border-[var(--border)] bg-[var(--vp-paper-pure)] px-3 py-1.5 text-xs font-medium text-[var(--muted)] hover:border-[var(--vp-wine)] hover:text-[var(--vp-wine)]"}
         aria-label={iconOnly ? "Arquivar conversa" : undefined}
       >
-        {iconOnly ? <CrmIcon name="archive" className="text-lg" /> : "Não é lead"}
+        {menu ? (
+          <>
+            <CrmIcon name="archive" className="text-[20px]" />
+            Arquivar
+          </>
+        ) : iconOnly ? <CrmIcon name="archive" className="text-lg" /> : "Não é lead"}
       </button>
     );
   }
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-[rgba(35,0,4,0.35)] p-4" role="dialog" aria-modal="true" aria-label="Arquivar conversa">
+    <div className="fixed inset-0 z-[80] grid place-items-center bg-[rgba(35,0,4,0.35)] p-4" role="dialog" aria-modal="true" aria-label="Arquivar conversa">
     <ActionPanel
       busy={busy}
       err={err}

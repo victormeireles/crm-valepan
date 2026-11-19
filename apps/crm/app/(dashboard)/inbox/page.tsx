@@ -9,6 +9,7 @@ import { nestOne } from "@/lib/supabase/nested";
 import { createServerSupabaseClient, crmTables, getServerUser } from "@/lib/supabase/server";
 import { templateFirstName } from "@/lib/inbox/quick-replies";
 import { InboxLiveRefresh } from "./inbox-live-refresh";
+import { InboxMobileFrame } from "./inbox-mobile-frame";
 import { InboxSidebar, type InboxSidebarRow } from "./inbox-sidebar";
 import { InboxConversationPane } from "./inbox-conversation-pane";
 import {
@@ -615,39 +616,36 @@ export default async function InboxPage({
           {schemaHint ? <p className="mt-2 text-xs">{schemaHint}</p> : null}
         </div>
       ) : null}
-      <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,40vh)_minmax(0,1fr)] gap-0 overflow-hidden min-[900px]:grid-cols-[474px_minmax(0,1fr)] min-[900px]:grid-rows-[minmax(0,1fr)]">
-        <div
-          data-inbox-panel
-          className="flex h-full min-h-0 flex-col overflow-hidden rounded-none border-r border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)]"
-        >
-          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-            <InboxSidebar
-              conversations={sidebarRows}
-              selectedId={selectedId}
-              activeTab={activeTab}
-              page={page}
-              initialQuery={inboxQuery}
-              renderNowMs={renderNowMs}
-              tabCounts={tabCounts}
-              unreadCounts={unreadCounts}
-              unreadOnly={unreadOnly}
-              tabTotal={tabTotal}
-              ownerFilter={ownerFilter}
-              ownerFilterLabel={ownerFilterLabel}
-              canViewTeam={session.isAdmin}
-              currentUserId={session.userId}
-              teamOptions={teamOptions}
-            />
-          </div>
-        </div>
-
-        <InboxConversationPane
-          initialView={initialConversationView}
-          stages={catalogStages}
-          substages={catalogSubstages}
-          distributors={distributorOptions}
-        />
-      </div>
+      <InboxMobileFrame
+        initialConversationId={selectedId}
+        list={
+          <InboxSidebar
+            conversations={sidebarRows}
+            selectedId={selectedId}
+            activeTab={activeTab}
+            page={page}
+            initialQuery={inboxQuery}
+            renderNowMs={renderNowMs}
+            tabCounts={tabCounts}
+            unreadCounts={unreadCounts}
+            unreadOnly={unreadOnly}
+            tabTotal={tabTotal}
+            ownerFilter={ownerFilter}
+            ownerFilterLabel={ownerFilterLabel}
+            canViewTeam={session.isAdmin}
+            currentUserId={session.userId}
+            teamOptions={teamOptions}
+          />
+        }
+        conversation={
+          <InboxConversationPane
+            initialView={initialConversationView}
+            stages={catalogStages}
+            substages={catalogSubstages}
+            distributors={distributorOptions}
+          />
+        }
+      />
     </div>
   );
 }

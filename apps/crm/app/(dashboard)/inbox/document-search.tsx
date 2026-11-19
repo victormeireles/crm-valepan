@@ -10,7 +10,13 @@ type SearchResult = {
   processed_at: string | null;
 };
 
-export function DocumentSearch({ conversationId }: { conversationId: string }) {
+export function DocumentSearch({
+  conversationId,
+  className,
+}: {
+  conversationId: string;
+  className?: string;
+}) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
@@ -41,7 +47,7 @@ export function DocumentSearch({ conversationId }: { conversationId: string }) {
   }
 
   return (
-    <div className="shrink-0 border-b border-[var(--border)] px-1 pb-2">
+    <div className={className ?? "shrink-0 border-b border-[var(--border)] px-1 pb-2"}>
       <form onSubmit={search} className="flex gap-2">
         <input
           type="search"

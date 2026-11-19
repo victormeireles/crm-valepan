@@ -9,6 +9,7 @@ import {
   type InboxOwnerUnreadRow,
 } from "@/app/actions/inbox";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { MobileSheet } from "@/components/mobile-sheet";
 import { ContactAvatar } from "@/components/contact-avatar";
 import { CrmIcon, type CrmIconName } from "@/components/crm-icon";
 import { PaginationNav } from "@/components/pagination-nav";
@@ -22,6 +23,7 @@ import {
 } from "./inbox-live-refresh";
 import {
   formatUnreadBadge,
+  INBOX_LOCATION_EVENT,
   inboxClientHashOwnsNavigation,
   inboxClientHref,
   inboxServerSnapshotMatchesClient,
@@ -116,7 +118,7 @@ function OwnerInitialChip({
   const label = (ownerName ?? "").trim() || "Responsável";
   return (
     <span
-      className="grid size-4 shrink-0 place-items-center rounded-full text-[9px] font-extrabold leading-none"
+      className="grid size-4 shrink-0 place-items-center rounded-full text-[9px] font-extrabold leading-none max-md:size-[18px] max-md:text-[10px]"
       style={{ backgroundColor: color.bg, color: color.fg }}
       title={`Responsável: ${label}`}
       aria-label={`Responsável: ${label}`}
@@ -128,6 +130,15 @@ function OwnerInitialChip({
 }
 
 const PAGE_SIZE = 20;
+
+const MOBILE_TABS: InboxTab[] = ["leads", "groups", "clientes", "perdidos"];
+
+function appendUniqueRows(base: InboxSidebarRow[], extra: InboxSidebarRow[]) {
+  if (extra.length === 0) return base;
+  const seen = new Set(base.map((row) => row.id));
+  const next = extra.filter((row) => !seen.has(row.id));
+  return next.length ? [...base, ...next] : base;
+}
 
 const INBOX_RAIL: { tab: InboxTab; label: string; icon: CrmIconName }[] = [
   { tab: "leads", label: "Leads", icon: "chat" },
@@ -194,7 +205,7 @@ function ConversationElapsed({
   }, [lastAt, nowMs]);
   return (
     <span
-      className={`ml-auto shrink-0 text-[11px] font-bold tabular-nums ${
+      className={`ml-auto shrink-0 text-[11px] font-bold tabular-nums max-md:text-xs ${
         awaiting ? "text-[var(--vp-error)]" : "text-[var(--vp-ink-soft)]"
       }`}
       title={elapsed ? formatAbsoluteShort(lastAt) : undefined}
@@ -254,9 +265,27 @@ export function InboxSidebar({
   const [ownerFlyoutTab, setOwnerFlyoutTab] = useState<InboxTab | null>(null);
   const [ownerUnreadRows, setOwnerUnreadRows] = useState<InboxOwnerUnreadRow[]>([]);
   const [ownerCountsPending, setOwnerCountsPending] = useState(false);
+  const [liveTabCounts, setLiveTabCounts] = useState(tabCounts);
+  const [extraConversations, setExtraConversations] = useState<InboxSidebarRow[]>([]);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [mobileOwnerOpen, setMobileOwnerOpen] = useState(false);
+  const [actionRow, setActionRow] = useState<InboxSidebarRow | null>(null);
+  const loadedThroughRef = useRef(page);
+  const extraCountRef = useRef(0);
+  const loadingMoreRef = useRef(false);
+  const moreExhaustedRef = useRef(false);
+  const moreGenerationRef = useRef(0);
+  const longPressRef = useRef<number | null>(null);
+  const pressPointRef = useRef<{ x: number; y: number } | null>(null);
+  const suppressClickRef = useRef(false);
+  const sentinelRef = useRef<HTMLLIElement>(null);
+  const liveTabTotalRef = useRef(
+    tabTotal ?? (activeTab === "all" ? sumInboxTabCounts(tabCounts) : tabCounts[activeTab]),
+  );
   const [liveTabTotal, setLiveTabTotal] = useState(
     tabTotal ?? (activeTab === "all" ? sumInboxTabCounts(tabCounts) : tabCounts[activeTab]),
   );
+  liveTabTotalRef.current = liveTabTotal;
   const [optimisticSelectedId, setOptimisticSelectedId] = useState(selectedId);
   const [readIds, setReadIds] = useState<Set<string>>(() => new Set());
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
@@ -334,6 +363,7 @@ export function InboxSidebar({
     setLiveTab(tab);
     setLivePage(nextPage);
     setLiveUnreadCounts(result.unreadCounts);
+    setLiveTabCounts(result.tabCounts);
     setReadIds((previous) => {
       const next = new Set(previous);
       result.conversations.forEach((conversation) => {
@@ -402,6 +432,13 @@ export function InboxSidebar({
   ) => {
     const startedAt = performance.now();
     const version = ++requestVersion.current;
+    if (mode !== "silent") {
+      moreGenerationRef.current += 1;
+      extraCountRef.current = 0;
+      moreExhaustedRef.current = false;
+      loadedThroughRef.current = nextPage;
+      setExtraConversations([]);
+    }
     const activeQuery = query === undefined
       ? (isInboxSearchQuery(qRef.current) ? qRef.current.trim() : null)
       : query?.trim() || null;
@@ -508,6 +545,83 @@ export function InboxSidebar({
       });
   }, [applySidebarResult, canViewTeam, currentUserId, prefetchSidebarList, teamOptions]);
 
+  const loadMore = useCallback(() => {
+    if (loadingMoreRef.current || moreExhaustedRef.current) return;
+    if (window.matchMedia("(min-width: 768px)").matches) return;
+    const shown = liveConversationsRef.current.length + extraCountRef.current;
+    if (shown >= liveTabTotalRef.current) {
+      moreExhaustedRef.current = true;
+      return;
+    }
+    const nextPage = loadedThroughRef.current + 1;
+    const generation = moreGenerationRef.current;
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    const activeQuery = isInboxSearchQuery(qRef.current) ? qRef.current.trim() : null;
+    void fetchInboxSidebarCached(
+      {
+        tab: liveTabRef.current,
+        page: nextPage,
+        query: activeQuery,
+        unread: liveUnreadOnlyRef.current,
+        owner: liveOwnerFilterRef.current,
+      },
+      refreshInboxSidebar,
+    ).then((result) => {
+      if (generation !== moreGenerationRef.current) return;
+      if (!result || result.conversations.length === 0) {
+        moreExhaustedRef.current = true;
+        return;
+      }
+      loadedThroughRef.current = nextPage;
+      setLiveTabCounts(result.tabCounts);
+      if (result.tabTotal > 0) {
+        liveTabTotalRef.current = result.tabTotal;
+        setLiveTabTotal(result.tabTotal);
+      }
+      setExtraConversations((previous) => {
+        const seen = new Set(liveConversationsRef.current.map((row) => row.id));
+        for (const row of previous) seen.add(row.id);
+        const next = result.conversations.filter((row) => !seen.has(row.id));
+        const merged = next.length ? [...previous, ...next] : previous;
+        extraCountRef.current = merged.length;
+        return merged;
+      });
+      if (result.conversations.length < PAGE_SIZE) moreExhaustedRef.current = true;
+    }).finally(() => {
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
+    });
+  }, []);
+
+  useEffect(() => {
+    moreGenerationRef.current += 1;
+    loadedThroughRef.current = livePage;
+    extraCountRef.current = 0;
+    moreExhaustedRef.current = false;
+    setExtraConversations([]);
+  }, [liveTab, livePage, liveUnreadOnly, liveOwnerFilter]);
+
+  useEffect(() => {
+    const node = sentinelRef.current;
+    if (!node) return;
+    const root = node.closest("ul");
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) loadMore();
+    }, { root: root instanceof Element ? root : null, rootMargin: "240px" });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [loadMore, liveConversations.length, extraConversations.length]);
+
+  useEffect(() => {
+    const total = liveUnreadCounts.leads
+      + liveUnreadCounts.groups
+      + liveUnreadCounts.clientes
+      + liveUnreadCounts.arquivados
+      + liveUnreadCounts.perdidos;
+    window.dispatchEvent(new CustomEvent("crm:inbox-unread-total", { detail: { total } }));
+  }, [liveUnreadCounts]);
+
   useEffect(() => {
     setQ(initialQuery);
   }, [initialQuery]);
@@ -547,6 +661,7 @@ export function InboxSidebar({
     setLiveOwnerFilterLabel(ownerFilterLabel);
     setLiveTab(activeTab);
     setLivePage(page);
+    setLiveTabCounts(tabCounts);
     writeInboxSidebarCache(
       inboxSidebarCacheKey({
         tab: activeTab,
@@ -763,10 +878,18 @@ export function InboxSidebar({
   useEffect(() => {
     const onPopState = () => {
       const next = readInboxLocation();
+      setOptimisticSelectedId(next.cid ?? null);
       loadList(next.tab, next.page, "silent", undefined, next.unread, next.owner);
     };
+    const onLocation = () => {
+      setOptimisticSelectedId(readInboxLocation().cid ?? null);
+    };
+    window.addEventListener(INBOX_LOCATION_EVENT, onLocation);
     window.addEventListener("popstate", onPopState);
-    return () => window.removeEventListener("popstate", onPopState);
+    return () => {
+      window.removeEventListener("popstate", onPopState);
+      window.removeEventListener(INBOX_LOCATION_EVENT, onLocation);
+    };
   }, [loadList]);
 
   useEffect(() => {
@@ -911,6 +1034,7 @@ export function InboxSidebar({
 
   const closeOwnerFlyout = useCallback(() => {
     setOwnerFlyoutTab(null);
+    setMobileOwnerOpen(false);
   }, []);
 
   const openOwnerFlyout = useCallback((tab: InboxTab) => {
@@ -941,6 +1065,7 @@ export function InboxSidebar({
 
   const selectOwnerFilter = (tab: InboxTab, owner: InboxOwnerFilter) => {
     setOwnerFlyoutTab(null);
+    setMobileOwnerOpen(false);
     const next = resolveInboxOwnerFilterSelection({
       currentTab: liveTab,
       currentOwner: liveOwnerFilter,
@@ -950,6 +1075,18 @@ export function InboxSidebar({
     });
     if (!next.reload) return;
     loadList(next.tab, 1, "push", undefined, next.unread, next.owner);
+  };
+
+  const selectMobileTab = (tab: InboxTab) => {
+    if (liveTab === tab && !searchActive) return;
+    loadList(tab, 1, "push", searchActive ? q.trim() : undefined, liveUnreadOnly, liveOwnerFilter);
+  };
+
+  const clearLongPress = () => {
+    if (longPressRef.current != null) {
+      window.clearTimeout(longPressRef.current);
+      longPressRef.current = null;
+    }
   };
 
   const selectRailTab = (tab: InboxTab) => {
@@ -967,7 +1104,7 @@ export function InboxSidebar({
     };
     const onPointerDown = (event: PointerEvent) => {
       const target = event.target as Element | null;
-      if (target?.closest?.("[data-inbox-owner-flyout], [data-inbox-rail]")) return;
+      if (target?.closest?.("[data-inbox-owner-flyout], [data-inbox-rail], [role='dialog']")) return;
       closeOwnerFlyout();
     };
     window.addEventListener("keydown", onKeyDown);
@@ -990,7 +1127,7 @@ export function InboxSidebar({
       <nav
         data-inbox-rail
         aria-label="Listas do inbox"
-        className="relative z-30 flex w-14 shrink-0 flex-col items-center gap-1 border-r border-[var(--vp-ink-line)] bg-[var(--vp-paper)] py-2"
+        className="relative z-30 hidden w-14 shrink-0 flex-col items-center gap-1 border-r border-[var(--vp-ink-line)] bg-[var(--vp-paper)] py-2 md:flex"
       >
         {INBOX_RAIL.map(({ tab, label, icon }) => {
           const active = liveTab === tab;
@@ -1028,13 +1165,13 @@ export function InboxSidebar({
             type="button"
             aria-label="Fechar filtro de responsável"
             onClick={closeOwnerFlyout}
-            className="absolute inset-y-0 left-14 right-0 z-10 cursor-default border-0 bg-[rgba(35,0,4,0.28)] p-0 motion-safe:animate-[inbox-owner-scrim-in_180ms_ease-out]"
+            className="absolute inset-y-0 left-14 right-0 z-10 hidden cursor-default border-0 bg-[rgba(35,0,4,0.28)] p-0 motion-safe:animate-[inbox-owner-scrim-in_180ms_ease-out] md:block"
           />
           <div
             data-inbox-owner-flyout
             role="menu"
             aria-label={`Responsável em ${flyoutTabLabel}`}
-            className="absolute inset-y-0 left-14 z-20 flex w-[220px] flex-col border-r border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] shadow-[var(--sh-md)] motion-safe:animate-[inbox-owner-flyout-in_200ms_ease-out]"
+            className="absolute inset-y-0 left-14 z-20 hidden w-[220px] flex-col border-r border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] shadow-[var(--sh-md)] motion-safe:animate-[inbox-owner-flyout-in_200ms_ease-out] md:flex"
           >
             <div className="flex items-center justify-between gap-2 border-b border-[var(--vp-ink-line)] px-3 py-2.5">
               <div className="min-w-0">
@@ -1134,8 +1271,37 @@ export function InboxSidebar({
         </>
       ) : null}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <div className="shrink-0 border-b border-[var(--vp-ink-line)] p-3">
-          <label htmlFor="inbox-search" className="flex min-h-10 items-center gap-2 rounded-full border border-[var(--vp-ink-line)] bg-[var(--vp-paper)] px-3">
+        <div className="grid shrink-0 grid-cols-4 border-b border-[var(--vp-ink-line)] bg-[var(--vp-paper-pure)] md:hidden">
+          {INBOX_RAIL.filter((item) => MOBILE_TABS.includes(item.tab)).map(({ tab, label, icon }) => {
+            const active = liveTab === tab;
+            const badge = formatUnreadBadge(liveTabCounts[tab]);
+            return (
+              <button
+                key={tab}
+                type="button"
+                aria-current={active ? "page" : undefined}
+                onClick={() => selectMobileTab(tab)}
+                className={`flex h-[58px] flex-col items-center justify-center gap-0.5 border-b-2 text-[12px] font-bold ${
+                  active
+                    ? "border-[var(--vp-wine)] text-[var(--vp-wine)]"
+                    : "border-transparent text-[var(--vp-ink-soft)]"
+                }`}
+              >
+                <span className="relative">
+                  <CrmIcon name={icon} className="text-[22px]" />
+                  {badge ? (
+                    <span className="absolute -right-2.5 -top-1.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-[var(--vp-wine)] px-1 text-[10px] font-bold leading-none text-[var(--vp-paper-pure)]">
+                      {badge}
+                    </span>
+                  ) : null}
+                </span>
+                {label}
+              </button>
+            );
+          })}
+        </div>
+        <div className="shrink-0 border-b border-[var(--vp-ink-line)] p-3 max-md:px-4 max-md:py-3">
+          <label htmlFor="inbox-search" className="flex min-h-10 items-center gap-2 rounded-full border border-[var(--vp-ink-line)] bg-[var(--vp-paper)] px-3 max-md:min-h-11">
             <CrmIcon name="search" className="text-[17px] text-[var(--vp-ink-soft)]" />
             <span className="sr-only">Buscar conversas</span>
             <input
@@ -1144,7 +1310,7 @@ export function InboxSidebar({
               value={q}
               onChange={(e) => setQ(e.target.value)}
               placeholder="Buscar conversa"
-              className="w-full border-0 bg-transparent text-[13px] outline-none placeholder:text-[var(--vp-ink-soft)]"
+              className="w-full border-0 bg-transparent text-[13px] outline-none placeholder:text-[var(--vp-ink-soft)] max-md:text-[15px]"
               autoComplete="off"
               spellCheck={false}
             />
@@ -1155,7 +1321,7 @@ export function InboxSidebar({
               role="tab"
               aria-selected={!liveUnreadOnly}
               onClick={() => setUnreadFilter(false)}
-              className={`rounded-full px-3 py-1 text-xs font-bold transition-colors ${
+              className={`rounded-full px-3 py-1 text-xs font-bold transition-colors max-md:inline-flex max-md:min-h-10 max-md:items-center max-md:px-4 max-md:text-[13px] ${
                 !liveUnreadOnly
                   ? "bg-[var(--vp-wine)] text-[var(--vp-paper-pure)]"
                   : "bg-[var(--vp-surface)] text-[var(--vp-ink-muted)] hover:bg-[var(--vp-surface-high)]"
@@ -1168,7 +1334,7 @@ export function InboxSidebar({
               role="tab"
               aria-selected={liveUnreadOnly}
               onClick={() => setUnreadFilter(true)}
-              className={`rounded-full px-3 py-1 text-xs font-bold transition-colors ${
+              className={`rounded-full px-3 py-1 text-xs font-bold transition-colors max-md:inline-flex max-md:min-h-10 max-md:items-center max-md:px-4 max-md:text-[13px] ${
                 liveUnreadOnly
                   ? "bg-[var(--vp-wine)] text-[var(--vp-paper-pure)]"
                   : "bg-[var(--vp-surface)] text-[var(--vp-ink-muted)] hover:bg-[var(--vp-surface-high)]"
@@ -1176,12 +1342,24 @@ export function InboxSidebar({
             >
               Não lidas{scopeUnreadBadge ? ` ${scopeUnreadBadge}` : ""}
             </button>
+            <button
+              type="button"
+              onClick={() => {
+                const tab = isInboxTab(liveTab) ? liveTab : "leads";
+                setMobileOwnerOpen(true);
+                openOwnerFlyout(tab);
+              }}
+              className="inline-flex max-w-full items-center gap-1 rounded-full bg-[var(--vp-surface)] px-4 text-[13px] font-bold text-[var(--vp-ink-muted)] max-md:min-h-10 md:hidden"
+            >
+              <span className="truncate">{ownerFilterChipLabel ?? "Responsável"}</span>
+              <CrmIcon name="expand_more" className="shrink-0 text-[16px] text-[var(--vp-gold-deep)]" />
+            </button>
             {ownerFilterChipLabel ? (
               <button
                 type="button"
                 aria-label={`Limpar filtro de responsável: ${liveOwnerFilterLabel ?? ownerFilterChipLabel}`}
                 onClick={() => loadList(liveTab, 1, "push", undefined, liveUnreadOnly, null)}
-                className="inline-flex max-w-full items-center gap-1 rounded-full bg-[rgba(35,0,4,0.09)] px-3 py-1 text-xs font-bold text-[var(--vp-wine)] transition-colors duration-150 hover:bg-[rgba(35,0,4,0.14)]"
+                className="hidden max-w-full items-center gap-1 rounded-full bg-[rgba(35,0,4,0.09)] px-3 py-1 text-xs font-bold text-[var(--vp-wine)] transition-colors duration-150 hover:bg-[rgba(35,0,4,0.14)] md:inline-flex"
               >
                 <span className="truncate">{ownerFilterChipLabel}</span>
                 <CrmIcon name="close" className="shrink-0 text-[14px]" />
@@ -1202,7 +1380,7 @@ export function InboxSidebar({
           ) : null}
         </div>
         <ul
-          className={`min-h-0 flex-1 divide-y divide-[var(--vp-surface-high)] overflow-y-auto overscroll-contain transition-opacity duration-150 ${
+          className={`min-h-0 flex-1 divide-y divide-[var(--vp-surface-high)] overflow-y-auto overscroll-contain transition-opacity duration-150 max-md:pb-[calc(72px+env(safe-area-inset-bottom))] ${
             listRefreshing && !listPending ? "opacity-60" : "opacity-100"
           }`}
         >
@@ -1218,12 +1396,12 @@ export function InboxSidebar({
                   </div>
                 </li>
               ))
-            : liveConversations.map((c) => {
+            : appendUniqueRows(liveConversations, extraConversations).map((c) => {
                 const showUnread = c.unread && !readIds.has(c.id);
                 return (
                   <li
                     key={c.id}
-                    className={`relative transition-colors hover:bg-[rgba(35,0,4,0.05)] ${
+                    className={`relative transition-colors hover:bg-[rgba(35,0,4,0.05)] max-md:border-l-transparent max-md:bg-transparent ${
                       c.id === optimisticSelectedId
                         ? "border-l-[3px] border-l-[var(--vp-wine)] bg-[rgba(35,0,4,0.09)]"
                         : "border-l-[3px] border-l-transparent"
@@ -1231,7 +1409,33 @@ export function InboxSidebar({
                   >
                     <a
                       href={conversationHref(c.id)}
+                      onPointerDown={(event) => {
+                        if (event.button !== 0) return;
+                        if (window.matchMedia("(min-width: 768px)").matches) return;
+                        clearLongPress();
+                        pressPointRef.current = { x: event.clientX, y: event.clientY };
+                        longPressRef.current = window.setTimeout(() => {
+                          longPressRef.current = null;
+                          suppressClickRef.current = true;
+                          setActionRow(c);
+                        }, 480);
+                      }}
+                      onPointerUp={clearLongPress}
+                      onPointerCancel={clearLongPress}
+                      onPointerMove={(event) => {
+                        const start = pressPointRef.current;
+                        if (!start) return;
+                        if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > 10) clearLongPress();
+                      }}
+                      onContextMenu={(event) => {
+                        if (window.matchMedia("(max-width: 767px)").matches) event.preventDefault();
+                      }}
                       onClick={(event) => {
+                        if (suppressClickRef.current) {
+                          suppressClickRef.current = false;
+                          event.preventDefault();
+                          return;
+                        }
                         if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
                         event.preventDefault();
                         const href = inboxClientHref({
@@ -1255,21 +1459,21 @@ export function InboxSidebar({
                           },
                         }));
                       }}
-                      className="block px-3 py-2 pr-9"
+                      className="block px-3 py-2 pr-9 max-md:flex max-md:h-[76px] max-md:items-center max-md:overflow-hidden max-md:px-4 max-md:py-2.5 max-md:pr-4"
                     >
                       <div className="flex items-center gap-2.5">
                         <ContactAvatar
                           name={c.identityName}
                           src={validAvatarUrl(c.avatarUrl)}
                           phone={c.phone_e164}
-                          className="size-10 shrink-0"
+                          className="size-10 shrink-0 max-md:size-12"
                           textClassName="text-[13px]"
                           allowRemoteFallback={false}
                           allowRefresh={false}
                         />
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2">
-                            <span className={`min-w-0 truncate text-sm text-[var(--vp-ink-body)] ${showUnread ? "font-extrabold" : "font-bold"}`}>
+                            <span className={`min-w-0 truncate text-sm text-[var(--vp-ink-body)] max-md:text-base ${showUnread ? "font-extrabold" : "font-bold"}`}>
                               {c.identityName}
                             </span>
                             {c.ownerId ? (
@@ -1278,7 +1482,7 @@ export function InboxSidebar({
                             <ConversationElapsed lastAt={c.lastAt} awaiting={c.awaiting} nowMs={nowMs} />
                           </div>
                           <div className="flex items-center gap-2">
-                            <p className="min-w-0 flex-1 truncate text-xs text-[var(--vp-ink-muted)]">
+                            <p className="min-w-0 flex-1 truncate text-xs text-[var(--vp-ink-muted)] max-md:text-sm">
                               {c.callStatus === "ringing" ? (
                                 <span
                                   className="mr-1 animate-pulse font-bold text-[var(--vp-wine)]"
@@ -1312,7 +1516,7 @@ export function InboxSidebar({
                         </div>
                       </div>
                     </a>
-                    <div className="absolute right-1.5 top-1.5">
+                    <div className="absolute right-1.5 top-1.5 max-md:hidden">
                       <button
                         type="button"
                         aria-label="Mais ações da conversa"
@@ -1419,7 +1623,10 @@ export function InboxSidebar({
                   </li>
                 );
               })}
-          {!listPending && liveConversations.length === 0 ? (
+          <li ref={sentinelRef} className="px-4 py-3 text-center text-xs text-[var(--vp-ink-soft)] md:hidden">
+            {loadingMore ? "Carregando…" : ""}
+          </li>
+          {!listPending && liveConversations.length === 0 && extraConversations.length === 0 ? (
             <li className="px-4 py-8 text-center text-sm text-[var(--muted)]">
               {searchActive
                 ? "Nenhum resultado."
@@ -1431,7 +1638,7 @@ export function InboxSidebar({
             </li>
           ) : null}
         </ul>
-        <div className="shrink-0">
+        <div className="shrink-0 max-md:hidden">
           <PaginationNav
             pathname="/inbox"
             page={livePage}
@@ -1455,6 +1662,120 @@ export function InboxSidebar({
           />
         </div>
       </div>
+      <MobileSheet
+        open={mobileOwnerOpen}
+        title="Responsável"
+        subtitle={flyoutTabLabel ?? undefined}
+        onClose={closeOwnerFlyout}
+      >
+        <div className="pb-2">
+          {ownerCountsPending ? (
+            <p className="px-4 py-3 text-sm text-[var(--vp-ink-muted)]">Carregando…</p>
+          ) : ownerUnreadRows.map((row) => {
+            const optionOwner: InboxOwnerFilter = row.isAll ? null : row.ownerId ? row.ownerId : "unassigned";
+            const selected = liveTab === ownerFlyoutTab && (
+              row.isAll
+                ? liveOwnerFilter == null
+                : row.ownerId
+                  ? liveOwnerFilter === row.ownerId
+                  : liveOwnerFilter === "unassigned"
+            );
+            const badge = formatUnreadBadge(row.unreadCount);
+            const label = row.isAll
+              ? "Todos"
+              : !row.ownerId
+                ? "Sem responsável"
+                : currentUserId && row.ownerId === currentUserId && !canViewTeam
+                  ? "Eu"
+                  : firstName(row.ownerName);
+            return (
+              <button
+                key={row.isAll ? "all" : row.ownerId ?? "unassigned"}
+                type="button"
+                onClick={() => selectOwnerFilter(ownerFlyoutTab ?? "leads", optionOwner)}
+                className={`flex min-h-[52px] w-full items-center gap-3 px-4 text-left text-sm ${
+                  selected ? "font-bold text-[var(--vp-wine)]" : "text-[var(--vp-ink-body)]"
+                }`}
+              >
+                <span className="min-w-0 flex-1 truncate">{label}</span>
+                {badge ? (
+                  <span className="rounded-full bg-[var(--vp-wine)] px-1.5 py-0.5 text-[10px] font-bold text-[var(--vp-paper-pure)]">{badge}</span>
+                ) : null}
+                {selected ? <CrmIcon name="check" className="text-[20px]" /> : null}
+              </button>
+            );
+          })}
+        </div>
+      </MobileSheet>
+      <MobileSheet
+        open={actionRow != null}
+        title={actionRow?.identityName ?? "Conversa"}
+        onClose={() => setActionRow(null)}
+      >
+        {actionRow ? (
+          <div className="pb-2">
+            <button
+              type="button"
+              disabled={savingId === actionRow.id || (actionRow.unread && !readIds.has(actionRow.id))}
+              onClick={() => {
+                const row = actionRow;
+                setActionRow(null);
+                void markUnread(row);
+              }}
+              className="flex min-h-[52px] w-full items-center px-4 text-left text-sm font-semibold text-[var(--vp-ink-body)] disabled:opacity-50"
+            >
+              {actionRow.unread && !readIds.has(actionRow.id) ? "Já não lida" : "Marcar como não lida"}
+            </button>
+            {actionRow.kind === "lead" ? (
+              <button
+                type="button"
+                disabled={savingId === actionRow.id}
+                onClick={() => {
+                  const row = actionRow;
+                  const next = window.prompt("Editar nome do contato", row.displayName);
+                  if (next == null) {
+                    setActionRow(null);
+                    return;
+                  }
+                  const name = next.trim();
+                  if (!name) {
+                    setErrorById((prev) => ({ ...prev, [row.id]: "Nome não pode ficar vazio." }));
+                    return;
+                  }
+                  setActionRow(null);
+                  setSavingId(row.id);
+                  void updateConversationContactName({
+                    conversationId: row.id,
+                    contactName: name,
+                  }).then((res) => {
+                    setSavingId(null);
+                    if (!res.ok) {
+                      setErrorById((prev) => ({ ...prev, [row.id]: res.error ?? "Erro ao salvar nome." }));
+                      return;
+                    }
+                    setLiveConversations((rows) =>
+                      rows.map((item) =>
+                        item.id === row.id ? { ...item, displayName: name, identityName: name } : item,
+                      ),
+                    );
+                    setExtraConversations((rows) =>
+                      rows.map((item) =>
+                        item.id === row.id ? { ...item, displayName: name, identityName: name } : item,
+                      ),
+                    );
+                  });
+                }}
+                className="flex min-h-[52px] w-full items-center px-4 text-left text-sm font-semibold text-[var(--vp-ink-body)] disabled:opacity-50"
+              >
+                Editar nome
+              </button>
+            ) : null}
+            {actionRow && errorById[actionRow.id] ? (
+              <p className="px-4 pb-3 text-xs text-[var(--vp-error)]">{errorById[actionRow.id]}</p>
+            ) : null}
+          </div>
+        ) : null}
+      </MobileSheet>
     </div>
   );
 }
